@@ -27,14 +27,23 @@
       </div>
     </div>
     <div id="center-msg"></div>
+    <div id="upgrade-note" class="hidden">Есть очко прокачки — нажми Esc</div>
     <div id="scoreboard" class="hidden"></div>
   </div>
 
   <div id="pause" class="overlay hidden">
-    <div class="panel">
-      <h2>Кликни, чтобы играть</h2>
-      <p>WASD — движение · Пробел — прыжок · Мышь — прицел и стрельба<br>
-         1 / 2 / 3 или колесо — оружие · R — перезарядка · Tab — счёт</p>
+    <div class="panel wide">
+      <button id="resume" class="primary" type="button">ИГРАТЬ</button>
+      <p>WASD — движение · Shift — спринт · Пробел — прыжок · ЛКМ — огонь<br>
+         1 / 2 / 3 или колесо — оружие · R — перезарядка · Tab — счёт · Esc — это меню</p>
+
+      <h3>Настройки</h3>
+      <div class="settings"></div>
+
+      <h3>Прокачка</h3>
+      <small id="upgrade-points"></small>
+      <div id="upgrades"></div>
+      <small>1 очко за каждые 10 убийств. Прогресс сохраняется в этом браузере.</small>
     </div>
   </div>
 
@@ -63,7 +72,12 @@
         </div>
       </div>
 
-      <button id="play" type="submit" disabled>Подключение…</button>
+      <details class="field">
+        <summary>Настройки</summary>
+        <div class="settings"></div>
+      </details>
+
+      <button id="play" class="primary" type="submit" disabled>Подключение…</button>
       <small id="status"></small>
     </form>
   </div>

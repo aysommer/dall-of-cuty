@@ -13,9 +13,11 @@ body { font-family: system-ui, "Segoe UI", Roboto, sans-serif; color: #fff; user
   width: 100%; max-width: 420px; background: #1b1f27; border: 2px solid #343b48;
   padding: 28px; text-align: center;
 }
-#pause .panel { background: rgba(27, 31, 39, 0.9); cursor: pointer; }
+#pause .panel { background: rgba(27, 31, 39, 0.94); }
+.panel.wide { max-width: 520px; max-height: 100%; overflow-y: auto; }
+.panel small { color: #9aa4b5; }
 h1 { margin: 0; font-size: 34px; letter-spacing: 4px; }
-h2 { margin: 0 0 10px; }
+h3 { margin: 22px 0 10px; font-size: 13px; color: #9aa4b5; text-transform: uppercase; letter-spacing: 2px; text-align: left; border-bottom: 1px solid #343b48; padding-bottom: 6px; }
 .sub { margin: 6px 0 22px; color: #9aa4b5; font-size: 14px; }
 .panel p { color: #b8c0cc; line-height: 1.6; font-size: 14px; margin: 0; }
 .field { display: block; text-align: left; margin-bottom: 16px; font-size: 13px; color: #9aa4b5; text-transform: uppercase; letter-spacing: 1px; }
@@ -34,11 +36,33 @@ h2 { margin: 0 0 10px; }
 .choice button.green.active { border-color: #3ddc5a; background: #173d20; }
 .choice button.red.active { border-color: #ff4d4d; background: #4a1717; }
 .choice button:disabled { opacity: 0.45; cursor: not-allowed; }
-#play {
+.primary {
   width: 100%; padding: 14px; font-size: 18px; font-weight: 700; letter-spacing: 2px; cursor: pointer;
   background: #e8e8e8; color: #111; border: 0; margin-top: 6px;
 }
-#play:disabled { opacity: 0.5; cursor: default; }
+.primary:disabled { opacity: 0.5; cursor: default; }
+#resume { margin: 0 0 14px; }
+
+/* ---------- настройки и прокачка ---------- */
+details.field summary { cursor: pointer; }
+details.field .settings { margin-top: 10px; }
+.setting { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; font-size: 14px; color: #d5dae2; text-transform: none; letter-spacing: 0; }
+.setting .name { flex: 0 0 42%; text-align: left; }
+.setting input[type=range] { flex: 1; min-width: 0; accent-color: #e8e8e8; }
+.setting .value { flex: 0 0 48px; text-align: right; color: #9aa4b5; font-variant-numeric: tabular-nums; }
+.setting .choice { flex: 1; margin: 0; }
+.setting .choice button { padding: 6px; }
+
+#upgrade-points { display: block; text-align: left; margin-bottom: 10px; }
+.upgrade { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 14px; }
+.upgrade .name { flex: 0 0 34%; text-align: left; }
+.upgrade .name small { display: block; font-size: 11px; }
+.upgrade .steps { flex: 1; display: flex; gap: 4px; }
+.upgrade .steps span { flex: 1; padding: 5px 0; font-size: 12px; background: #11141a; border: 1px solid #343b48; color: #6f7888; font-variant-numeric: tabular-nums; }
+.upgrade .steps .done { color: #9aa4b5; border-color: #4d5668; }
+.upgrade .steps .now { color: #fff; border-color: #5cf07a; background: #173d20; }
+.upgrade button { flex: 0 0 58px; padding: 6px 0; font-weight: 700; cursor: pointer; background: #e8e8e8; color: #111; border: 0; }
+.upgrade button:disabled { opacity: 0.35; cursor: default; }
 #status { display: block; margin-top: 10px; min-height: 18px; color: #ff8080; }
 
 /* ---------- HUD ---------- */
@@ -94,6 +118,11 @@ h2 { margin: 0 0 10px; }
 #slots { font-size: 12px; font-weight: 400; margin-top: 4px; }
 #slots span { margin-left: 10px; color: #8a909b; }
 #slots span.active { color: #fff; }
+
+#upgrade-note {
+  position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.45); padding: 6px 14px; font-size: 14px; color: #5cf07a; white-space: nowrap;
+}
 
 #center-msg {
   position: absolute; left: 50%; top: 34%; transform: translateX(-50%);

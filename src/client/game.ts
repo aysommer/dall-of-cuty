@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { BOXES, WEAPONS, WEAPON_ORDER, PLAYER, WORLD, rayBox, rayWorld, type Box } from '../shared/map.js';
+import {
+  KILLS_PER_POINT, STATS, UPGRADES, maxLevel, multiplier, newProfile, pointsLeft, type Profile,
+} from '../shared/progress.js';
 import type {
-  ClientMsg, InfoMsg, KillMsg, Mode, OverMsg, PlayerInfo, PlayersMsg, ServerMsg,
+  ClientMsg, InfoMsg, KillMsg, Mode, OverMsg, PlayerInfo, PlayersMsg, ProfileMsg, ServerMsg,
   ShotMsg, SnapMsg, SpawnMsg, Team, Vec3, WeaponId,
 } from '../shared/protocol.js';
 
@@ -12,6 +15,33 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
 };
 const TEAM_COLOR: Record<Team, number> = { green: 0x2fc44e, red: 0xe23b3b };
 const SPEED = 6.5, JUMP = 7, GRAVITY = 19;
+const MOUSE_SENS = 0.0022;
+
+// ======================= настройки =======================
+interface Settings {
+  /** Громкость, 0…1 */
+  volume: number;
+  /** Множитель чувствительности мыши */
+  sens: number;
+  hand: 'right' | 'left';
+}
+const SETTINGS_KEY = 'doc-settings';
+const TOKEN_KEY = 'doc-progress';
+
+function loadSettings(): Settings {
+  const s: Settings = { volume: 0.7, sens: 1, hand: 'right' };
+  try {
+    const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>;
+    if (typeof raw.volume === 'number') s.volume = Math.max(0, Math.min(1, raw.volume));
+    if (typeof raw.sens === 'number') s.sens = Math.max(0.2, Math.min(3, raw.sens));
+    if (raw.hand === 'left') s.hand = 'left';
+  } catch { /* испорченные настройки — берём стандартные */ }
+  return s;
+}
+const settings = loadSettings();
+
+// Прокачка: данные приходят с сервера, в браузере лежит только зашифрованный токен
+let profile: Profile = newProfile();
 
 // ======================= сцена =======================
 const canvas = $<HTMLCanvasElement>('game');
@@ -200,7 +230,7 @@ let respawnAt = 0;
 
 // Оружие в руках (вид от первого лица)
 const viewModel = new THREE.Group();
-viewModel.position.set(0.22, -0.2, -0.45);
+viewModel.position.set(settings.hand === 'left' ? -0.22 : 0.22, -0.2, -0.45);
 viewModel.scale.setScalar(0.7);
 camera.add(viewModel);
 let viewGun = buildGun('pistol');
@@ -219,12 +249,18 @@ function setWeapon(w: WeaponId): void {
 
 // ======================= звук =======================
 let audio: AudioContext | null = null;
+let master: GainNode | null = null;
 function initAudio(): void {
   if (audio) return;
-  try { audio = new AudioContext(); } catch { /* без звука */ }
+  try {
+    audio = new AudioContext();
+    master = audio.createGain();
+    master.gain.value = settings.volume;
+    master.connect(audio.destination);
+  } catch { /* без звука */ }
 }
 function shotSound(w: WeaponId, volume = 1): void {
-  if (!audio || volume <= 0.01) return;
+  if (!audio || !master || volume <= 0.01) return;
   const dur = w === 'shotgun' ? 0.35 : w === 'rifle' ? 0.14 : 0.18;
   const buf = audio.createBuffer(1, Math.floor(audio.sampleRate * dur), audio.sampleRate);
   const data = buf.getChannelData(0);
@@ -236,16 +272,16 @@ function shotSound(w: WeaponId, volume = 1): void {
   filter.frequency.value = w === 'shotgun' ? 900 : w === 'rifle' ? 2600 : 1800;
   const gain = audio.createGain();
   gain.gain.value = 0.35 * volume;
-  src.connect(filter).connect(gain).connect(audio.destination);
+  src.connect(filter).connect(gain).connect(master);
   src.start();
 }
 function beep(freq: number, dur: number, volume = 0.15): void {
-  if (!audio) return;
+  if (!audio || !master) return;
   const o = audio.createOscillator(), g = audio.createGain();
   o.frequency.value = freq;
   g.gain.setValueAtTime(volume, audio.currentTime);
   g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + dur);
-  o.connect(g).connect(audio.destination);
+  o.connect(g).connect(master);
   o.start();
   o.stop(audio.currentTime + dur);
 }
@@ -327,6 +363,7 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
     case 'shot': onShot(m); break;
     case 'kill': onKill(m); break;
     case 'over': onOver(m); break;
+    case 'profile': onProfile(m); break;
     case 'reset':
       roundOver = false;
       $('center-msg').textContent = '';
@@ -487,15 +524,16 @@ $('join-form').addEventListener('submit', (e) => {
   const name = nameInput.value.trim();
   localStorage.setItem('doc-name', name);
   playBtn.disabled = true;
-  sendMsg({ t: 'join', name, team: chosenTeam, mode: chosenMode });
+  sendMsg({ t: 'join', name, team: chosenTeam, mode: chosenMode, token: localStorage.getItem(TOKEN_KEY) ?? undefined });
 });
 
 // ======================= управление =======================
 function lock(): void {
   initAudio();
-  void canvas.requestPointerLock();
+  // Сразу после Esc браузер может отказать в захвате курсора — тогда нужен повторный клик
+  Promise.resolve(canvas.requestPointerLock()).catch(() => {});
 }
-$('pause').addEventListener('click', lock);
+$('resume').addEventListener('click', lock);
 canvas.addEventListener('click', () => { if (joined && !locked) lock(); });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
@@ -506,8 +544,9 @@ document.addEventListener('mousemove', (e) => {
   if (!locked) return;
   // Браузеры иногда присылают ложный рывок сразу после захвата курсора
   if (Math.abs(e.movementX) > 400 || Math.abs(e.movementY) > 400) return;
-  me.yaw -= e.movementX * 0.0022;
-  me.pitch = Math.max(-1.5, Math.min(1.5, me.pitch - e.movementY * 0.0022));
+  const sens = MOUSE_SENS * settings.sens;
+  me.yaw -= e.movementX * sens;
+  me.pitch = Math.max(-1.5, Math.min(1.5, me.pitch - e.movementY * sens));
 });
 document.addEventListener('mousedown', (e) => {
   if (locked && e.button === 0) { mouseDown = true; firedThisPress = false; }
@@ -551,8 +590,10 @@ function move(dt: number): void {
   const s = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
   const len = Math.hypot(f, s) || 1;
   const sin = Math.sin(me.yaw), cos = Math.cos(me.yaw);
-  const wishX = (-sin * f + cos * s) / len * SPEED;
-  const wishZ = (-cos * f - sin * s) / len * SPEED;
+  let speed = SPEED * multiplier(profile.levels, 'walk');
+  if (keys.ShiftLeft || keys.ShiftRight) speed *= multiplier(profile.levels, 'sprint');
+  const wishX = (-sin * f + cos * s) / len * speed;
+  const wishZ = (-cos * f - sin * s) / len * speed;
   const accel = me.grounded ? 14 : 4;
   const k = Math.min(1, accel * dt);
   me.vel.x += (wishX - me.vel.x) * k;
@@ -584,7 +625,7 @@ function move(dt: number): void {
 function startReload(): void {
   const w = WEAPONS[me.weapon];
   if (me.reloadUntil || me.ammo[me.weapon] >= w.mag || !me.alive) return;
-  me.reloadUntil = performance.now() + w.reload;
+  me.reloadUntil = performance.now() + w.reload / multiplier(profile.levels, 'reload');
   beep(300, 0.08, 0.08);
   updateHud();
 }
@@ -723,6 +764,101 @@ function renderScoreboard(): void {
   }
   sb.append(table);
 }
+
+// ======================= меню настроек =======================
+const settingsRefreshers: Array<() => void> = [];
+
+function applySettings(): void {
+  if (master) master.gain.value = settings.volume;
+  viewModel.position.x = settings.hand === 'left' ? -0.22 : 0.22;
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* хранилище недоступно */ }
+  for (const refresh of settingsRefreshers) refresh();
+}
+
+function slider(
+  label: string, min: number, max: number, step: number,
+  get: () => number, set: (v: number) => void, show: (v: number) => string,
+): HTMLElement {
+  const row = document.createElement('label');
+  row.className = 'setting';
+  const input = document.createElement('input');
+  input.type = 'range';
+  input.min = String(min); input.max = String(max); input.step = String(step);
+  const value = textEl('span', '', 'value');
+  row.append(textEl('span', label, 'name'), input, value);
+  input.addEventListener('input', () => { set(Number(input.value)); applySettings(); });
+  settingsRefreshers.push(() => { input.value = String(get()); value.textContent = show(get()); });
+  return row;
+}
+
+function buildSettings(root: HTMLElement): void {
+  root.append(
+    slider('Громкость', 0, 1, 0.05, () => settings.volume, (v) => { settings.volume = v; },
+      (v) => `${Math.round(v * 100)}%`),
+    slider('Чувствительность мыши', 0.2, 3, 0.05, () => settings.sens, (v) => { settings.sens = v; },
+      (v) => `×${v.toFixed(2)}`),
+  );
+  const row = document.createElement('div');
+  row.className = 'setting';
+  const choice = document.createElement('div');
+  choice.className = 'choice';
+  const hands = [['right', 'Справа'], ['left', 'Слева']] as const;
+  const buttons = hands.map(([hand, title]) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = title;
+    b.addEventListener('click', () => { settings.hand = hand; applySettings(); });
+    settingsRefreshers.push(() => b.classList.toggle('active', settings.hand === hand));
+    return b;
+  });
+  choice.append(...buttons);
+  row.append(textEl('span', 'Оружие', 'name'), choice);
+  root.append(row);
+}
+
+for (const root of document.querySelectorAll<HTMLElement>('.settings')) buildSettings(root);
+applySettings();
+
+// ======================= прокачка =======================
+function onProfile(m: ProfileMsg): void {
+  const before = pointsLeft(profile);
+  profile = { kills: m.kills, levels: m.levels };
+  try { localStorage.setItem(TOKEN_KEY, m.token); } catch { /* хранилище недоступно */ }
+  if (pointsLeft(profile) > before && joined && profile.kills > 0) beep(660, 0.25);
+  renderUpgrades();
+}
+
+function renderUpgrades(): void {
+  const points = pointsLeft(profile);
+  const toNext = KILLS_PER_POINT - (profile.kills % KILLS_PER_POINT);
+  $('upgrade-points').textContent =
+    `Убийств: ${profile.kills} · свободных очков: ${points} · до следующего очка: ${toNext}`;
+  $('upgrade-note').classList.toggle('hidden', points <= 0);
+
+  const root = $('upgrades');
+  root.textContent = '';
+  for (const stat of STATS) {
+    const up = UPGRADES[stat];
+    const level = profile.levels[stat];
+    const row = document.createElement('div');
+    row.className = 'upgrade';
+    const steps = document.createElement('span');
+    steps.className = 'steps';
+    up.values.forEach((v, i) => {
+      steps.append(textEl('span', `×${v.toFixed(2)}`, i === level ? 'now' : i < level ? 'done' : ''));
+    });
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = level >= maxLevel(stat) ? 'МАКС' : '+';
+    btn.disabled = points <= 0 || level >= maxLevel(stat);
+    btn.addEventListener('click', () => sendMsg({ t: 'upgrade', stat }));
+    const title = textEl('span', up.name, 'name');
+    title.append(textEl('small', up.hint));
+    row.append(title, steps, btn);
+    root.append(row);
+  }
+}
+renderUpgrades();
 
 // ======================= главный цикл =======================
 let last = performance.now(), sendAcc = 0;

@@ -4,4 +4,9 @@ services:
     image: dall-of-cuty
     ports:
       - "${PORT:-3000}:3000"
+    volumes:
+      - game-data:/app/data
     restart: unless-stopped
+
+volumes:
+  game-data:

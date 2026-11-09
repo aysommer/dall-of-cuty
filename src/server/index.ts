@@ -5,6 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { WEAPONS, PLAYER, SPAWNS, lineOfSight, isWeapon, type SpawnPoint } from '../shared/map.js';
+import { isStat, maxLevel, pointsLeft, type Profile } from '../shared/progress.js';
+import { decodeProfile, encodeProfile } from './progress.js';
 import type { InfoMsg, Mode, ServerMsg, SnapRow, Team, Vec3, WeaponId, Winner } from '../shared/protocol.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,6 +32,7 @@ interface Player {
   kills: number;
   deaths: number;
   lastShot: number;
+  profile: Profile;
   respawnTimer?: NodeJS.Timeout;
 }
 
@@ -89,6 +92,9 @@ function broadcast(msg: ServerMsg, exceptId: number | null = null): void {
   for (const p of players.values()) {
     if (p.id !== exceptId && p.ws.readyState === p.ws.OPEN) p.ws.send(data);
   }
+}
+function sendProfile(p: Player): void {
+  send(p.ws, { t: 'profile', token: encodeProfile(p.profile), kills: p.profile.kills, levels: p.profile.levels });
 }
 function teamCount(team: Team): number {
   let n = 0;
@@ -218,6 +224,8 @@ function handleShoot(p: Player, msg: Incoming): void {
       v.alive = false;
       v.deaths++;
       p.kills++;
+      p.profile.kills++;
+      sendProfile(p);
       broadcast({ t: 'kill', killer: p.id, victim: v.id, w: weaponId });
       v.respawnTimer = setTimeout(() => {
         if (players.has(v.id) && !roundOver) {
@@ -250,9 +258,11 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
     id: nextId++, ws, name, team,
     pos: [0, 0, 0], yaw: 0, pitch: 0, w: 'pistol',
     hp: 100, alive: false, kills: 0, deaths: 0, lastShot: 0,
+    profile: decodeProfile(msg.token),
   };
   players.set(p.id, p);
   send(ws, { t: 'welcome', id: p.id, mode });
+  sendProfile(p);
   broadcastPlayers();
   spawn(p);
   broadcastPlayers();
@@ -288,6 +298,11 @@ wss.on('connection', (ws) => {
       if (isWeapon(msg.w)) me.w = msg.w;
     } else if (msg.t === 'shoot') {
       handleShoot(me, msg);
+    } else if (msg.t === 'upgrade') {
+      if (isStat(msg.stat) && pointsLeft(me.profile) > 0 && me.profile.levels[msg.stat] < maxLevel(msg.stat)) {
+        me.profile.levels[msg.stat]++;
+      }
+      sendProfile(me);
     }
   });
 
