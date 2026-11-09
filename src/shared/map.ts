@@ -1,14 +1,36 @@
 // Общие данные для клиента и сервера: карта, оружие, размеры игрока.
 // Вся геометрия — только прямоугольные блоки.
 
+import type { Team, Vec3, WeaponId } from './protocol.js';
+
+export interface Weapon {
+  name: string;
+  dmg: number;
+  pellets: number;
+  rate: number;
+  mag: number;
+  reload: number;
+  spread: number;
+  auto: boolean;
+}
+
+export interface Box {
+  min: Vec3;
+  max: Vec3;
+  color: string;
+}
+
+/** Точка появления: [x, z, yaw] */
+export type SpawnPoint = [number, number, number];
+
 export const PLAYER = { w: 0.8, h: 1.8, eye: 1.6 };
 
-export const WEAPONS = {
+export const WEAPONS: Record<WeaponId, Weapon> = {
   pistol:  { name: 'Пистолет', dmg: 25, pellets: 1, rate: 280, mag: 12, reload: 1200, spread: 0.008, auto: false },
   shotgun: { name: 'Дробовик', dmg: 13, pellets: 8, rate: 900, mag: 6,  reload: 2200, spread: 0.07,  auto: false },
   rifle:   { name: 'Винтовка', dmg: 30, pellets: 1, rate: 110, mag: 30, reload: 2000, spread: 0.018, auto: true },
 };
-export const WEAPON_ORDER = ['pistol', 'shotgun', 'rifle'];
+export const WEAPON_ORDER: WeaponId[] = ['pistol', 'shotgun', 'rifle'];
 
 export const WORLD = { half: 30, wallH: 6 };
 
@@ -19,8 +41,8 @@ const CRATE = '#8a5a2b';
 const CRATE_LIGHT = '#a8743a';
 const TUNNEL = '#6f6455';
 
-export const BOXES = [];
-function b(x1, z1, x2, z2, h, color, y = 0) {
+export const BOXES: Box[] = [];
+function b(x1: number, z1: number, x2: number, z2: number, h: number, color: string, y = 0): void {
   BOXES.push({ min: [x1, y, z1], max: [x2, y + h, z2], color });
 }
 
@@ -70,7 +92,7 @@ b(-22, 23, -20, 25, 1.2, CRATE_LIGHT);
 b(20, -25, 22, -23, 1.2, CRATE_LIGHT);
 
 // Точки появления: [x, z, yaw]. yaw = 0 — взгляд на север (-z).
-export const SPAWNS = {
+export const SPAWNS: Record<Team | 'ffa', SpawnPoint[]> = {
   green: [[-6, 26, 0], [-2, 26, 0], [2, 26, 0], [6, 26, 0]],
   red: [[-6, -26, Math.PI], [-2, -26, Math.PI], [2, -26, Math.PI], [6, -26, Math.PI]],
   ffa: [
@@ -82,7 +104,7 @@ export const SPAWNS = {
 
 // Пересечение луча с блоком (метод «слэбов»).
 // Возвращает расстояние вдоль луча либо Infinity.
-export function rayBox(o, d, min, max) {
+export function rayBox(o: Vec3, d: Vec3, min: Vec3, max: Vec3): number {
   let t0 = 0, t1 = Infinity;
   for (let i = 0; i < 3; i++) {
     if (Math.abs(d[i]) < 1e-9) {
@@ -100,7 +122,7 @@ export function rayBox(o, d, min, max) {
 }
 
 // Ближайшее пересечение луча с геометрией карты (включая пол).
-export function rayWorld(o, d, maxDist = 200) {
+export function rayWorld(o: Vec3, d: Vec3, maxDist = 200): number {
   let t = maxDist;
   if (d[1] < -1e-9) {
     const tf = -o[1] / d[1];
@@ -114,10 +136,14 @@ export function rayWorld(o, d, maxDist = 200) {
 }
 
 // Есть ли прямая видимость между двумя точками.
-export function lineOfSight(a, c) {
-  const d = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+export function lineOfSight(a: Vec3, c: Vec3): boolean {
+  const d: Vec3 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
   const len = Math.hypot(d[0], d[1], d[2]);
   if (len < 1e-6) return true;
   d[0] /= len; d[1] /= len; d[2] /= len;
   return rayWorld(a, d, len) >= len - 0.05;
+}
+
+export function isWeapon(w: unknown): w is WeaponId {
+  return typeof w === 'string' && Object.hasOwn(WEAPONS, w);
 }

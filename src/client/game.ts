@@ -1,12 +1,20 @@
 import * as THREE from 'three';
-import { BOXES, WEAPONS, WEAPON_ORDER, PLAYER, WORLD, rayBox, rayWorld } from './shared/map.js';
+import { BOXES, WEAPONS, WEAPON_ORDER, PLAYER, WORLD, rayBox, rayWorld, type Box } from '../shared/map.js';
+import type {
+  ClientMsg, InfoMsg, KillMsg, Mode, OverMsg, PlayerInfo, PlayersMsg, ServerMsg,
+  ShotMsg, SnapMsg, SpawnMsg, Team, Vec3, WeaponId,
+} from '../shared/protocol.js';
 
-const $ = (id) => document.getElementById(id);
-const TEAM_COLOR = { green: 0x2fc44e, red: 0xe23b3b };
+const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`Нет элемента #${id}`);
+  return el as T;
+};
+const TEAM_COLOR: Record<Team, number> = { green: 0x2fc44e, red: 0xe23b3b };
 const SPEED = 6.5, JUMP = 7, GRAVITY = 19;
 
 // ======================= сцена =======================
-const canvas = $('game');
+const canvas = $<HTMLCanvasElement>('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
@@ -23,7 +31,7 @@ const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(20, 40, 10);
 scene.add(sun);
 
-function resize() {
+function resize(): void {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -31,8 +39,9 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-function box(w, h, d, color) {
-  return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
+function box(w: number, h: number, d: number, color: THREE.ColorRepresentation, lit = true): THREE.Mesh {
+  const material = lit ? new THREE.MeshLambertMaterial({ color }) : new THREE.MeshBasicMaterial({ color });
+  return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
 }
 
 // Карта: пол + блоки
@@ -50,16 +59,21 @@ function box(w, h, d, color) {
 }
 
 // ======================= модели из кубиков =======================
-// Оружие смотрит стволом вдоль -Z. Возвращает группу и положение дула.
-function buildGun(type) {
-  const g = new THREE.Group();
-  const add = (w, h, d, color, x, y, z) => {
+interface Gun {
+  group: THREE.Group;
+  flash: THREE.Mesh;
+  muzzleZ: number;
+}
+
+// Оружие смотрит стволом вдоль -Z.
+function buildGun(type: WeaponId): Gun {
+  const group = new THREE.Group();
+  const add = (w: number, h: number, d: number, color: number, x: number, y: number, z: number): void => {
     const m = box(w, h, d, color);
     m.position.set(x, y, z);
-    g.add(m);
-    return m;
+    group.add(m);
   };
-  let muzzleZ;
+  let muzzleZ: number;
   if (type === 'pistol') {
     add(0.05, 0.07, 0.24, 0x2b2b2b, 0, 0, -0.12);
     add(0.045, 0.13, 0.06, 0x3a2a1a, 0, -0.09, -0.03);
@@ -77,19 +91,22 @@ function buildGun(type) {
     add(0.02, 0.04, 0.12, 0x1c1c1c, 0, 0.065, -0.2);
     muzzleZ = -0.75;
   }
-  const flash = box(0.12, 0.12, 0.12, 0xffd34d);
-  flash.material = new THREE.MeshBasicMaterial({ color: 0xffd34d });
+  const flash = box(0.12, 0.12, 0.12, 0xffd34d, false);
   flash.position.set(0, 0, muzzleZ - 0.05);
   flash.visible = false;
-  g.add(flash);
-  g.userData = { flash, muzzleZ };
-  return g;
+  group.add(flash);
+  return { group, flash, muzzleZ };
 }
 
-function nameSprite(text, team) {
+function muzzleWorld(gun: Gun): THREE.Vector3 {
+  gun.group.updateWorldMatrix(true, false);
+  return new THREE.Vector3(0, 0, gun.muzzleZ).applyMatrix4(gun.group.matrixWorld);
+}
+
+function nameSprite(text: string, team: Team): THREE.Sprite {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 64;
-  const ctx = c.getContext('2d');
+  const ctx = c.getContext('2d')!;
   ctx.font = 'bold 34px system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -98,13 +115,33 @@ function nameSprite(text, team) {
   ctx.strokeText(text, 128, 32);
   ctx.fillStyle = team === 'green' ? '#7dff96' : '#ff8a8a';
   ctx.fillText(text, 128, 32);
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: true }));
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c) }));
   s.scale.set(1.6, 0.4, 1);
   return s;
 }
 
+interface Remote {
+  info: PlayerInfo;
+  g: THREE.Group;
+  hand: THREE.Group;
+  gun: Gun;
+  w: WeaponId;
+  pos: THREE.Vector3;
+  target: THREE.Vector3;
+  yaw: number;
+  targetYaw: number;
+  pitch: number;
+  flashUntil: number;
+}
+
+function remoteGun(w: WeaponId): Gun {
+  const gun = buildGun(w);
+  gun.group.scale.setScalar(1.4);
+  return gun;
+}
+
 // Игрок — одинаковый прямоугольник цвета команды
-function buildPlayer(info) {
+function buildPlayer(info: PlayerInfo): Remote {
   const g = new THREE.Group();
   const body = box(PLAYER.w, PLAYER.h, PLAYER.w, TEAM_COLOR[info.team]);
   body.position.y = PLAYER.h / 2;
@@ -119,31 +156,45 @@ function buildPlayer(info) {
   label.position.y = PLAYER.h + 0.35;
   g.add(label);
   scene.add(g);
-  const r = { g, hand, gun: null, w: null, pos: new THREE.Vector3(), target: new THREE.Vector3(), yaw: 0, targetYaw: 0, pitch: 0, flashUntil: 0 };
-  setRemoteWeapon(r, 'pistol');
-  return r;
+  const gun = remoteGun('pistol');
+  hand.add(gun.group);
+  return {
+    info, g, hand, gun, w: 'pistol',
+    pos: new THREE.Vector3(), target: new THREE.Vector3(),
+    yaw: 0, targetYaw: 0, pitch: 0, flashUntil: 0,
+  };
 }
-function setRemoteWeapon(r, w) {
-  if (r.w === w || !WEAPONS[w]) return;
-  if (r.gun) r.hand.remove(r.gun);
-  r.gun = buildGun(w);
-  r.gun.scale.setScalar(1.4);
-  r.hand.add(r.gun);
+function setRemoteWeapon(r: Remote, w: WeaponId): void {
+  if (r.w === w) return;
+  r.hand.remove(r.gun.group);
+  r.gun = remoteGun(w);
+  r.hand.add(r.gun.group);
   r.w = w;
 }
 
 // ======================= состояние =======================
 const me = {
-  id: null, team: 'green', alive: false, hp: 100,
-  pos: new THREE.Vector3(0, 0, 26), vel: new THREE.Vector3(), yaw: 0, pitch: 0, grounded: false,
-  weapon: 'pistol', ammo: {}, reloadUntil: 0, nextShot: 0,
+  id: -1,
+  team: 'green' as Team,
+  alive: false,
+  hp: 100,
+  pos: new THREE.Vector3(0, 0, 26),
+  vel: new THREE.Vector3(),
+  yaw: 0,
+  pitch: 0,
+  grounded: false,
+  weapon: 'pistol' as WeaponId,
+  ammo: { pistol: WEAPONS.pistol.mag, shotgun: WEAPONS.shotgun.mag, rifle: WEAPONS.rifle.mag } as Record<WeaponId, number>,
+  reloadUntil: 0,
+  nextShot: 0,
 };
-for (const w of WEAPON_ORDER) me.ammo[w] = WEAPONS[w].mag;
 
-let mode = 'tdm', limit = 20, scores = { green: 0, red: 0 };
-let roster = [];               // список игроков с сервера
-const remotes = new Map();     // id -> модель другого игрока
-const keys = {};
+let mode: Mode = 'tdm';
+let limit = 20;
+let scores: Record<Team, number> = { green: 0, red: 0 };
+let roster: PlayerInfo[] = [];
+const remotes = new Map<number, Remote>();
+const keys: Record<string, boolean> = {};
 let mouseDown = false, firedThisPress = false, locked = false, joined = false, roundOver = false;
 let respawnAt = 0;
 
@@ -152,25 +203,27 @@ const viewModel = new THREE.Group();
 viewModel.position.set(0.22, -0.2, -0.45);
 viewModel.scale.setScalar(0.7);
 camera.add(viewModel);
-let viewGun = null, kick = 0;
-function setWeapon(w) {
-  if (!WEAPONS[w]) return;
+let viewGun = buildGun('pistol');
+viewModel.add(viewGun.group);
+let kick = 0;
+
+function setWeapon(w: WeaponId): void {
   me.weapon = w;
   me.reloadUntil = 0;
   me.nextShot = Math.max(me.nextShot, performance.now() + 250);
-  if (viewGun) viewModel.remove(viewGun);
+  viewModel.remove(viewGun.group);
   viewGun = buildGun(w);
-  viewModel.add(viewGun);
+  viewModel.add(viewGun.group);
   updateHud();
 }
 
 // ======================= звук =======================
-let audio = null;
-function initAudio() {
+let audio: AudioContext | null = null;
+function initAudio(): void {
   if (audio) return;
-  try { audio = new (window.AudioContext || window.webkitAudioContext)(); } catch { /* без звука */ }
+  try { audio = new AudioContext(); } catch { /* без звука */ }
 }
-function shotSound(w, volume = 1) {
+function shotSound(w: WeaponId, volume = 1): void {
   if (!audio || volume <= 0.01) return;
   const dur = w === 'shotgun' ? 0.35 : w === 'rifle' ? 0.14 : 0.18;
   const buf = audio.createBuffer(1, Math.floor(audio.sampleRate * dur), audio.sampleRate);
@@ -186,7 +239,7 @@ function shotSound(w, volume = 1) {
   src.connect(filter).connect(gain).connect(audio.destination);
   src.start();
 }
-function beep(freq, dur, volume = 0.15) {
+function beep(freq: number, dur: number, volume = 0.15): void {
   if (!audio) return;
   const o = audio.createOscillator(), g = audio.createGain();
   o.frequency.value = freq;
@@ -198,56 +251,68 @@ function beep(freq, dur, volume = 0.15) {
 }
 
 // ======================= трассеры =======================
-const tracers = [];
-function addTracer(from, to) {
-  const geo = new THREE.BufferGeometry().setFromPoints([from, to]);
-  const mat = new THREE.LineBasicMaterial({ color: 0xfff2a8, transparent: true, opacity: 0.9 });
-  const line = new THREE.Line(geo, mat);
+interface Effect {
+  obj: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial> | THREE.Mesh;
+  born: number;
+  life: number;
+  fade: boolean;
+}
+const effects: Effect[] = [];
+
+function addTracer(from: THREE.Vector3, to: THREE.Vector3): void {
+  const now = performance.now();
+  const line = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([from, to]),
+    new THREE.LineBasicMaterial({ color: 0xfff2a8, transparent: true, opacity: 0.9 }),
+  );
   scene.add(line);
-  tracers.push({ line, born: performance.now() });
+  effects.push({ obj: line, born: now, life: 70, fade: true });
   // Искра в точке попадания
-  const spark = box(0.08, 0.08, 0.08, 0xffe08a);
-  spark.material = new THREE.MeshBasicMaterial({ color: 0xffe08a });
+  const spark = box(0.08, 0.08, 0.08, 0xffe08a, false);
   spark.position.copy(to);
   scene.add(spark);
-  tracers.push({ line: spark, born: performance.now(), spark: true });
+  effects.push({ obj: spark, born: now, life: 160, fade: false });
 }
-function updateTracers(now) {
-  for (let i = tracers.length - 1; i >= 0; i--) {
-    const t = tracers[i];
-    const life = t.spark ? 160 : 70;
-    const age = now - t.born;
-    if (age > life) {
-      scene.remove(t.line);
-      t.line.geometry.dispose();
-      t.line.material.dispose();
-      tracers.splice(i, 1);
-    } else if (!t.spark) {
-      t.line.material.opacity = 0.9 * (1 - age / life);
+function updateEffects(now: number): void {
+  for (let i = effects.length - 1; i >= 0; i--) {
+    const e = effects[i]!;
+    const age = now - e.born;
+    const material = e.obj.material as THREE.Material;
+    if (age > e.life) {
+      scene.remove(e.obj);
+      e.obj.geometry.dispose();
+      material.dispose();
+      effects.splice(i, 1);
+    } else if (e.fade) {
+      material.opacity = 0.9 * (1 - age / e.life);
     }
   }
 }
 
 // ======================= сеть =======================
 const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
-const sendMsg = (m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); };
+function sendMsg(m: ClientMsg): void {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
+}
+
+const playBtn = $<HTMLButtonElement>('play');
 
 ws.addEventListener('close', () => {
   $('status').textContent = 'Соединение с сервером потеряно. Обнови страницу.';
-  $('play').disabled = true;
+  playBtn.disabled = true;
   if (joined) {
-    document.exitPointerLock?.();
+    document.exitPointerLock();
     $('hud').classList.add('hidden');
     $('pause').classList.add('hidden');
     $('menu').classList.remove('hidden');
   }
 });
 
-ws.addEventListener('message', (e) => {
-  const m = JSON.parse(e.data);
+ws.addEventListener('message', (e: MessageEvent<string>) => {
+  const m = JSON.parse(e.data) as ServerMsg;
   switch (m.t) {
     case 'info': onInfo(m); break;
-    case 'error': $('status').textContent = m.text; $('play').disabled = false; break;
+    case 'error': $('status').textContent = m.text; playBtn.disabled = false; break;
     case 'welcome':
       me.id = m.id;
       mode = m.mode;
@@ -269,9 +334,9 @@ ws.addEventListener('message', (e) => {
   }
 });
 
-function onPlayers(m) {
+function onPlayers(m: PlayersMsg): void {
   mode = m.mode; limit = m.limit; scores = m.scores; roster = m.list;
-  const seen = new Set();
+  const seen = new Set<number>();
   for (const p of roster) {
     if (p.id === me.id) {
       if (p.hp < me.hp && p.alive) flashDamage();
@@ -290,11 +355,10 @@ function onPlayers(m) {
   for (const [id, r] of remotes) {
     if (!seen.has(id)) { scene.remove(r.g); remotes.delete(id); }
   }
-  viewModel.visible = me.alive;
   updateHud();
 }
 
-function onSpawn(m) {
+function onSpawn(m: SpawnMsg): void {
   if (m.id === me.id) {
     me.pos.set(m.p[0], m.p[1], m.p[2]);
     me.vel.set(0, 0, 0);
@@ -304,54 +368,52 @@ function onSpawn(m) {
     me.hp = 100;
     for (const w of WEAPON_ORDER) me.ammo[w] = WEAPONS[w].mag;
     me.reloadUntil = 0;
-    viewModel.visible = true;
     if (!roundOver) $('center-msg').textContent = '';
     updateHud();
-  } else {
-    const r = remotes.get(m.id);
-    if (r) {
-      r.pos.set(m.p[0], m.p[1], m.p[2]);
-      r.target.copy(r.pos);
-      r.yaw = r.targetYaw = m.yaw;
-    }
+    return;
+  }
+  const r = remotes.get(m.id);
+  if (r) {
+    r.pos.set(m.p[0], m.p[1], m.p[2]);
+    r.target.copy(r.pos);
+    r.yaw = r.targetYaw = m.yaw;
   }
 }
 
-function onSnap(m) {
-  for (const s of m.ps) {
-    const r = remotes.get(s[0]);
+function onSnap(m: SnapMsg): void {
+  for (const [id, x, y, z, yaw, pitch, w] of m.ps) {
+    const r = remotes.get(id);
     if (!r) continue;
-    r.target.set(s[1], s[2], s[3]);
-    r.targetYaw = s[4];
-    r.pitch = s[5];
-    setRemoteWeapon(r, s[6]);
+    r.target.set(x, y, z);
+    r.targetYaw = yaw;
+    r.pitch = pitch;
+    setRemoteWeapon(r, w);
   }
 }
 
-function onShot(m) {
+function onShot(m: ShotMsg): void {
   const r = remotes.get(m.id);
   if (!r) return;
   setRemoteWeapon(r, m.w);
   r.flashUntil = performance.now() + 50;
-  r.gun.updateWorldMatrix(true, false);
-  const from = new THREE.Vector3(0, 0, r.gun.userData.muzzleZ).applyMatrix4(r.gun.matrixWorld);
+  const from = muzzleWorld(r.gun);
   for (const e of m.ends) addTracer(from, new THREE.Vector3(e[0], e[1], e[2]));
   const dist = r.pos.distanceTo(me.pos);
   shotSound(m.w, Math.max(0, 1 - dist / 70) * 0.8);
 }
 
-const playerName = (id) => roster.find((p) => p.id === id);
-function onKill(m) {
-  const k = playerName(m.killer), v = playerName(m.victim);
+function onKill(m: KillMsg): void {
+  const k = roster.find((p) => p.id === m.killer);
+  const v = roster.find((p) => p.id === m.victim);
   if (!k || !v) return;
   const row = document.createElement('div');
-  const span = (p) => {
+  const span = (p: PlayerInfo): HTMLSpanElement => {
     const s = document.createElement('span');
     s.className = 't-' + p.team;
     s.textContent = p.name;
     return s;
   };
-  row.append(span(k), ` ▸ ${WEAPONS[m.w]?.name ?? ''} ▸ `, span(v));
+  row.append(span(k), ` ▸ ${WEAPONS[m.w].name} ▸ `, span(v));
   $('feed').prepend(row);
   setTimeout(() => row.remove(), 5000);
   if (m.killer === me.id) { showHit(true); beep(880, 0.15); }
@@ -360,25 +422,32 @@ function onKill(m) {
   }
 }
 
-function onOver(m) {
+function onOver(m: OverMsg): void {
   roundOver = true;
-  let text;
+  let text: string;
   if (m.winner.team) text = m.winner.team === 'green' ? 'Победили ЗЕЛЁНЫЕ' : 'Победили КРАСНЫЕ';
-  else text = `Победил ${m.winner.name}`;
+  else text = `Победил ${m.winner.name ?? ''}`;
   $('center-msg').textContent = `${text}\nНовый раунд через ${Math.round(m.pause / 1000)} сек.`;
 }
 
 // ======================= меню =======================
-let chosenMode = 'tdm', chosenTeam = 'green';
-$('name').value = localStorage.getItem('doc-name') || '';
+let chosenMode: Mode = 'tdm';
+let chosenTeam: Team = 'green';
+let lastInfo: InfoMsg | null = null;
+const nameInput = $<HTMLInputElement>('name');
+nameInput.value = localStorage.getItem('doc-name') ?? '';
 
-function onInfo(m) {
+const buttonsOf = (id: string): HTMLButtonElement[] =>
+  [...$(id).querySelectorAll<HTMLButtonElement>('button')];
+
+function onInfo(m: InfoMsg): void {
+  lastInfo = m;
   if (joined) return;
-  $('play').disabled = m.count >= m.max;
-  $('play').textContent = m.count >= m.max ? 'Сервер заполнен' : 'ИГРАТЬ';
+  playBtn.disabled = m.count >= m.max;
+  playBtn.textContent = m.count >= m.max ? 'Сервер заполнен' : 'ИГРАТЬ';
   const modeLocked = m.count > 0;
   if (modeLocked) chosenMode = m.mode;
-  for (const b of $('mode-choice').children) {
+  for (const b of buttonsOf('mode-choice')) {
     b.classList.toggle('active', b.dataset.mode === chosenMode);
     b.disabled = modeLocked;
   }
@@ -388,40 +457,43 @@ function onInfo(m) {
   const tdm = chosenMode === 'tdm';
   $('green-count').textContent = tdm ? `${m.green}/2` : '';
   $('red-count').textContent = tdm ? `${m.red}/2` : '';
-  const full = { green: tdm && m.green >= 2, red: tdm && m.red >= 2 };
+  const full: Record<Team, boolean> = { green: tdm && m.green >= 2, red: tdm && m.red >= 2 };
   if (full[chosenTeam]) chosenTeam = chosenTeam === 'green' ? 'red' : 'green';
-  for (const b of $('team-choice').children) {
-    b.disabled = full[b.dataset.team];
+  for (const b of buttonsOf('team-choice')) {
+    b.disabled = full[b.dataset.team as Team];
     b.classList.toggle('active', b.dataset.team === chosenTeam);
   }
-  lastInfo = m;
 }
-let lastInfo = null;
+
+function pickedButton(e: MouseEvent): HTMLButtonElement | null {
+  const b = (e.target as HTMLElement).closest('button');
+  return b && !b.disabled ? b : null;
+}
 $('mode-choice').addEventListener('click', (e) => {
-  const b = e.target.closest('button');
-  if (!b || b.disabled) return;
-  chosenMode = b.dataset.mode;
+  const b = pickedButton(e);
+  if (!b) return;
+  chosenMode = b.dataset.mode === 'ffa' ? 'ffa' : 'tdm';
   if (lastInfo) onInfo(lastInfo);
 });
 $('team-choice').addEventListener('click', (e) => {
-  const b = e.target.closest('button');
-  if (!b || b.disabled) return;
-  chosenTeam = b.dataset.team;
+  const b = pickedButton(e);
+  if (!b) return;
+  chosenTeam = b.dataset.team === 'red' ? 'red' : 'green';
   if (lastInfo) onInfo(lastInfo);
 });
 $('join-form').addEventListener('submit', (e) => {
   e.preventDefault();
   initAudio();
-  const name = $('name').value.trim();
+  const name = nameInput.value.trim();
   localStorage.setItem('doc-name', name);
-  $('play').disabled = true;
+  playBtn.disabled = true;
   sendMsg({ t: 'join', name, team: chosenTeam, mode: chosenMode });
 });
 
 // ======================= управление =======================
-function lock() {
+function lock(): void {
   initAudio();
-  canvas.requestPointerLock?.();
+  void canvas.requestPointerLock();
 }
 $('pause').addEventListener('click', lock);
 canvas.addEventListener('click', () => { if (joined && !locked) lock(); });
@@ -445,10 +517,10 @@ document.addEventListener('wheel', (e) => {
   if (!locked) return;
   const i = WEAPON_ORDER.indexOf(me.weapon);
   const n = WEAPON_ORDER.length;
-  setWeapon(WEAPON_ORDER[(i + (e.deltaY > 0 ? 1 : n - 1)) % n]);
+  setWeapon(WEAPON_ORDER[(i + (e.deltaY > 0 ? 1 : n - 1)) % n]!);
 });
 document.addEventListener('keydown', (e) => {
-  if (!joined || e.target.tagName === 'INPUT') return;
+  if (!joined || e.target instanceof HTMLInputElement) return;
   if (e.code === 'Tab') { e.preventDefault(); $('scoreboard').classList.remove('hidden'); renderScoreboard(); }
   if (!locked) return;
   keys[e.code] = true;
@@ -464,7 +536,7 @@ document.addEventListener('keyup', (e) => {
 });
 
 // ======================= движение и столкновения =======================
-function hitBox(p) {
+function hitBox(p: THREE.Vector3): Box | null {
   const r = PLAYER.w / 2;
   for (const b of BOXES) {
     if (p.x + r > b.min[0] && p.x - r < b.max[0] &&
@@ -474,7 +546,7 @@ function hitBox(p) {
   return null;
 }
 
-function move(dt) {
+function move(dt: number): void {
   const f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
   const s = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
   const len = Math.hypot(f, s) || 1;
@@ -496,8 +568,9 @@ function move(dt) {
 
   p.y += me.vel.y * dt;
   me.grounded = false;
-  if (p.y <= 0) { p.y = 0; me.vel.y = 0; me.grounded = true; }
-  else {
+  if (p.y <= 0) {
+    p.y = 0; me.vel.y = 0; me.grounded = true;
+  } else {
     const b = hitBox(p);
     if (b) {
       if (me.vel.y <= 0) { p.y = b.max[1]; me.grounded = true; }
@@ -508,7 +581,7 @@ function move(dt) {
 }
 
 // ======================= стрельба =======================
-function startReload() {
+function startReload(): void {
   const w = WEAPONS[me.weapon];
   if (me.reloadUntil || me.ammo[me.weapon] >= w.mag || !me.alive) return;
   me.reloadUntil = performance.now() + w.reload;
@@ -517,38 +590,38 @@ function startReload() {
 }
 
 const _dir = new THREE.Vector3(), _right = new THREE.Vector3(), _up = new THREE.Vector3();
-function fire(now) {
+function fire(now: number): void {
   const w = WEAPONS[me.weapon];
   me.nextShot = now + w.rate;
   me.ammo[me.weapon]--;
   firedThisPress = true;
 
   camera.updateMatrixWorld(true);
-  const eye = [camera.position.x, camera.position.y, camera.position.z];
+  const eye: Vec3 = [camera.position.x, camera.position.y, camera.position.z];
   camera.getWorldDirection(_dir);
   _right.setFromMatrixColumn(camera.matrixWorld, 0);
   _up.setFromMatrixColumn(camera.matrixWorld, 1);
-  const muzzle = new THREE.Vector3(0, 0, viewGun.userData.muzzleZ).applyMatrix4(viewGun.matrixWorld);
+  const muzzle = muzzleWorld(viewGun);
 
-  const hits = {};
-  const ends = [];
+  const hits: Record<number, number> = {};
+  const ends: Vec3[] = [];
   let anyHit = false;
+  const hw = PLAYER.w / 2;
   for (let i = 0; i < w.pellets; i++) {
     const a = Math.random() * Math.PI * 2, rad = Math.sqrt(Math.random()) * w.spread;
     const d = _dir.clone().addScaledVector(_right, Math.cos(a) * rad).addScaledVector(_up, Math.sin(a) * rad).normalize();
-    const dv = [d.x, d.y, d.z];
+    const dv: Vec3 = [d.x, d.y, d.z];
     let t = rayWorld(eye, dv);
-    let victim = null;
+    let victim: number | null = null;
     for (const [id, r] of remotes) {
-      if (!r.info?.alive) continue;
+      if (!r.info.alive) continue;
       if (mode === 'tdm' && r.info.team === me.team) continue;
-      const hw = PLAYER.w / 2;
       const tp = rayBox(eye, dv,
         [r.pos.x - hw, r.pos.y, r.pos.z - hw],
         [r.pos.x + hw, r.pos.y + PLAYER.h, r.pos.z + hw]);
       if (tp < t) { t = tp; victim = id; }
     }
-    if (victim !== null) { hits[victim] = (hits[victim] || 0) + 1; anyHit = true; }
+    if (victim !== null) { hits[victim] = (hits[victim] ?? 0) + 1; anyHit = true; }
     const end = new THREE.Vector3(eye[0] + dv[0] * t, eye[1] + dv[1] * t, eye[2] + dv[2] * t);
     ends.push([+end.x.toFixed(2), +end.y.toFixed(2), +end.z.toFixed(2)]);
     addTracer(muzzle, end);
@@ -559,13 +632,14 @@ function fire(now) {
   shotSound(me.weapon);
   kick = me.weapon === 'shotgun' ? 0.12 : 0.05;
   me.pitch = Math.min(1.5, me.pitch + (me.weapon === 'shotgun' ? 0.035 : me.weapon === 'rifle' ? 0.012 : 0.015));
-  viewGun.userData.flash.visible = true;
-  setTimeout(() => { if (viewGun) viewGun.userData.flash.visible = false; }, 45);
+  const flash = viewGun.flash;
+  flash.visible = true;
+  setTimeout(() => { flash.visible = false; }, 45);
   if (me.ammo[me.weapon] <= 0) startReload();
   updateHud();
 }
 
-function updateShooting(now) {
+function updateShooting(now: number): void {
   if (me.reloadUntil && now >= me.reloadUntil) {
     me.ammo[me.weapon] = WEAPONS[me.weapon].mag;
     me.reloadUntil = 0;
@@ -580,71 +654,79 @@ function updateShooting(now) {
 
 // ======================= HUD =======================
 let hitTimer = 0, dmgTimer = 0;
-function showHit(kill) {
+function showHit(kill: boolean): void {
   const el = $('hitmarker');
   el.classList.toggle('kill', kill);
   el.classList.add('show');
   clearTimeout(hitTimer);
-  hitTimer = setTimeout(() => el.classList.remove('show'), kill ? 250 : 60);
+  hitTimer = window.setTimeout(() => el.classList.remove('show'), kill ? 250 : 60);
 }
-function flashDamage() {
+function flashDamage(): void {
   $('damage').classList.add('show');
   clearTimeout(dmgTimer);
-  dmgTimer = setTimeout(() => $('damage').classList.remove('show'), 80);
+  dmgTimer = window.setTimeout(() => $('damage').classList.remove('show'), 80);
 }
 
-function updateHud() {
-  $('hp').textContent = me.alive ? me.hp : 0;
+function textEl(tag: 'span' | 'small', text: string, cls = ''): HTMLElement {
+  const s = document.createElement(tag);
+  s.className = cls;
+  s.textContent = text;
+  return s;
+}
+
+function updateHud(): void {
+  $('hp').textContent = String(me.alive ? me.hp : 0);
   $('health').classList.toggle('low', me.hp <= 30);
   $('weapon-name').textContent = WEAPONS[me.weapon].name;
-  $('ammo-count').textContent = me.reloadUntil ? '…' : me.ammo[me.weapon];
-  for (const s of $('slots').children) s.classList.toggle('active', s.dataset.w === me.weapon);
+  $('ammo-count').textContent = me.reloadUntil ? '…' : String(me.ammo[me.weapon]);
+  for (const s of $('slots').querySelectorAll<HTMLElement>('span')) {
+    s.classList.toggle('active', s.dataset.w === me.weapon);
+  }
 
   const score = $('score');
   score.textContent = '';
-  const part = (cls, text) => {
-    const s = document.createElement(cls === 'small' ? 'small' : 'span');
-    if (cls !== 'small') s.className = cls;
-    s.textContent = text;
-    return s;
-  };
   if (mode === 'tdm') {
-    score.append(part('g', `Зелёные ${scores.green}`), ' : ', part('r', `${scores.red} Красные`), part('small', `до ${limit}`));
+    score.append(
+      textEl('span', `Зелёные ${scores.green}`, 'g'), ' : ',
+      textEl('span', `${scores.red} Красные`, 'r'),
+      textEl('small', `до ${limit}`),
+    );
   } else {
     const mine = roster.find((p) => p.id === me.id);
     const top = [...roster].sort((a, b) => b.kills - a.kills)[0];
     score.append(`Ты: ${mine?.kills ?? 0}`);
-    if (top) score.append(part('small', `лидер: ${top.name} — ${top.kills} · до ${limit}`));
+    if (top) score.append(textEl('small', `лидер: ${top.name} — ${top.kills} · до ${limit}`));
   }
   if (!$('scoreboard').classList.contains('hidden')) renderScoreboard();
 }
 
-function renderScoreboard() {
+function renderScoreboard(): void {
   const sb = $('scoreboard');
   sb.textContent = '';
   const table = document.createElement('table');
   const head = table.insertRow();
-  for (const [t, cls] of [['Игрок', ''], ['Убийства', 'n'], ['Смерти', 'n']]) {
+  for (const [t, cls] of [['Игрок', ''], ['Убийства', 'n'], ['Смерти', 'n']] as const) {
     const th = document.createElement('th');
-    th.textContent = t; th.className = cls;
+    th.textContent = t;
+    th.className = cls;
     head.append(th);
   }
-  const order = { green: 0, red: 1 };
+  const order: Record<Team, number> = { green: 0, red: 1 };
   const list = [...roster].sort((a, b) =>
     (mode === 'tdm' ? order[a.team] - order[b.team] : 0) || b.kills - a.kills);
   for (const p of list) {
     const row = table.insertRow();
     if (p.id === me.id) row.className = 'me';
     const n = row.insertCell(); n.textContent = p.name; n.className = 't-' + p.team;
-    const k = row.insertCell(); k.textContent = p.kills; k.className = 'n';
-    const d = row.insertCell(); d.textContent = p.deaths; d.className = 'n';
+    const k = row.insertCell(); k.textContent = String(p.kills); k.className = 'n';
+    const d = row.insertCell(); d.textContent = String(p.deaths); d.className = 'n';
   }
   sb.append(table);
 }
 
 // ======================= главный цикл =======================
 let last = performance.now(), sendAcc = 0;
-function frame(now) {
+function frame(now: number): void {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
@@ -658,11 +740,11 @@ function frame(now) {
       camera.position.set(me.pos.x, me.pos.y + 6, me.pos.z + 4);
       const left = Math.max(0, Math.ceil((respawnAt - now) / 1000));
       if (!roundOver && left > 0) {
-        const first = $('center-msg').textContent.split('\n')[0];
+        const first = ($('center-msg').textContent ?? '').split('\n')[0];
         $('center-msg').textContent = `${first}\nВозрождение через ${left} сек.`;
       }
     }
-    camera.rotation.set(me.alive ? me.pitch : -0.9, me.yaw, 0);
+    camera.rotation.set(me.alive ? me.pitch : -0.9, me.alive ? me.yaw : 0, 0);
 
     updateShooting(now);
     kick = Math.max(0, kick - dt * 0.6);
@@ -689,21 +771,25 @@ function frame(now) {
   const k = 1 - Math.exp(-16 * dt);
   for (const r of remotes.values()) {
     r.pos.lerp(r.target, k);
-    let dy = r.targetYaw - r.yaw;
-    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-    r.yaw += dy * k;
+    const dy = r.targetYaw - r.yaw;
+    r.yaw += Math.atan2(Math.sin(dy), Math.cos(dy)) * k;
     r.g.position.copy(r.pos);
     r.g.rotation.y = r.yaw;
     r.hand.rotation.x = r.pitch;
-    r.gun.userData.flash.visible = now < r.flashUntil;
+    r.gun.flash.visible = now < r.flashUntil;
   }
 
-  updateTracers(now);
+  updateEffects(now);
   renderer.render(scene, camera);
 }
 
-setWeapon('pistol');
+updateHud();
 requestAnimationFrame(frame);
 
 // Для отладки из консоли
+declare global {
+  interface Window {
+    game: { me: typeof me; remotes: typeof remotes; keys: typeof keys };
+  }
+}
 window.game = { me, remotes, keys };

@@ -3,13 +3,29 @@
   "version": "1.0.0",
   "description": "Простой сетевой 3D-шутер из кубиков (до 4 игроков)",
   "type": "module",
-  "main": "server.js",
+  "main": "dist/server/index.js",
   "scripts": {
-    "start": "node server.js"
+    "typecheck": "tsc --noEmit",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:client": "esbuild src/client/game.ts --bundle --minify --format=esm --target=es2022 --outfile=dist/public/game.js",
+    "build:static": "node --input-type=module -e \"import{cpSync}from'node:fs';cpSync('public','dist/public',{recursive:true})\"",
+    "build": "npm run typecheck && npm run build:server && npm run build:client && npm run build:static",
+    "start": "node dist/server/index.js",
+    "dev": "npm run build && npm start"
   },
   "license": "MIT",
   "dependencies": {
-    "three": "^0.187.0",
     "ws": "^8.22.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/three": "^0.187.0",
+    "@types/ws": "^8.18.2",
+    "esbuild": "^0.28.2",
+    "three": "^0.187.0",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
