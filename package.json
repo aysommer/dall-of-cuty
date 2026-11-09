@@ -1,0 +1,15 @@
+{
+  "name": "dall-of-cuty",
+  "version": "1.0.0",
+  "description": "Простой сетевой 3D-шутер из кубиков (до 4 игроков)",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.187.0",
+    "ws": "^8.22.2"
+  }
+}

@@ -1,0 +1,116 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #111; }
+body { font-family: system-ui, "Segoe UI", Roboto, sans-serif; color: #fff; user-select: none; }
+#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+.hidden { display: none !important; }
+
+/* ---------- меню ---------- */
+.overlay {
+  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 12, 16, 0.72); z-index: 10; padding: 16px;
+}
+.panel {
+  width: 100%; max-width: 420px; background: #1b1f27; border: 2px solid #343b48;
+  padding: 28px; text-align: center;
+}
+#pause .panel { background: rgba(27, 31, 39, 0.9); cursor: pointer; }
+h1 { margin: 0; font-size: 34px; letter-spacing: 4px; }
+h2 { margin: 0 0 10px; }
+.sub { margin: 6px 0 22px; color: #9aa4b5; font-size: 14px; }
+.panel p { color: #b8c0cc; line-height: 1.6; font-size: 14px; margin: 0; }
+.field { display: block; text-align: left; margin-bottom: 16px; font-size: 13px; color: #9aa4b5; text-transform: uppercase; letter-spacing: 1px; }
+.field input {
+  display: block; width: 100%; margin-top: 6px; padding: 10px 12px; font-size: 16px;
+  background: #11141a; border: 2px solid #343b48; color: #fff; outline: none;
+}
+.field input:focus { border-color: #6b7a94; }
+.field small { display: block; margin-top: 6px; text-transform: none; letter-spacing: 0; }
+.choice { display: flex; gap: 8px; margin-top: 6px; }
+.choice button {
+  flex: 1; padding: 10px 6px; font-size: 14px; cursor: pointer;
+  background: #11141a; border: 2px solid #343b48; color: #b8c0cc;
+}
+.choice button.active { border-color: #fff; color: #fff; background: #2a303c; }
+.choice button.green.active { border-color: #3ddc5a; background: #173d20; }
+.choice button.red.active { border-color: #ff4d4d; background: #4a1717; }
+.choice button:disabled { opacity: 0.45; cursor: not-allowed; }
+#play {
+  width: 100%; padding: 14px; font-size: 18px; font-weight: 700; letter-spacing: 2px; cursor: pointer;
+  background: #e8e8e8; color: #111; border: 0; margin-top: 6px;
+}
+#play:disabled { opacity: 0.5; cursor: default; }
+#status { display: block; margin-top: 10px; min-height: 18px; color: #ff8080; }
+
+/* ---------- HUD ---------- */
+#hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; text-shadow: 0 1px 2px #000; }
+.label { color: #c8ccd4; font-size: 16px; }
+
+#crosshair { position: absolute; left: 50%; top: 50%; }
+#crosshair i { position: absolute; background: #fff; box-shadow: 0 0 2px #000; }
+#crosshair i:nth-child(1) { width: 2px; height: 8px; left: -1px; top: -13px; }
+#crosshair i:nth-child(2) { width: 2px; height: 8px; left: -1px; top: 5px; }
+#crosshair i:nth-child(3) { width: 8px; height: 2px; left: -13px; top: -1px; }
+#crosshair i:nth-child(4) { width: 8px; height: 2px; left: 5px; top: -1px; }
+
+#hitmarker {
+  position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+  opacity: 0; transition: opacity 0.25s;
+  background:
+    linear-gradient(45deg, transparent 46%, #fff 46%, #fff 54%, transparent 54%),
+    linear-gradient(-45deg, transparent 46%, #fff 46%, #fff 54%, transparent 54%);
+  -webkit-mask: radial-gradient(circle, transparent 4px, #000 5px);
+          mask: radial-gradient(circle, transparent 4px, #000 5px);
+}
+#hitmarker.show { opacity: 1; transition: none; }
+#hitmarker.kill { filter: drop-shadow(0 0 0 #f33) hue-rotate(0deg); background:
+    linear-gradient(45deg, transparent 44%, #ff4040 44%, #ff4040 56%, transparent 56%),
+    linear-gradient(-45deg, transparent 44%, #ff4040 44%, #ff4040 56%, transparent 56%); }
+
+#damage {
+  position: absolute; inset: 0; opacity: 0; transition: opacity 0.5s;
+  box-shadow: inset 0 0 140px 30px rgba(255, 0, 0, 0.75);
+}
+#damage.show { opacity: 1; transition: none; }
+
+#score {
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.45); padding: 8px 18px; font-size: 18px; font-weight: 700; white-space: nowrap;
+}
+#score .g { color: #5cf07a; }
+#score .r { color: #ff6b6b; }
+#score small { font-weight: 400; color: #c8ccd4; margin-left: 10px; font-size: 13px; }
+
+#feed { position: absolute; top: 12px; right: 12px; text-align: right; font-size: 14px; }
+#feed div { background: rgba(0, 0, 0, 0.45); padding: 4px 10px; margin-bottom: 4px; display: inline-block; clear: both; float: right; }
+.t-green { color: #5cf07a; }
+.t-red { color: #ff6b6b; }
+
+#health, #ammo { position: absolute; bottom: 18px; background: rgba(0, 0, 0, 0.45); padding: 10px 18px; }
+#health { left: 18px; font-size: 40px; font-weight: 700; }
+#health .label { margin-right: 10px; }
+#health.low #hp { color: #ff5a5a; }
+#ammo { right: 18px; text-align: right; font-size: 40px; font-weight: 700; }
+#weapon-name { font-size: 15px; font-weight: 400; color: #c8ccd4; text-transform: uppercase; letter-spacing: 2px; }
+#slots { font-size: 12px; font-weight: 400; margin-top: 4px; }
+#slots span { margin-left: 10px; color: #8a909b; }
+#slots span.active { color: #fff; }
+
+#center-msg {
+  position: absolute; left: 50%; top: 34%; transform: translateX(-50%);
+  font-size: 28px; font-weight: 700; text-align: center; white-space: pre-line;
+}
+
+#scoreboard {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  background: rgba(10, 12, 16, 0.88); border: 2px solid #343b48; padding: 16px 20px; min-width: 340px;
+}
+#scoreboard table { width: 100%; border-collapse: collapse; font-size: 16px; }
+#scoreboard th { text-align: left; color: #9aa4b5; font-weight: 400; font-size: 12px; text-transform: uppercase; padding: 4px 8px; }
+#scoreboard td { padding: 6px 8px; border-top: 1px solid #2a303c; }
+#scoreboard td.n, #scoreboard th.n { text-align: right; }
+#scoreboard tr.me td { background: rgba(255, 255, 255, 0.08); }
+
+@media (max-width: 640px) {
+  #health, #ammo { font-size: 28px; padding: 8px 12px; }
+  #slots { display: none; }
+}
