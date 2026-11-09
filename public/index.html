@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dall of Cuty</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- Интерфейс во время игры -->
+  <div id="hud" class="hidden">
+    <div id="crosshair"><i></i><i></i><i></i><i></i></div>
+    <div id="hitmarker"></div>
+    <div id="damage"></div>
+    <div id="score"></div>
+    <div id="feed"></div>
+    <div id="health"><span class="label">HP</span><span id="hp">100</span></div>
+    <div id="ammo">
+      <div id="weapon-name">Пистолет</div>
+      <div><span id="ammo-count">12</span><span class="label"> / ∞</span></div>
+      <div id="slots">
+        <span data-w="pistol">1 Пистолет</span>
+        <span data-w="shotgun">2 Дробовик</span>
+        <span data-w="rifle">3 Винтовка</span>
+      </div>
+    </div>
+    <div id="center-msg"></div>
+    <div id="upgrade-note" class="hidden">Есть очко прокачки — нажми Esc</div>
+    <div id="scoreboard" class="hidden"></div>
+  </div>
+
+  <div id="pause" class="overlay hidden">
+    <div class="panel wide">
+      <button id="resume" class="primary" type="button">ИГРАТЬ</button>
+      <p>WASD — движение · Shift — спринт · Пробел — прыжок · ЛКМ — огонь<br>
+         1 / 2 / 3 или колесо — оружие · R — перезарядка · Tab — счёт · Esc — это меню</p>
+
+      <h3>Настройки</h3>
+      <div class="settings"></div>
+
+      <h3>Прокачка</h3>
+      <small id="upgrade-points"></small>
+      <div id="upgrades"></div>
+      <small>1 очко за каждые 10 убийств. Прогресс сохраняется в этом браузере.</small>
+    </div>
+  </div>
+
+  <!-- Меню входа -->
+  <div id="menu" class="overlay">
+    <form class="panel" id="join-form">
+      <h1>DALL OF CUTY</h1>
+      <p class="sub">Сетевой шутер из кубиков · до 4 игроков</p>
+
+      <label class="field">Имя
+        <input id="name" maxlength="14" placeholder="Игрок" autocomplete="off">
+      </label>
+
+      <div class="field">Режим
+        <div class="choice" id="mode-choice">
+          <button type="button" data-mode="tdm" class="active">Команды 2 × 2</button>
+          <button type="button" data-mode="ffa">Каждый сам за себя</button>
+        </div>
+        <small id="mode-note"></small>
+      </div>
+
+      <div class="field">Цвет
+        <div class="choice" id="team-choice">
+          <button type="button" data-team="green" class="green active">Зелёные <b id="green-count"></b></button>
+          <button type="button" data-team="red" class="red">Красные <b id="red-count"></b></button>
+        </div>
+      </div>
+
+      <details class="field">
+        <summary>Настройки</summary>
+        <div class="settings"></div>
+      </details>
+
+      <button id="play" class="primary" type="submit" disabled>Подключение…</button>
+      <small id="status"></small>
+    </form>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>
