@@ -291,6 +291,11 @@ interface Gun {
   shell?: THREE.Object3D;
   /** Центр коллиматорного прицела (красная точка) в координатах оружия */
   sight?: { y: number; z: number };
+  /**
+   * Куда смотрит глаз при прицеливании: центр прицела (y, z в координатах оружия)
+   * и на каком расстоянии от него глаз (relief, метры). Приклад при этом уходит к щеке, за пределы обзора.
+   */
+  aim?: { y: number; z: number; relief: number };
 }
 
 /** Коллиматорный прицел: рамка со стеклом и красная точка в центре. */
@@ -332,11 +337,13 @@ function buildGun(type: WeaponId): Gun {
   let muzzleZ: number;
   let mag: THREE.Object3D | undefined, bolt: THREE.Object3D | undefined, shell: THREE.Object3D | undefined;
   let sight: Gun['sight'];
+  let aim: Gun['aim'];
   if (type === 'pistol') {
     add(0.05, 0.07, 0.24, 0x2b2b2b, 0, 0, -0.12);
     add(0.045, 0.13, 0.06, 0x3a2a1a, 0, -0.09, -0.03);
     mag = part(0.032, 0.05, 0.045, 0x111111, 0, -0.165, -0.03); // низ магазина торчит из рукояти
     sight = { y: 0.085, z: -0.1 };
+    aim = { ...sight, relief: 0.35 }; // пистолет держат на вытянутых руках
     muzzleZ = -0.26;
   } else if (type === 'shotgun') {
     add(0.06, 0.06, 0.7, 0x252525, 0, 0, -0.35);
@@ -345,6 +352,7 @@ function buildGun(type: WeaponId): Gun {
     shell = part(0.03, 0.03, 0.07, 0xc0262b, 0, -0.12, -0.08);
     shell.visible = false;
     sight = { y: 0.08, z: -0.15 };
+    aim = { ...sight, relief: 0.16 };
     muzzleZ = -0.72;
   } else if (type === 'sniper') {
     add(0.06, 0.08, 0.75, 0x2f3a2c, 0, 0, -0.25);
@@ -363,6 +371,7 @@ function buildGun(type: WeaponId): Gun {
     b.position.set(0, 0.035, 0.02);
     group.add(b);
     bolt = b;
+    aim = { y: 0.085, z: -0.1, relief: 0.08 }; // глаз у окуляра оптики
     muzzleZ = -1.05;
   } else if (type === 'knife') {
     add(0.035, 0.05, 0.12, 0x1c1c1c, 0, 0, 0);
@@ -381,6 +390,7 @@ function buildGun(type: WeaponId): Gun {
     mag = part(0.045, 0.18, 0.07, 0x1c1c1c, 0, -0.12, -0.22);
     add(0.055, 0.1, 0.24, 0x4a3a28, 0, -0.02, 0.16);
     sight = { y: 0.1, z: -0.12 };
+    aim = { ...sight, relief: 0.14 };
     muzzleZ = -0.75;
   }
   if (sight) buildRedDot(group, sight.y, sight.z);
@@ -388,7 +398,7 @@ function buildGun(type: WeaponId): Gun {
   flash.position.set(0, 0, muzzleZ - 0.05);
   flash.visible = false;
   group.add(flash);
-  return { group, flash, muzzleZ, mag, magY: mag?.position.y ?? 0, bolt, boltZ: bolt?.position.z ?? 0, shell, sight };
+  return { group, flash, muzzleZ, mag, magY: mag?.position.y ?? 0, bolt, boltZ: bolt?.position.z ?? 0, shell, sight, aim };
 }
 
 function muzzleWorld(gun: Gun): THREE.Vector3 {
@@ -1819,8 +1829,8 @@ function updateAim(dt: number): void {
   }
   const handX = settings.hand === 'left' ? -0.22 : 0.22;
   viewModel.position.x = handX * (1 - adsK);
-  // С коллиматором оружие встаёт так, чтобы красная точка оказалась ровно в центре экрана
-  const aimY = viewGun.sight ? -viewGun.sight.y * viewModel.scale.y : -0.13;
+  // В прицеле центр прицела встаёт ровно на линию взгляда (красная точка — в центр экрана)
+  const aimY = viewGun.aim ? -viewGun.aim.y * viewModel.scale.y : -0.13;
   viewModel.position.y = -0.2 + (aimY + 0.2) * adsK;
 }
 
@@ -1901,8 +1911,11 @@ function frame(now: number): void {
     // Взмах ножом — горизонтальный: справа налево, с выносом вперёд в середине
     const sw = now < swingUntil ? 1 - (swingUntil - now) / SWING_MS : -1;
     const swing = sw >= 0 ? Math.sin(Math.PI * sw) : 0;
-    // В прицеле оружие подносится ближе к глазу, чтобы рамка коллиматора была крупной
-    viewModel.position.z = -0.45 + 0.2 * adsK + kick - swing * 0.12;
+    // В прицеле глаз подводится к прицелу: прицел оказывается в aim.relief метрах перед глазом,
+    // а приклад уходит назад к щеке, за пределы обзора. Отдача в прицеле мягче.
+    const aim = viewGun.aim;
+    const aimZ = aim ? -aim.relief - aim.z * viewModel.scale.z : -0.25;
+    viewModel.position.z = -0.45 + (aimZ + 0.45) * adsK + kick * (1 - 0.7 * adsK) - swing * 0.12;
     viewModel.position.x += sw >= 0 ? 0.2 - 0.4 * sw : 0;
     viewModel.rotation.y = sw >= 0 ? -1.1 + 2.2 * sw : 0;
     viewModel.rotation.z = sw >= 0 ? -Math.PI / 2 * swing * 0.6 : 0;
