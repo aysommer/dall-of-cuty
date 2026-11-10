@@ -5,6 +5,7 @@ import { SANDS } from './maps/sands.js';
 import { BRICKS } from './maps/bricks.js';
 import { DEPOT } from './maps/depot.js';
 import { JUMPS } from './maps/jumps.js';
+import { TOWN } from './maps/town.js';
 import type { Box, GameMap, MapId } from './maps/types.js';
 
 export type { Box, GameMap, JumpPad, Ladder, MapId, SpawnPoint } from './maps/types.js';
@@ -143,8 +144,8 @@ export function bodyPoints(pos: Vec3, sliding: boolean, scale = 1): Vec3[] {
   return [0.2, h / 2, h - 0.1].map((y) => [pos[0], pos[1] + y, pos[2]] as Vec3);
 }
 
-export const MAPS: Record<MapId, GameMap> = { sands: SANDS, bricks: BRICKS, depot: DEPOT, jumps: JUMPS };
-export const MAP_ORDER: MapId[] = ['sands', 'bricks', 'depot', 'jumps'];
+export const MAPS: Record<MapId, GameMap> = { sands: SANDS, bricks: BRICKS, depot: DEPOT, jumps: JUMPS, town: TOWN };
+export const MAP_ORDER: MapId[] = ['sands', 'bricks', 'depot', 'jumps', 'town'];
 
 export function isMapId(v: unknown): v is MapId {
   return typeof v === 'string' && Object.hasOwn(MAPS, v);
