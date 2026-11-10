@@ -6,9 +6,12 @@ body { font-family: system-ui, "Segoe UI", Roboto, sans-serif; color: #fff; user
 
 /* ---------- меню ---------- */
 .overlay {
-  position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+  position: fixed; inset: 0; display: flex;
   background: rgba(10, 12, 16, 0.72); z-index: 10; padding: 16px;
+  /* Если меню выше экрана — его можно прокрутить, иначе оно по центру */
+  overflow-y: auto;
 }
+.overlay > .panel { margin: auto; }
 .panel {
   width: 100%; max-width: 420px; background: #1b1f27; border: 2px solid #343b48;
   padding: 28px; text-align: center;
@@ -124,15 +127,12 @@ details.field .settings { margin-top: 10px; }
 .t-green { color: #5cf07a; }
 .t-red { color: #ff6b6b; }
 
-#health, #ammo { position: absolute; bottom: 18px; background: rgba(0, 0, 0, 0.45); padding: 10px 18px; }
+#health, #ammo { position: absolute; bottom: 64px; background: rgba(0, 0, 0, 0.45); padding: 10px 18px; }
 #health { left: 18px; font-size: 40px; font-weight: 700; }
 #health .label { margin-right: 10px; }
 #health.low #hp { color: #ff5a5a; }
 #ammo { right: 18px; text-align: right; font-size: 40px; font-weight: 700; }
 #weapon-name { font-size: 15px; font-weight: 400; color: #c8ccd4; text-transform: uppercase; letter-spacing: 2px; }
-#slots { font-size: 12px; font-weight: 400; margin-top: 4px; }
-#slots span { margin-left: 10px; color: #8a909b; }
-#slots span.active { color: #fff; }
 
 #crate-prompt {
   position: absolute; left: 50%; top: 62%; transform: translateX(-50%);
@@ -152,7 +152,7 @@ details.field .settings { margin-top: 10px; }
   background: rgba(0, 0, 0, 0.45); padding: 4px 12px; font-size: 14px; color: #ffc928; white-space: nowrap;
 }
 #upgrade-note {
-  position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
+  position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%);
   background: rgba(0, 0, 0, 0.45); padding: 6px 14px; font-size: 14px; color: #5cf07a; white-space: nowrap;
 }
 
@@ -171,7 +171,63 @@ details.field .settings { margin-top: 10px; }
 #scoreboard td.n, #scoreboard th.n { text-align: right; }
 #scoreboard tr.me td { background: rgba(255, 255, 255, 0.08); }
 
+/* ---------- серия убийств, слоты, таймер ---------- */
+#score .timer { margin-left: 12px; color: #fff; font-variant-numeric: tabular-nums; }
+#streak {
+  position: absolute; left: 18px; bottom: 140px; background: rgba(0, 0, 0, 0.45);
+  padding: 5px 12px; font-size: 14px; white-space: nowrap;
+}
+#streak b { font-size: 20px; color: #ffb347; margin: 0 4px; }
+#streak small { color: #c8ccd4; }
+
+/* Слоты — отдельной строкой в самом низу, над ними HP и патроны */
+#hotbar { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); display: flex; gap: 4px; max-width: calc(100% - 16px); }
+#hotbar .slot {
+  min-width: 58px; padding: 3px 6px; background: rgba(0, 0, 0, 0.5); border: 2px solid transparent;
+  font-size: 11px; line-height: 1.25; text-align: left; position: relative;
+}
+#hotbar .slot .key { display: block; font-weight: 700; font-size: 12px; color: #c8ccd4; }
+#hotbar .slot .name { display: block; white-space: nowrap; }
+#hotbar .slot .count { position: absolute; right: 5px; top: 3px; color: #ffb347; font-weight: 700; }
+#hotbar .slot.active { border-color: #fff; }
+#hotbar .slot.off { opacity: 0.35; }
+#hotbar .slot.reward { border-color: #ffb347; }
+
+/* ---------- БПЛА: мини-карта ---------- */
+#minimap { position: absolute; left: 12px; top: 12px; width: 180px; height: 180px; border: 2px solid #3f6f4c; }
+
+/* ---------- ракета с неба: вид из ракеты ---------- */
+#game.thermal { filter: grayscale(1) contrast(1.35) brightness(1.1); }
+#missile-view { position: absolute; inset: 0; }
+#missile-view .frame {
+  position: absolute; left: 50%; top: 50%; width: 120px; height: 120px; margin: -60px 0 0 -60px;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+}
+#missile-view .frame::before, #missile-view .frame::after { content: ''; position: absolute; background: rgba(255, 255, 255, 0.85); }
+#missile-view .frame::before { left: 50%; top: -40px; bottom: -40px; width: 2px; margin-left: -1px; }
+#missile-view .frame::after { top: 50%; left: -40px; right: -40px; height: 2px; margin-top: -1px; }
+#missile-alt {
+  position: absolute; left: 50%; top: calc(50% + 90px); transform: translateX(-50%);
+  font: 700 15px ui-monospace, monospace; letter-spacing: 1px;
+}
+
+/* ---------- бомба: вспышка на весь экран ---------- */
+#flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 20; }
+#flash.on { opacity: 1; }
+#flash.fade { opacity: 0; transition: opacity 2.5s ease-in; }
+
+/* ---------- голосование за карту ---------- */
+#vote-maps { display: flex; flex-direction: column; gap: 8px; margin: 16px 0 10px; }
+#vote-maps button {
+  padding: 12px; font-size: 16px; cursor: pointer; background: #11141a; border: 2px solid #343b48; color: #fff; text-align: left;
+}
+#vote-maps button.active { border-color: #5cf07a; background: #173d20; }
+#vote-maps small { color: #9aa4b5; }
+
 @media (max-width: 640px) {
   #health, #ammo { font-size: 28px; padding: 8px 12px; }
-  #slots { display: none; }
+  #hotbar .slot { min-width: 0; }
+  #hotbar .slot .name { display: none; }
+  #streak { bottom: 124px; }
+  #health, #ammo { bottom: 52px; }
 }

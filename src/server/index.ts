@@ -5,14 +5,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  ARMOR, CRATE, HEAD, MAPS, MEDKIT, PLAYER, ROCKET, SLIDE, WEAPONS, bodyPoints, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
-  type MapId,
+  ARMOR, CRATE, HEAD, MAPS, MAP_ORDER, MATCH, MEDKIT, PLAYER, ROCKET, SLIDE, STREAK, THROW, WEAPONS,
+  bodyPoints, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
+  type MapId, type StreakKind,
 } from '../shared/map.js';
 import { chooseSpawn } from './spawn.js';
 import { isStat, maxLevel, pointsLeft, type Profile } from '../shared/progress.js';
 import { decodeProfile, encodeProfile } from './progress.js';
 import { EMOJIS, SPRAY } from '../shared/emoji.js';
-import type { CrateState, InfoMsg, Mode, ServerMsg, SnapRow, Team, Vec3, WeaponId, Winner } from '../shared/protocol.js';
+import type {
+  CrateState, InfoMsg, KillWeapon, Mode, ServerMsg, SnapRow, Team, Vec3, WeaponId, Winner,
+} from '../shared/protocol.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '..', 'public');
@@ -20,7 +23,6 @@ const PORT = Number(process.env.PORT) || 3000;
 const MAX_PLAYERS = 4;
 const TEAM_SIZE = 2;
 const RESPAWN_MS = 3000;
-const ROUND_PAUSE_MS = 8000;
 const LIMIT: Record<Mode, number> = { tdm: 20, ffa: 15 };
 
 interface Player {
@@ -43,8 +45,20 @@ interface Player {
   /** Когда последний раз рисовал на стене */
   lastSpray: number;
   profile: Profile;
-  /** Сколько ракет осталось (ракетница из ящика) */
+  /** Сколько ракет осталось (ракетница из ящика или за серию) */
   rockets: number;
+  /** Метательный нож: один на жизнь */
+  hasKnife: boolean;
+  /** Убийств подряд без смерти */
+  streak: number;
+  /** Запас наград за серию: их можно применить и после смерти */
+  uav: number;
+  missile: number;
+  nuke: number;
+  /** До какого момента работает БПЛА этого игрока */
+  uavUntil: number;
+  /** Суперброня: игрок в 1,5 раза больше */
+  big: boolean;
   respawnTimer?: NodeJS.Timeout;
 }
 
@@ -94,8 +108,13 @@ const players = new Map<number, Player>();
 let nextId = 1;
 let mode: Mode = 'tdm';
 let mapId: MapId = 'sands';
+/** Матч окончен — идёт голосование за карту; урон и награды не засчитываются */
 let roundOver = false;
-let roundTimer: NodeJS.Timeout | undefined;
+let matchMinutes = 10;
+let matchEndsAt = 0;
+let voteTimer: NodeJS.Timeout | undefined;
+/** Голоса за карту: id игрока → карта */
+const votes = new Map<number, MapId>();
 
 function send(ws: WebSocket, msg: ServerMsg): void {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg));
@@ -115,7 +134,7 @@ function teamCount(team: Team): number {
   return n;
 }
 function lobbyInfo(): InfoMsg {
-  return { t: 'info', mode, map: mapId, count: players.size, green: teamCount('green'), red: teamCount('red'), max: MAX_PLAYERS };
+  return { t: 'info', mode, map: mapId, minutes: matchMinutes, count: players.size, green: teamCount('green'), red: teamCount('red'), max: MAX_PLAYERS };
 }
 function broadcastInfo(): void {
   const data = JSON.stringify(lobbyInfo());
@@ -131,9 +150,11 @@ function broadcastPlayers(): void {
     t: 'players',
     mode,
     limit: LIMIT[mode],
+    left: roundOver ? 0 : Math.max(0, matchEndsAt - Date.now()),
     scores: teamScores(),
     list: [...players.values()].map((p) => ({
       id: p.id, name: p.name, team: p.team, hp: p.hp, armor: p.armor, alive: p.alive, kills: p.kills, deaths: p.deaths,
+      big: p.big,
     })),
   });
 }
@@ -144,14 +165,16 @@ function spawn(p: Player): void {
   p.yaw = s[2];
   p.hp = 100;
   p.armor = 0;
+  p.big = false;
   p.slide = false;
+  p.hasKnife = true; // нож возвращается после смерти
   p.alive = true;
+  sendLoadout(p);
   broadcast({ t: 'spawn', id: p.id, p: p.pos, yaw: p.yaw });
 }
 
 function resetRound(): void {
   roundOver = false;
-  roundTimer = undefined;
   for (const p of players.values()) {
     p.kills = 0;
     p.deaths = 0;
@@ -161,6 +184,8 @@ function resetRound(): void {
   }
   // Новый раунд начинается без ящика; следующий упадёт по расписанию
   rockets = [];
+  knives = [];
+  missiles.clear();
   clearCrate();
   clearMedkits();
   for (const p of players.values()) spawn(p);
@@ -168,7 +193,9 @@ function resetRound(): void {
   broadcastPlayers();
 }
 
+/** Матч кончается по лимиту убийств или по времени; дальше — голосование за карту. */
 function checkWin(): void {
+  if (roundOver) return;
   let winner: Winner | null = null;
   if (mode === 'tdm') {
     const s = teamScores();
@@ -177,10 +204,65 @@ function checkWin(): void {
   } else {
     for (const p of players.values()) if (p.kills >= LIMIT.ffa) winner = { id: p.id, name: p.name };
   }
-  if (!winner) return;
+  if (winner) endMatch(winner);
+}
+
+/** Победитель по счёту на момент окончания времени; при равенстве — ничья. */
+function winnerByScore(): Winner {
+  if (mode === 'tdm') {
+    const s = teamScores();
+    if (s.green === s.red) return { draw: true };
+    return { team: s.green > s.red ? 'green' : 'red' };
+  }
+  const list = [...players.values()].sort((a, b) => b.kills - a.kills);
+  const [first, second] = list;
+  if (!first || (second && second.kills === first.kills)) return { draw: true };
+  return { id: first.id, name: first.name };
+}
+
+function voteMsg(p: Player | null): ServerMsg {
+  const counts = Object.fromEntries(MAP_ORDER.map((m) => [m, 0])) as Record<MapId, number>;
+  for (const m of votes.values()) counts[m]++;
+  return { t: 'vote', counts, ms: MATCH.voteMs, mine: p ? votes.get(p.id) ?? null : null };
+}
+function broadcastVotes(): void {
+  for (const p of players.values()) send(p.ws, voteMsg(p));
+}
+
+function endMatch(winner: Winner): void {
   roundOver = true;
-  broadcast({ t: 'over', winner, pause: ROUND_PAUSE_MS });
-  roundTimer = setTimeout(resetRound, ROUND_PAUSE_MS);
+  votes.clear();
+  rockets = [];
+  knives = [];
+  missiles.clear();
+  clearTimeout(nukeTimer);
+  nukeTimer = undefined;
+  broadcast({ t: 'over', winner, pause: MATCH.voteMs });
+  broadcastVotes();
+  clearTimeout(voteTimer);
+  voteTimer = setTimeout(finishVote, MATCH.voteMs);
+}
+
+function handleVote(p: Player, map: unknown): void {
+  if (!roundOver || !isMapId(map)) return;
+  votes.set(p.id, map);
+  broadcastVotes();
+}
+
+/** Карта с большинством голосов; при равенстве (или если никто не голосовал) — случайная из лидеров. */
+function finishVote(): void {
+  const counts = new Map<MapId, number>(MAP_ORDER.map((m) => [m, 0]));
+  for (const m of votes.values()) counts.set(m, (counts.get(m) ?? 0) + 1);
+  const best = Math.max(...counts.values());
+  const leaders = MAP_ORDER.filter((m) => counts.get(m) === best);
+  mapId = leaders[Math.floor(Math.random() * leaders.length)]!;
+  votes.clear();
+  voteTimer = undefined;
+  broadcast({ t: 'newmap', map: mapId });
+  matchEndsAt = Date.now() + matchMinutes * 60_000;
+  resetRound();
+  broadcastInfo();
+  console.log(`Новый матч на карте ${mapId}`);
 }
 
 function isVec3(v: unknown): v is Vec3 {
@@ -192,16 +274,22 @@ function isNum(v: unknown): v is number {
 }
 
 /** killer = null — игрока убил взорвавшийся ящик: убийство никому не засчитывается. */
-function killPlayer(killer: Player | null, v: Player, w: WeaponId | 'crate', head = false): void {
+function killPlayer(killer: Player | null, v: Player, w: KillWeapon, head = false): void {
   v.hp = 0;
   v.armor = 0;
+  v.big = false;
   v.alive = false;
   v.deaths++;
+  // Смерть обрывает серию; награды в запасе остаются
+  v.streak = 0;
+  sendLoadout(v);
   // Подорвавшемуся на своей ракете убийство не засчитывается
   if (killer && killer !== v) {
     killer.kills++;
     killer.profile.kills++;
     sendProfile(killer);
+    // Убийства бомбой серию не продолжают
+    if (w !== 'nuke' && killer.alive) addStreak(killer);
   }
   broadcast({ t: 'kill', killer: killer?.id ?? null, victim: v.id, w, head });
   // Погибший теряет ракетницу и перестаёт открывать ящик
@@ -213,6 +301,199 @@ function killPlayer(killer: Player | null, v: Player, w: WeaponId | 'crate', hea
       broadcastPlayers();
     }
   }, RESPAWN_MS);
+}
+
+// ---------- серия убийств ----------
+function sendLoadout(p: Player): void {
+  send(p.ws, { t: 'loadout', knife: p.hasKnife, streak: p.streak, uav: p.uav, missile: p.missile, nuke: p.nuke });
+}
+
+/** Награды выдаются ровно на пороге серии: 3 — БПЛА, 4 — ракета с неба, 5 — ракетница, 7 — суперброня, 15 — бомба. */
+function addStreak(p: Player): void {
+  p.streak++;
+  if (p.streak === STREAK.uav) p.uav++;
+  if (p.streak === STREAK.missile) p.missile++;
+  if (p.streak === STREAK.launcher) setRockets(p, Math.max(p.rockets, 6));
+  if (p.streak === STREAK.superArmor) {
+    p.armor = STREAK.superArmorHp;
+    p.big = true;
+  }
+  if (p.streak === STREAK.nuke) p.nuke++;
+  sendLoadout(p);
+}
+
+/** Применить награду из запаса. */
+function useStreak(p: Player, kind: unknown): void {
+  if (roundOver || (kind !== 'uav' && kind !== 'missile' && kind !== 'nuke')) return;
+  const k = kind as StreakKind;
+  if (p[k] <= 0) return;
+  if (k === 'missile' && [...missiles.values()].some((m) => m.owner === p.id)) return;
+  if (k === 'nuke' && nukeTimer) return;
+  p[k]--;
+  sendLoadout(p);
+  if (k === 'uav') {
+    p.uavUntil = Math.max(p.uavUntil, Date.now()) + STREAK.uavMs;
+    for (const r of uavViewers(p)) send(r.ws, { t: 'uav', ms: p.uavUntil - Date.now() });
+  } else if (k === 'missile') {
+    launchMissile(p);
+  } else {
+    callNuke(p);
+  }
+}
+
+// ---------- БПЛА ----------
+/** Кто видит отметки этого БПЛА: в командах — вся команда, иначе — только хозяин. */
+function uavViewers(owner: Player): Player[] {
+  return [...players.values()].filter((p) => p === owner || (mode === 'tdm' && p.team === owner.team));
+}
+let lastPing = 0;
+/** Раз в STREAK.pingMs каждому, у кого (или у чьей команды) работает БПЛА, — где сейчас противники. */
+function sendPings(now: number): void {
+  if (now - lastPing < STREAK.pingMs) return;
+  lastPing = now;
+  const seeing = new Set<Player>();
+  for (const p of players.values()) {
+    if (p.uavUntil > now) for (const v of uavViewers(p)) seeing.add(v);
+  }
+  for (const viewer of seeing) {
+    const list: Array<[number, number, number]> = [];
+    for (const e of players.values()) {
+      if (e.alive && isEnemy(viewer, e)) list.push([e.id, +e.pos[0].toFixed(1), +e.pos[2].toFixed(1)]);
+    }
+    send(viewer.ws, { t: 'ping', list });
+  }
+}
+
+// ---------- ракета с неба ----------
+// Игрок ведёт её сам с высоты STREAK.missileHeight; сервер принимает точку попадания и взрывает по области.
+interface Missile { id: number; owner: number; born: number; last: Vec3 }
+const missiles = new Map<number, Missile>();
+let nextMissileId = 1;
+
+function launchMissile(p: Player): void {
+  const half = MAPS[mapId].half;
+  const start: Vec3 = [p.pos[0] * 0.3, STREAK.missileHeight, p.pos[2] * 0.3 + (p.pos[2] > 0 ? half.z * 0.3 : -half.z * 0.3)];
+  const m: Missile = { id: nextMissileId++, owner: p.id, born: Date.now(), last: start };
+  missiles.set(m.id, m);
+  send(p.ws, { t: 'missile-go', id: m.id, p: start });
+}
+
+function missilePos(p: Player, msg: Incoming): void {
+  const m = missiles.get(Number(msg.id));
+  if (!m || m.owner !== p.id || !isVec3(msg.p)) return;
+  m.last = msg.p;
+  broadcast({ t: 'missile', id: m.id, by: p.id, p: msg.p }, p.id);
+}
+
+function missileHit(p: Player, msg: Incoming): void {
+  const m = missiles.get(Number(msg.id));
+  if (!m || m.owner !== p.id || !isVec3(msg.p)) return;
+  // Ракета не может долететь быстрее, чем позволяет форсаж
+  const minMs = ((STREAK.missileHeight - msg.p[1]) / STREAK.missileBoost) * 1000 * 0.8;
+  if (Date.now() - m.born < minMs) return;
+  detonateMissile(m, msg.p);
+}
+
+function detonateMissile(m: Missile, at: Vec3): void {
+  missiles.delete(m.id);
+  broadcast({ t: 'boom', id: -m.id, p: at });
+  const owner = players.get(m.owner);
+  if (owner) blast(owner, at, STREAK.missileRadius, 'missile');
+}
+
+/**
+ * Взрыв по области: убивает противников и самого хозяина в радиусе (если их не закрывает стена).
+ * Союзников не задевает.
+ */
+function blast(owner: Player, at: Vec3, radius: number, w: KillWeapon, from: Vec3 = [at[0], at[1] + 0.3, at[2]]): void {
+  if (roundOver) return;
+  const walls = MAPS[mapId].boxes;
+  let killed = false;
+  for (const v of players.values()) {
+    if (!v.alive || (v !== owner && !isEnemy(owner, v))) continue;
+    if (distToPlayer(v, at) > radius) continue;
+    if (bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt))) continue;
+    killPlayer(owner, v, w);
+    killed = true;
+  }
+  if (killed) {
+    broadcastPlayers();
+    checkWin();
+  }
+}
+
+// ---------- бомба ----------
+let nukeTimer: NodeJS.Timeout | undefined;
+function callNuke(p: Player): void {
+  broadcast({ t: 'nuke', by: p.id, ms: STREAK.nukeMs });
+  nukeTimer = setTimeout(() => {
+    nukeTimer = undefined;
+    if (roundOver) return;
+    const owner = players.get(p.id) ?? null;
+    // Убивает вообще всех; убийства противников засчитываются вызвавшему
+    for (const v of players.values()) {
+      if (!v.alive) continue;
+      killPlayer(owner && isEnemy(owner, v) ? owner : null, v, 'nuke');
+    }
+    broadcastPlayers();
+    checkWin();
+  }, STREAK.nukeMs);
+}
+
+// ---------- метательный нож ----------
+interface Knife { id: number; owner: number; pos: Vec3; vel: Vec3; born: number }
+let knives: Knife[] = [];
+let nextKnifeId = 1;
+
+function handleThrow(p: Player, msg: Incoming): void {
+  if (!p.alive || !p.hasKnife || roundOver || !isVec3(msg.d)) return;
+  const len = Math.hypot(msg.d[0], msg.d[1], msg.d[2]);
+  if (len < 0.5) return;
+  const d: Vec3 = [msg.d[0] / len, msg.d[1] / len, msg.d[2] / len];
+  p.hasKnife = false;
+  sendLoadout(p);
+  const k: Knife = {
+    id: nextKnifeId++, owner: p.id, pos: eyeOf(p),
+    vel: [d[0] * THROW.speed, d[1] * THROW.speed, d[2] * THROW.speed], born: Date.now(),
+  };
+  knives.push(k);
+  broadcast({ t: 'throw', id: k.id, by: p.id, o: k.pos, d });
+}
+
+function stepKnives(dt: number): void {
+  if (!knives.length) return;
+  const walls = MAPS[mapId].boxes;
+  const now = Date.now();
+  const flying: Knife[] = [];
+  for (const k of knives) {
+    const owner = players.get(k.owner);
+    if (!owner) continue;
+    k.vel[1] -= THROW.gravity * dt;
+    const speed = Math.hypot(...k.vel);
+    const dir: Vec3 = [k.vel[0] / speed, k.vel[1] / speed, k.vel[2] / speed];
+    const step = speed * dt;
+    let t = rayWorld(walls, k.pos, dir, step);
+    let victim: Player | null = null;
+    for (const v of players.values()) {
+      if (!v.alive || !isEnemy(owner, v)) continue;
+      const [min, max] = playerBox(v.pos, v.yaw, v.slide, scaleOf(v));
+      const tv = rayBox(k.pos, dir, min, max);
+      if (tv < t) { t = tv; victim = v; }
+    }
+    const at: Vec3 = [k.pos[0] + dir[0] * t, k.pos[1] + dir[1] * t, k.pos[2] + dir[2] * t];
+    if (t < step || now - k.born > THROW.lifeMs) {
+      broadcast({ t: 'thrown', id: k.id, p: at, hit: victim !== null });
+      if (victim && !roundOver) {
+        hurt(owner, victim, THROW.dmg, 'throw', false);
+        broadcastPlayers();
+        checkWin();
+      }
+    } else {
+      k.pos = at;
+      flying.push(k);
+    }
+  }
+  knives = flying;
 }
 
 // ---------- ящик с ракетницей ----------
@@ -331,7 +612,7 @@ function handleOpen(p: Player, on: boolean): void {
     if (roll < CRATE.trapChance) explodeCrate(at);
     else if (roll < CRATE.trapChance + CRATE.rocketChance) setRockets(opener, ROCKETS_IN_CRATE);
     else {
-      opener.armor = ARMOR.amount;
+      opener.armor = Math.max(opener.armor, ARMOR.amount);
       broadcastPlayers();
     }
   }, CRATE.openMs);
@@ -344,10 +625,10 @@ function explodeCrate([cx, cy, cz]: Vec3): void {
   broadcast({ t: 'boom', id: 0, p: at });
   for (const v of players.values()) {
     if (!v.alive) continue;
-    const [min, max] = playerBox(v.pos, v.yaw, v.slide);
+    const [min, max] = playerBox(v.pos, v.yaw, v.slide, scaleOf(v));
     const d = Math.hypot(...([0, 1, 2] as const).map((i) => Math.max(min[i] - at[i], 0, at[i] - max[i])));
     if (d > CRATE.trapRadius) continue;
-    const covered = bodyPoints(v.pos, v.slide).every((pt) => !lineOfSight(map.boxes, at, pt));
+    const covered = bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(map.boxes, at, pt));
     if (!covered) killPlayer(null, v, 'crate');
   }
   broadcastPlayers();
@@ -434,7 +715,7 @@ function explode(r: Rocket, at: Vec3): void {
     if (!v.alive || (v !== owner && !isEnemy(owner, v))) continue;
     // Расстояние от взрыва до ближайшей точки игрока
     if (distToPlayer(v, at) > ROCKET.radius) continue;
-    const covered = bodyPoints(v.pos, v.slide).every((pt) => !lineOfSight(walls, from, pt));
+    const covered = bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt));
     if (covered) continue; // за стеной взрыв не достаёт
     killPlayer(owner, v, 'rocket');
     killed = true;
@@ -457,7 +738,7 @@ function stepRockets(dt: number): void {
     let t = rayWorld(walls, r.pos, r.dir, step);
     for (const v of players.values()) {
       if (!v.alive || !isEnemy(owner, v)) continue;
-      const [min, max] = playerBox(v.pos, v.yaw, v.slide);
+      const [min, max] = playerBox(v.pos, v.yaw, v.slide, scaleOf(v));
       t = Math.min(t, rayBox(r.pos, r.dir, min, max));
     }
     const at: Vec3 = [r.pos[0] + r.dir[0] * t, r.pos[1] + r.dir[1] * t, r.pos[2] + r.dir[2] * t];
@@ -467,12 +748,15 @@ function stepRockets(dt: number): void {
   rockets = flying;
 }
 
+function scaleOf(p: Player): number {
+  return p.big ? STREAK.bigScale : 1;
+}
 function eyeOf(p: Player): Vec3 {
-  return [p.pos[0], p.pos[1] + (p.slide ? SLIDE.eye : PLAYER.eye), p.pos[2]];
+  return [p.pos[0], p.pos[1] + (p.slide ? SLIDE.eye : PLAYER.eye) * scaleOf(p), p.pos[2]];
 }
 /** Расстояние от точки до ближайшей точки хитбокса игрока. */
 function distToPlayer(v: Player, at: Vec3): number {
-  const [min, max] = playerBox(v.pos, v.yaw, v.slide);
+  const [min, max] = playerBox(v.pos, v.yaw, v.slide, scaleOf(v));
   return Math.hypot(...([0, 1, 2] as const).map((i) => Math.max(min[i] - at[i], 0, at[i] - max[i])));
 }
 
@@ -493,9 +777,10 @@ function handleSpray(p: Player, msg: Incoming): void {
 }
 
 /** Урон сначала снимает броню, потом здоровье. */
-function hurt(attacker: Player, v: Player, dmg: number, w: WeaponId, head: boolean): void {
+function hurt(attacker: Player, v: Player, dmg: number, w: KillWeapon, head: boolean): void {
   const absorbed = Math.min(v.armor, dmg);
   v.armor = Math.round(v.armor - absorbed);
+  if (v.armor <= 0) v.big = false; // суперброня кончилась — игрок снова обычного размера
   v.hp = Math.max(0, Math.round(v.hp - (dmg - absorbed)));
   if (v.hp <= 0) killPlayer(attacker, v, w, head);
 }
@@ -520,10 +805,10 @@ function handleShoot(p: Player, msg: Incoming): void {
     const v = players.get(Number(idStr));
     if (!v || !v.alive || v.id === p.id) continue;
     if (mode === 'tdm' && v.team === p.team) continue;
-    // Нож бьёт только вплотную (с запасом на задержку сети)
-    if (w.melee && distToPlayer(v, eye) > w.melee + 0.75) continue;
+    // Нож бьёт только вплотную (с запасом на задержку сети) и только если он не брошен
+    if (w.melee && (!p.hasKnife || distToPlayer(v, eye) > w.melee + 0.75)) continue;
     // Проверка, что между стрелком и целью нет стены
-    if (bodyPoints(v.pos, v.slide).every((pt) => !lineOfSight(walls, eye, pt))) continue;
+    if (bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, eye, pt))) continue;
 
     const [rawBody, rawHead] = Array.isArray(raw) ? raw : [raw, 0];
     let head = Math.min(count(rawHead), budget);
@@ -532,7 +817,7 @@ function handleShoot(p: Player, msg: Incoming): void {
     budget -= body;
     if (head + body === 0) continue;
     // Голову засчитываем, только если её видно и игрок стоит (в подкате головы как зоны нет)
-    const headPt: Vec3 = [v.pos[0], v.pos[1] + PLAYER.h - 0.1, v.pos[2]];
+    const headPt: Vec3 = [v.pos[0], v.pos[1] + (PLAYER.h - 0.1) * scaleOf(v), v.pos[2]];
     if (head && (v.slide || !lineOfSight(walls, eye, headPt))) { body += head; head = 0; }
 
     if (w.melee) { killPlayer(p, v, weaponId); continue; }
@@ -556,8 +841,12 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
   if (players.size === 0) {
     mode = msg.mode === 'ffa' ? 'ffa' : 'tdm';
     mapId = isMapId(msg.map) ? msg.map : 'sands';
+    const minutes = Number(msg.minutes);
+    matchMinutes = (MATCH.minutes as readonly number[]).includes(minutes) ? minutes : 10;
+    matchEndsAt = Date.now() + matchMinutes * 60_000;
     roundOver = false;
-    clearTimeout(roundTimer);
+    clearTimeout(voteTimer);
+    votes.clear();
     stopDrops();
     startDrops();
     rockets = [];
@@ -573,9 +862,11 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
     hp: 100, armor: 0, alive: false, kills: 0, deaths: 0, lastShot: 0, lastSpray: 0,
     profile: decodeProfile(msg.token),
     rockets: 0,
+    hasKnife: true, streak: 0, uav: 0, missile: 0, nuke: 0, uavUntil: 0, big: false,
   };
   players.set(p.id, p);
   send(ws, { t: 'welcome', id: p.id, mode, map: mapId });
+  if (roundOver) send(ws, voteMsg(p));
   sendProfile(p);
   send(ws, crateMsg());
   send(ws, medkitsMsg());
@@ -627,6 +918,16 @@ wss.on('connection', (ws) => {
       handleRocket(me, msg);
     } else if (msg.t === 'spray') {
       handleSpray(me, msg);
+    } else if (msg.t === 'throw') {
+      handleThrow(me, msg);
+    } else if (msg.t === 'use') {
+      useStreak(me, msg.kind);
+    } else if (msg.t === 'mpos') {
+      missilePos(me, msg);
+    } else if (msg.t === 'mhit') {
+      missileHit(me, msg);
+    } else if (msg.t === 'vote') {
+      handleVote(me, msg.map);
     } else if (msg.t === 'upgrade') {
       if (isStat(msg.stat) && pointsLeft(me.profile) > 0 && me.profile.levels[msg.stat] < maxLevel(msg.stat)) {
         me.profile.levels[msg.stat]++;
@@ -639,11 +940,16 @@ wss.on('connection', (ws) => {
     if (!me) return;
     clearTimeout(me.respawnTimer);
     players.delete(me.id);
+    votes.delete(me.id);
+    for (const [id, m] of missiles) if (m.owner === me.id) missiles.delete(id);
     if (crate.state === 'opening' && crate.by === me.id) cancelOpening();
     console.log(`- ${me.name}, игроков: ${players.size}`);
     if (players.size === 0) {
-      clearTimeout(roundTimer);
-      roundTimer = undefined;
+      clearTimeout(voteTimer);
+      voteTimer = undefined;
+      clearTimeout(nukeTimer);
+      nukeTimer = undefined;
+      votes.clear();
       roundOver = false;
       stopDrops();
     }
@@ -656,6 +962,15 @@ wss.on('connection', (ws) => {
 // Рассылка позиций 20 раз в секунду
 setInterval(() => {
   stepRockets(0.05);
+  stepKnives(0.05);
+  const now = Date.now();
+  if (players.size) {
+    sendPings(now);
+    // Ракета с неба, которую не довели до цели, взрывается сама
+    for (const m of missiles.values()) if (now - m.born > STREAK.missileMaxMs) detonateMissile(m, m.last);
+    // Время матча вышло
+    if (!roundOver && now >= matchEndsAt) endMatch(winnerByScore());
+  }
   if (players.size < 2) return;
   const ps: SnapRow[] = [];
   for (const p of players.values()) {

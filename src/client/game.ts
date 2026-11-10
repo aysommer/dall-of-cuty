@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
-  CRATE, HEAD, HIP_SPREAD, MAPS, MAP_ORDER, MEDKIT, ROCKET, SLIDE, WEAPONS, WEAPON_ORDER, PLAYER, playerBox, rayBox, rayWorld,
+  CRATE, HEAD, HIP_SPREAD, MAPS, MAP_ORDER, MATCH, MEDKIT, ROCKET, SLIDE, STREAK, THROW, WEAPONS, WEAPON_ORDER, PLAYER,
+  playerBox, rayBox, rayWorld, type StreakKind,
   type Box, type GameMap, type Ladder, type MapId,
 } from '../shared/map.js';
 import { EMOJIS, SPRAY } from '../shared/emoji.js';
@@ -8,7 +9,8 @@ import {
   KILLS_PER_POINT, STATS, UPGRADES, maxLevel, multiplier, newProfile, pointsLeft, type Profile,
 } from '../shared/progress.js';
 import type {
-  BoomMsg, CrateMsg, CrateState, MedkitsMsg, RocketMsg, SprayMsg,
+  BoomMsg, CrateMsg, CrateState, KillWeapon, LoadoutMsg, MedkitsMsg, MissileMsg, NukeMsg, PingMsg, RocketMsg, SprayMsg,
+  ThrowEndMsg, ThrowMsg, VoteMsg,
   ClientMsg, InfoMsg, KillMsg, Mode, OverMsg, PlayerInfo, PlayersMsg, ProfileMsg, ServerMsg,
   ShotMsg, SnapMsg, SpawnMsg, Team, Vec3, WeaponId,
 } from '../shared/protocol.js';
@@ -300,7 +302,7 @@ interface Gun {
 
 /** Коллиматорный прицел: рамка со стеклом и красная точка в центре. */
 function buildRedDot(group: THREE.Group, y: number, z: number): void {
-  const FRAME = 0x1a1a1a, W = 0.09, H = 0.07;
+  const FRAME = 0x1a1a1a, W = 0.055, H = 0.042;
   const part = (w: number, h: number, d: number, px: number, py: number, color: number, lit = true) => {
     const m = box(w, h, d, color, lit);
     m.position.set(px, py, z);
@@ -317,7 +319,7 @@ function buildRedDot(group: THREE.Group, y: number, z: number): void {
   );
   glass.position.set(0, y, z);
   group.add(glass);
-  part(0.006, 0.006, 0.002, 0, y, 0xff2020, false).position.z = z - 0.004; // красная точка
+  part(0.004, 0.004, 0.002, 0, y, 0xff2020, false).position.z = z - 0.004; // красная точка
 }
 
 // Оружие смотрит стволом вдоль -Z.
@@ -352,7 +354,7 @@ function buildGun(type: WeaponId): Gun {
     shell = part(0.03, 0.03, 0.07, 0xc0262b, 0, -0.12, -0.08);
     shell.visible = false;
     sight = { y: 0.08, z: -0.15 };
-    aim = { ...sight, relief: 0.16 };
+    aim = { ...sight, relief: 0.22 };
     muzzleZ = -0.72;
   } else if (type === 'sniper') {
     add(0.06, 0.08, 0.75, 0x2f3a2c, 0, 0, -0.25);
@@ -390,7 +392,7 @@ function buildGun(type: WeaponId): Gun {
     mag = part(0.045, 0.18, 0.07, 0x1c1c1c, 0, -0.12, -0.22);
     add(0.055, 0.1, 0.24, 0x4a3a28, 0, -0.02, 0.16);
     sight = { y: 0.1, z: -0.12 };
-    aim = { ...sight, relief: 0.14 };
+    aim = { ...sight, relief: 0.22 };
     muzzleZ = -0.75;
   }
   if (sight) buildRedDot(group, sight.y, sight.z);
@@ -531,6 +533,7 @@ const me = {
   alive: false,
   hp: 100,
   armor: 0,
+  big: false,
   pos: new THREE.Vector3(0, 0, 26),
   vel: new THREE.Vector3(),
   yaw: 0,
@@ -585,6 +588,7 @@ let kick = 0;
 
 function setWeapon(w: WeaponId): void {
   if (w === 'rocket' && me.ammo.rocket <= 0) return;
+  if (w === 'knife' && !hasKnife) return; // нож брошен — до смерти его нет
   adsK = 0;
   me.weapon = w;
   me.reloadUntil = 0;
@@ -766,6 +770,7 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
       mode = m.mode;
       loadMap(m.map);
       joined = true;
+      setWeapon('rifle');
       $('menu').classList.add('hidden');
       $('hud').classList.remove('hidden');
       $('pause').classList.remove('hidden');
@@ -782,11 +787,24 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
     case 'boom': onBoom(m); break;
     case 'spray': onSpray(m); break;
     case 'medkits': onMedkits(m); break;
+    case 'loadout': onLoadout(m); break;
+    case 'throw': onThrow(m); break;
+    case 'thrown': onThrown(m); break;
+    case 'uav':
+      uavUntil = performance.now() + m.ms;
+      toast('📡 БПЛА в воздухе: противники видны на карте');
+      break;
+    case 'ping': onPing(m); break;
+    case 'missile-go': startMissile(m.id, m.p); break;
+    case 'missile': onMissile(m); break;
+    case 'nuke': onNuke(m); break;
+    case 'vote': onVote(m); break;
+    case 'newmap': onNewMap(m.map); break;
     case 'rockets': {
       const had = me.ammo.rocket;
       me.ammo.rocket = m.n;
       if (m.n > 0 && had === 0) { setWeapon('rocket'); beep(990, 0.3); }
-      if (m.n === 0 && me.weapon === 'rocket') setWeapon('pistol');
+      if (m.n === 0 && me.weapon === 'rocket') setWeapon('rifle');
       updateHud();
       break;
     }
@@ -799,6 +817,7 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
 
 function onPlayers(m: PlayersMsg): void {
   mode = m.mode; limit = m.limit; scores = m.scores; roster = m.list;
+  if (m.left > 0) matchEndsAt = performance.now() + m.left;
   const seen = new Set<number>();
   for (const p of roster) {
     if (p.id === me.id) {
@@ -809,6 +828,7 @@ function onPlayers(m: PlayersMsg): void {
       }
       me.hp = p.hp;
       me.armor = p.armor;
+      me.big = p.big;
       me.team = p.team;
       if (me.alive && !p.alive) respawnAt = performance.now() + 3000;
       me.alive = p.alive;
@@ -820,6 +840,7 @@ function onPlayers(m: PlayersMsg): void {
     r.info = p;
     r.g.visible = p.alive;
     r.armor.visible = p.armor > 0;
+    r.g.scale.setScalar(p.big ? STREAK.bigScale : 1); // суперброня — в полтора раза больше
   }
   for (const [id, r] of remotes) {
     if (!seen.has(id)) { scene.remove(r.g); remotes.delete(id); }
@@ -891,19 +912,20 @@ function onKill(m: KillMsg): void {
     const r = remotes.get(m.victim);
     if (r) spawnCorpse(r.pos, r.yaw, v.team, r.slide);
   }
-  if (m.w === 'crate') {
-    // Ящик оказался ловушкой
+  if (!k || m.killer === null) {
+    // Без убийцы: ящик-ловушка или бомба (для себя и своих)
     const trap = document.createElement('div');
     const name = document.createElement('span');
     name.className = 't-' + v.team;
     name.textContent = v.name;
-    trap.append('💥 Ящик ▸ ', name);
+    trap.append(m.w === 'nuke' ? '☢ Бомба ▸ ' : '💥 Ящик ▸ ', name);
     $('feed').prepend(trap);
     setTimeout(() => trap.remove(), 5000);
-    if (m.victim === me.id) $('center-msg').textContent = 'Ящик взорвался!\nВозрождение через 3 сек.';
+    if (m.victim === me.id) {
+      $('center-msg').textContent = `${m.w === 'nuke' ? 'Бомба!' : 'Ящик взорвался!'}\nВозрождение через 3 сек.`;
+    }
     return;
   }
-  if (!k) return;
   const row = document.createElement('div');
   const span = (p: PlayerInfo): HTMLSpanElement => {
     const s = document.createElement('span');
@@ -911,29 +933,37 @@ function onKill(m: KillMsg): void {
     s.textContent = p.name;
     return s;
   };
-  row.append(span(k), ` ▸ ${WEAPONS[m.w].name}${m.head ? ' 🎯' : ''} ▸ `, span(v));
+  row.append(span(k), ` ▸ ${weaponName(m.w)}${m.head ? ' 🎯' : ''} ▸ `, span(v));
   $('feed').prepend(row);
   setTimeout(() => row.remove(), 5000);
   const self = m.killer === m.victim;
   if (m.killer === me.id && !self) { showHit(true); beep(880, 0.15); }
   if (m.victim === me.id) {
     $('center-msg').textContent = self
-      ? 'Ты подорвался на своей ракете\nВозрождение через 3 сек.'
+      ? `Ты подорвался: ${weaponName(m.w)}\nВозрождение через 3 сек.`
       : `Тебя убил ${k.name}\nВозрождение через 3 сек.`;
   }
 }
 
+function weaponName(w: KillWeapon): string {
+  const extra: Record<string, string> = { crate: 'Ящик', throw: 'Метательный нож', missile: 'Ракета с неба', nuke: 'Бомба' };
+  return extra[w] ?? WEAPONS[w as WeaponId].name;
+}
+
+let overText = '';
 function onOver(m: OverMsg): void {
   roundOver = true;
-  let text: string;
-  if (m.winner.team) text = m.winner.team === 'green' ? 'Победили ЗЕЛЁНЫЕ' : 'Победили КРАСНЫЕ';
-  else text = `Победил ${m.winner.name ?? ''}`;
-  $('center-msg').textContent = `${text}\nНовый раунд через ${Math.round(m.pause / 1000)} сек.`;
+  if (m.winner.draw) overText = 'Ничья';
+  else if (m.winner.team) overText = m.winner.team === 'green' ? 'Победили ЗЕЛЁНЫЕ' : 'Победили КРАСНЫЕ';
+  else overText = `Победил ${m.winner.name ?? ''}`;
+  $('center-msg').textContent = '';
+  endMissile();
 }
 
 // ======================= меню =======================
 let chosenMode: Mode = 'tdm';
 let chosenMap: MapId = 'sands';
+let chosenMinutes = 10;
 let chosenTeam: Team = 'green';
 let lastInfo: InfoMsg | null = null;
 const nameInput = $<HTMLInputElement>('name');
@@ -958,10 +988,15 @@ function onInfo(m: InfoMsg): void {
     b.classList.toggle('active', b.dataset.map === chosenMap);
     b.disabled = modeLocked;
   }
+  if (modeLocked) chosenMinutes = m.minutes;
+  for (const b of buttonsOf('time-choice')) {
+    b.classList.toggle('active', Number(b.dataset.min) === chosenMinutes);
+    b.disabled = modeLocked;
+  }
   loadMap(chosenMap); // карта видна за меню
   $('mode-note').textContent = modeLocked
-    ? `На сервере уже ${m.count} из ${m.max} — режим и карту выбрал первый игрок.`
-    : 'Ты первый — режим и карту выбираешь ты.';
+    ? `На сервере уже ${m.count} из ${m.max} — режим, карту и время выбрал первый игрок.`
+    : 'Ты первый — режим, карту и время выбираешь ты.';
   const tdm = chosenMode === 'tdm';
   $('green-count').textContent = tdm ? `${m.green}/2` : '';
   $('red-count').textContent = tdm ? `${m.red}/2` : '';
@@ -996,6 +1031,19 @@ $('map-choice').addEventListener('click', (e) => {
   chosenMap = MAP_ORDER.find((id) => id === b.dataset.map) ?? 'sands';
   if (lastInfo) onInfo(lastInfo);
 });
+for (const min of MATCH.minutes) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.dataset.min = String(min);
+  b.textContent = `${min} мин`;
+  $('time-choice').append(b);
+}
+$('time-choice').addEventListener('click', (e) => {
+  const b = pickedButton(e);
+  if (!b) return;
+  chosenMinutes = Number(b.dataset.min);
+  if (lastInfo) onInfo(lastInfo);
+});
 $('team-choice').addEventListener('click', (e) => {
   const b = pickedButton(e);
   if (!b) return;
@@ -1008,7 +1056,7 @@ $('join-form').addEventListener('submit', (e) => {
   const name = nameInput.value.trim();
   localStorage.setItem('doc-name', name);
   playBtn.disabled = true;
-  sendMsg({ t: 'join', name, team: chosenTeam, mode: chosenMode, map: chosenMap, token: localStorage.getItem(TOKEN_KEY) ?? undefined });
+  sendMsg({ t: 'join', name, team: chosenTeam, mode: chosenMode, map: chosenMap, minutes: chosenMinutes, token: localStorage.getItem(TOKEN_KEY) ?? undefined });
 });
 
 // ======================= управление =======================
@@ -1030,7 +1078,7 @@ document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
   if (!locked) unlockedAt = performance.now();
   menuClosed = false;
-  $('pause').classList.toggle('hidden', locked || !joined);
+  $('pause').classList.toggle('hidden', locked || !joined || voting);
   if (!locked) { mouseDown = false; aimHeld = false; for (const k in keys) keys[k] = false; }
 });
 document.addEventListener('mousemove', (e) => {
@@ -1039,6 +1087,12 @@ document.addEventListener('mousemove', (e) => {
   if (Math.abs(e.movementX) > 400 || Math.abs(e.movementY) > 400) return;
   // В прицеле чувствительность падает вместе с углом обзора, чтобы прицел не «улетал»
   const sens = MOUSE_SENS * settings.sens * (camera.fov / BASE_FOV);
+  if (missileCtl) {
+    // Ракетой с неба управляет мышь: поворот и наклон (смотреть можно только вниз)
+    missileCtl.yaw -= e.movementX * sens * 0.6;
+    missileCtl.pitch = Math.max(-1.55, Math.min(-0.5, missileCtl.pitch - e.movementY * sens * 0.6));
+    return;
+  }
   me.yaw -= e.movementX * sens;
   me.pitch = Math.max(-1.5, Math.min(1.5, me.pitch - e.movementY * sens));
 });
@@ -1046,7 +1100,11 @@ document.addEventListener('mousedown', (e) => {
   // После Esc первый клик только возвращает мышь в игру, а не стреляет
   if (!locked) { if (joined && menuClosed) lock(); return; }
   if (e.button === 0) { mouseDown = true; firedThisPress = false; }
-  if (e.button === 2) aimHeld = true;
+  if (e.button === 2) {
+    // С ножом в руке ПКМ — бросить его
+    if (me.weapon === 'knife') throwKnife();
+    else aimHeld = true;
+  }
 });
 document.addEventListener('mouseup', (e) => {
   if (e.button === 0) mouseDown = false;
@@ -1055,7 +1113,8 @@ document.addEventListener('mouseup', (e) => {
 document.addEventListener('contextmenu', (e) => { if (joined) e.preventDefault(); });
 document.addEventListener('wheel', (e) => {
   if (!locked) return;
-  const order: WeaponId[] = me.ammo.rocket > 0 ? [...WEAPON_ORDER, 'rocket'] : WEAPON_ORDER;
+  const order = (['knife', 'shotgun', 'rifle', 'sniper', 'rocket', 'pistol'] as WeaponId[])
+    .filter((w) => (w !== 'knife' || hasKnife) && (w !== 'rocket' || me.ammo.rocket > 0));
   const i = order.indexOf(me.weapon);
   const n = order.length;
   setWeapon(order[(i + (e.deltaY > 0 ? 1 : n - 1)) % n]!);
@@ -1075,12 +1134,10 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'Tab') { e.preventDefault(); $('scoreboard').classList.remove('hidden'); renderScoreboard(); }
   if (!playing()) return;
   keys[e.code] = true;
-  if (e.code === 'Digit1') setWeapon('pistol');
-  if (e.code === 'Digit2') setWeapon('shotgun');
-  if (e.code === 'Digit3') setWeapon('rifle');
-  if (e.code === 'Digit4') setWeapon('sniper');
-  if (e.code === 'Digit5') setWeapon('knife');
-  if (e.code === 'Digit6') setWeapon('rocket');
+  // Слоты: 1 нож, 2 дробовик, 3 автомат, 4 снайперка, 5–8 — награды за серию, 0 — пистолет
+  const slot = HOTBAR.find((h) => `Digit${h.key}` === e.code);
+  if (slot && !e.repeat) useSlot(slot.id);
+  if (e.code === 'KeyG' && !e.repeat) throwKnife();
   if (e.code === 'KeyC' && !e.repeat) trySlide(performance.now());
   if (e.code === 'KeyT' && !e.repeat) trySpray(performance.now());
   if (e.code === 'KeyF' && !e.repeat) {
@@ -1180,7 +1237,7 @@ function move(dt: number): void {
   const now = performance.now();
   const sliding = now < slideUntil;
   // Пока открываем ящик — стоим на месте; в подкате управлять движением нельзя
-  const frozen = openingUntil > 0 || sliding;
+  const frozen = openingUntil > 0 || sliding || missileCtl !== null;
   const f = frozen ? 0 : (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
   const s = frozen ? 0 : (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
   const len = Math.hypot(f, s) || 1;
@@ -1276,13 +1333,13 @@ function fire(now: number): void {
     for (const [id, r] of remotes) {
       if (!r.info.alive) continue;
       if (mode === 'tdm' && r.info.team === me.team) continue;
-      const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, r.slide);
+      const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, r.slide, scaleOfRemote(r));
       const tp = rayBox(eye, dv, min, max);
       if (tp < t) { t = tp; victim = id; victimR = r; }
     }
     if (victim !== null && victimR) {
       // Голова — верх стоящего прямоугольника; в подкате головы как зоны нет
-      const head = !victimR.slide && eye[1] + dv[1] * t - victimR.pos.y >= HEAD.from;
+      const head = !victimR.slide && eye[1] + dv[1] * t - victimR.pos.y >= HEAD.from * scaleOfRemote(victimR);
       const h = (hits[victim] ??= [0, 0]);
       h[head ? 1 : 0]++;
       anyHit = true;
@@ -1324,7 +1381,7 @@ function stab(now: number): void {
   let victim: number | null = null, best = Infinity;
   for (const [id, r] of remotes) {
     if (!r.info.alive || (mode === 'tdm' && r.info.team === me.team)) continue;
-    const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, r.slide);
+    const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, r.slide, scaleOfRemote(r));
     const near = ([0, 1, 2] as const).map((i) => Math.max(min[i]!, Math.min(eye[i], max[i]!)));
     const dist = Math.hypot(near[0]! - eye[0], near[1]! - eye[1], near[2]! - eye[2]);
     if (dist > reach || dist >= best) continue;
@@ -1364,6 +1421,7 @@ function updateShooting(now: number): void {
     updateHud();
   }
   if (!mouseDown || !me.alive || !locked || me.reloadUntil || now < me.nextShot || openingUntil || now < boltUntil) return;
+  if (missileCtl) return; // ЛКМ сейчас — ускорение ракеты
   const w = WEAPONS[me.weapon];
   if (!w.auto && firedThisPress) return;
   if (me.weapon === 'rocket') { fireRocket(now); return; }
@@ -1403,10 +1461,8 @@ function updateHud(): void {
   const melee = !!WEAPONS[me.weapon].melee;
   $('ammo-count').textContent = melee ? '—' : me.reloadUntil ? '…' : String(me.ammo[me.weapon]);
   $('ammo-total').textContent = melee ? '' : me.weapon === 'rocket' ? ' ракет' : ' / ∞';
-  for (const s of $('slots').querySelectorAll<HTMLElement>('span')) {
-    s.classList.toggle('active', s.dataset.w === me.weapon);
-    if (s.dataset.w === 'rocket') s.classList.toggle('hidden', me.ammo.rocket <= 0);
-  }
+  renderHotbar();
+  renderStreak();
 
   const score = $('score');
   score.textContent = '';
@@ -1416,11 +1472,13 @@ function updateHud(): void {
       textEl('span', `${scores.red} Красные`, 'r'),
       textEl('small', `до ${limit}`),
     );
+    score.append(timerEl());
   } else {
     const mine = roster.find((p) => p.id === me.id);
     const top = [...roster].sort((a, b) => b.kills - a.kills)[0];
     score.append(`Ты: ${mine?.kills ?? 0}`);
     if (top) score.append(textEl('small', `лидер: ${top.name} — ${top.kills} · до ${limit}`));
+    score.append(timerEl());
   }
   if (!$('scoreboard').classList.contains('hidden')) renderScoreboard();
 }
@@ -1815,6 +1873,373 @@ function updateSteps(dt: number): void {
   if (myStepAcc >= STRIDE) { myStepAcc -= STRIDE; stepSound(0.25, 0); }
 }
 
+// ======================= слоты и серия убийств =======================
+/** Нож есть, пока его не бросили; после смерти возвращается. */
+let hasKnife = true;
+let streak = 0;
+const rewards: Record<StreakKind, number> = { uav: 0, missile: 0, nuke: 0 };
+
+type SlotId = WeaponId | StreakKind;
+const HOTBAR: Array<{ key: string; id: SlotId; label: string }> = [
+  { key: '1', id: 'knife', label: 'Нож' },
+  { key: '2', id: 'shotgun', label: 'Дробовик' },
+  { key: '3', id: 'rifle', label: 'Автомат' },
+  { key: '4', id: 'sniper', label: 'Снайперка' },
+  { key: '5', id: 'uav', label: 'БПЛА' },
+  { key: '6', id: 'missile', label: 'Ракета с неба' },
+  { key: '7', id: 'rocket', label: 'Ракетница' },
+  { key: '8', id: 'nuke', label: 'Бомба' },
+  { key: '0', id: 'pistol', label: 'Пистолет' },
+];
+const isStreakKind = (id: SlotId): id is StreakKind => id === 'uav' || id === 'missile' || id === 'nuke';
+
+function slotReady(id: SlotId): boolean {
+  if (isStreakKind(id)) return rewards[id] > 0;
+  if (id === 'knife') return hasKnife;
+  if (id === 'rocket') return me.ammo.rocket > 0;
+  return true;
+}
+
+function useSlot(id: SlotId): void {
+  if (!slotReady(id)) return;
+  if (!isStreakKind(id)) { if (me.alive) setWeapon(id); return; }
+  // БПЛА, ракету с неба и бомбу можно применить и после смерти
+  if (id === 'missile' && missileCtl) return;
+  sendMsg({ t: 'use', kind: id });
+}
+
+function renderHotbar(): void {
+  const bar = $('hotbar');
+  if (!bar.childElementCount) {
+    for (const h of HOTBAR) {
+      const cell = document.createElement('div');
+      cell.className = 'slot';
+      cell.dataset.id = h.id;
+      cell.append(textEl('span', h.key, 'key'), textEl('span', h.label, 'name'), textEl('span', '', 'count'));
+      bar.append(cell);
+    }
+  }
+  for (const cell of bar.querySelectorAll<HTMLElement>('.slot')) {
+    const id = cell.dataset.id as SlotId;
+    cell.classList.toggle('active', id === me.weapon);
+    cell.classList.toggle('off', !slotReady(id));
+    cell.classList.toggle('reward', isStreakKind(id) && rewards[id] > 0);
+    const count = isStreakKind(id) ? rewards[id] : id === 'rocket' ? me.ammo.rocket : 0;
+    cell.querySelector('.count')!.textContent = count > 0 ? `×${count}` : '';
+  }
+}
+
+const STREAK_STEPS: Array<[number, string]> = [
+  [STREAK.uav, 'БПЛА'], [STREAK.missile, 'ракета с неба'], [STREAK.launcher, 'ракетница'],
+  [STREAK.superArmor, 'суперброня'], [STREAK.nuke, 'бомба'],
+];
+function renderStreak(): void {
+  const next = STREAK_STEPS.find(([n]) => n > streak);
+  $('streak-count').textContent = String(streak);
+  $('streak-next').textContent = next ? `${next[1]} через ${next[0] - streak}` : 'все награды получены';
+}
+
+function onLoadout(m: LoadoutMsg): void {
+  const got = (k: StreakKind) => m[k] > rewards[k];
+  if (got('uav')) toast('🎁 БПЛА готов — нажми 5');
+  if (got('missile')) toast('🎁 Ракета с неба готова — нажми 6');
+  if (got('nuke')) toast('🎁 Бомба готова — нажми 8');
+  if (m.streak === STREAK.superArmor && streak < m.streak) toast('🛡 Суперброня: +500, ты стал больше');
+  if (got('uav') || got('missile') || got('nuke')) beep(1200, 0.3, 0.12);
+  hasKnife = m.knife;
+  streak = m.streak;
+  rewards.uav = m.uav;
+  rewards.missile = m.missile;
+  rewards.nuke = m.nuke;
+  if (!hasKnife && me.weapon === 'knife') setWeapon('rifle');
+  updateHud();
+}
+
+function scaleOfRemote(r: Remote): number {
+  return r.info.big ? STREAK.bigScale : 1;
+}
+
+// ======================= метательный нож =======================
+interface KnifeFx { mesh: THREE.Group; vel: THREE.Vector3 }
+const knifeFx = new Map<number, KnifeFx>();
+
+function knifeModel(): THREE.Group {
+  const g = new THREE.Group();
+  const blade = box(0.02, 0.06, 0.3, 0xd0d4da);
+  blade.position.z = -0.1;
+  const handle = box(0.04, 0.05, 0.14, 0x1c1c1c);
+  handle.position.z = 0.1;
+  g.add(blade, handle);
+  return g;
+}
+
+/** G (или ПКМ с ножом в руке): бросить нож туда, куда смотришь. */
+function throwKnife(): void {
+  if (!me.alive || !hasKnife || openingUntil || missileCtl || roundOver) return;
+  camera.updateMatrixWorld(true);
+  camera.getWorldDirection(_dir);
+  sendMsg({ t: 'throw', d: [+_dir.x.toFixed(4), +_dir.y.toFixed(4), +_dir.z.toFixed(4)] });
+  hasKnife = false; // сервер подтвердит
+  if (me.weapon === 'knife') setWeapon('rifle');
+  shotSound('knife', 1);
+  updateHud();
+}
+
+function onThrow(m: ThrowMsg): void {
+  const mesh = knifeModel();
+  mesh.position.set(m.o[0], m.o[1], m.o[2]);
+  scene.add(mesh);
+  knifeFx.set(m.id, { mesh, vel: new THREE.Vector3(m.d[0], m.d[1], m.d[2]).multiplyScalar(THROW.speed) });
+}
+
+function onThrown(m: ThrowEndMsg): void {
+  const fx = knifeFx.get(m.id);
+  if (!fx) return;
+  knifeFx.delete(m.id);
+  if (m.hit) {
+    scene.remove(fx.mesh);
+    return;
+  }
+  // Промах — нож торчит из стены или пола ещё 5 секунд
+  fx.mesh.position.set(m.p[0], m.p[1], m.p[2]);
+  fx.mesh.lookAt(fx.mesh.position.clone().sub(fx.vel));
+  setTimeout(() => scene.remove(fx.mesh), 5000);
+}
+
+function updateKnives(dt: number): void {
+  for (const fx of knifeFx.values()) {
+    fx.vel.y -= THROW.gravity * dt;
+    fx.mesh.position.addScaledVector(fx.vel, dt);
+    fx.mesh.rotation.x -= dt * 20; // летит, вращаясь
+  }
+}
+
+// ======================= БПЛА: мини-карта с эхо-локацией =======================
+let uavUntil = 0;
+let lastPingAt = 0;
+let pingDots: Array<[number, number]> = [];
+
+function onPing(m: PingMsg): void {
+  pingDots = m.list.map(([, x, z]) => [x, z]);
+  lastPingAt = performance.now();
+  if (uavUntil > lastPingAt) beep(1600, 0.06, 0.04);
+}
+
+/** Карта сверху: стены, ты (стрелка) и отметки противников, которые гаснут до следующего импульса. */
+function updateMinimap(now: number): void {
+  const c = $<HTMLCanvasElement>('minimap');
+  const on = joined && now < uavUntil && !voting;
+  c.classList.toggle('hidden', !on);
+  if (!on) return;
+  const ctx = c.getContext('2d')!;
+  const size = c.width, mid = size / 2;
+  const half = currentMap.half;
+  const k = (mid - 8) / Math.max(half.x, half.z);
+  const sx = (x: number) => mid + x * k, sz = (z: number) => mid + z * k;
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = 'rgba(10, 20, 14, 0.82)';
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = 'rgba(150, 190, 160, 0.55)';
+  for (const b of currentMap.boxes) {
+    if (b.max[1] - b.min[1] < 0.6 && b.min[1] > 0) continue; // тонкие крыши и полки не рисуем
+    ctx.fillRect(sx(b.min[0]), sz(b.min[2]), (b.max[0] - b.min[0]) * k, (b.max[2] - b.min[2]) * k);
+  }
+  // Эхо: кольцо расходится от тебя после каждого импульса.
+  // Время кадра бывает чуть раньше времени прихода отметки — не даём возрасту уйти в минус.
+  const age = Math.max(0, now - lastPingAt);
+  if (age < 900) {
+    ctx.strokeStyle = `rgba(90, 255, 140, ${1 - age / 900})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(sx(me.pos.x), sz(me.pos.z), (age / 900) * size * 0.75, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  const fade = Math.max(0, 1 - age / STREAK.pingMs);
+  ctx.fillStyle = `rgba(255, 70, 70, ${0.25 + 0.75 * fade})`;
+  for (const [x, z] of pingDots) {
+    ctx.beginPath();
+    ctx.arc(sx(x), sz(z), 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Ты: стрелка по направлению взгляда
+  ctx.save();
+  ctx.translate(sx(me.pos.x), sz(me.pos.z));
+  ctx.rotate(-me.yaw);
+  ctx.fillStyle = '#5cf07a';
+  ctx.beginPath();
+  ctx.moveTo(0, -7); ctx.lineTo(5, 5); ctx.lineTo(-5, 5);
+  ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = '#c8ffd6';
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.fillText(`БПЛА ${Math.ceil((uavUntil - now) / 1000)} с`, 6, 14);
+}
+
+// ======================= ракета с неба =======================
+let missileCtl: { id: number; pos: THREE.Vector3; yaw: number; pitch: number; born: number; sendAcc: number } | null = null;
+const remoteMissiles = new Map<number, THREE.Mesh>();
+
+function missileMesh(): THREE.Mesh {
+  const m = box(0.35, 0.35, 1.4, 0xdddddd);
+  m.material = new THREE.MeshLambertMaterial({ color: 0xdddddd, emissive: 0x552200 });
+  return m;
+}
+
+/** Камера переходит в ракету над картой; ведёшь её мышью, ЛКМ — ускорение. */
+function startMissile(id: number, p: Vec3): void {
+  missileCtl = { id, pos: new THREE.Vector3(p[0], p[1], p[2]), yaw: me.yaw, pitch: -1.3, born: performance.now(), sendAcc: 0 };
+  aimHeld = false;
+  $('missile-view').classList.remove('hidden');
+  canvas.classList.add('thermal');
+  beep(500, 0.4, 0.1);
+}
+
+function endMissile(): void {
+  if (!missileCtl) return;
+  missileCtl = null;
+  $('missile-view').classList.add('hidden');
+  canvas.classList.remove('thermal');
+}
+
+function updateMissile(now: number, dt: number): void {
+  const m = missileCtl;
+  if (!m) return;
+  const speed = mouseDown ? STREAK.missileBoost : STREAK.missileSpeed;
+  const dir = new THREE.Vector3(-Math.sin(m.yaw) * Math.cos(m.pitch), Math.sin(m.pitch), -Math.cos(m.yaw) * Math.cos(m.pitch));
+  const step = speed * dt;
+  const from: Vec3 = [m.pos.x, m.pos.y, m.pos.z];
+  const d: Vec3 = [dir.x, dir.y, dir.z];
+  let t = rayWorld(currentMap.boxes, from, d, step);
+  for (const r of remotes.values()) {
+    if (!r.info.alive) continue;
+    const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, r.slide, scaleOfRemote(r));
+    t = Math.min(t, rayBox(from, d, min, max));
+  }
+  const expired = now - m.born > STREAK.missileMaxMs - 500;
+  if (t < step || expired) {
+    const at = m.pos.clone().addScaledVector(dir, Math.min(t, step));
+    sendMsg({ t: 'mhit', id: m.id, p: [+at.x.toFixed(2), +at.y.toFixed(2), +at.z.toFixed(2)] });
+    endMissile();
+    return;
+  }
+  m.pos.addScaledVector(dir, step);
+  m.sendAcc += dt;
+  if (m.sendAcc >= 0.1) {
+    m.sendAcc = 0;
+    sendMsg({ t: 'mpos', id: m.id, p: [+m.pos.x.toFixed(2), +m.pos.y.toFixed(2), +m.pos.z.toFixed(2)] });
+  }
+  camera.position.copy(m.pos);
+  camera.rotation.set(m.pitch, m.yaw, 0);
+  $('missile-alt').textContent = `${Math.max(0, Math.round(m.pos.y))} м · ${mouseDown ? 'ускорение' : 'ЛКМ — ускорение'}`;
+}
+
+function onMissile(m: MissileMsg): void {
+  let mesh = remoteMissiles.get(m.id);
+  if (!mesh) {
+    mesh = missileMesh();
+    scene.add(mesh);
+    remoteMissiles.set(m.id, mesh);
+    if (joined) feedNote('🚀 С неба летит ракета!');
+  }
+  const target = new THREE.Vector3(m.p[0], m.p[1], m.p[2]);
+  mesh.lookAt(target);
+  mesh.position.copy(target);
+}
+
+// ======================= бомба =======================
+let nukeAt = 0;
+let nukeMesh: THREE.Group | null = null;
+
+function onNuke(m: NukeMsg): void {
+  nukeAt = performance.now() + m.ms;
+  const who = roster.find((p) => p.id === m.by)?.name ?? '';
+  feedNote(`☢ ${who} сбросил бомбу!`);
+  nukeMesh = new THREE.Group();
+  const body = box(1.6, 1.6, 3.6, 0x2d2f2a);
+  const tail = box(2.6, 0.15, 0.8, 0x2d2f2a);
+  tail.position.z = 1.8;
+  const tail2 = box(0.15, 2.6, 0.8, 0x2d2f2a);
+  tail2.position.z = 1.8;
+  const stripe = box(1.65, 1.65, 0.3, 0xf1c232);
+  stripe.position.z = -0.8;
+  nukeMesh.add(body, tail, tail2, stripe);
+  nukeMesh.rotation.x = Math.PI / 2; // носом вниз
+  scene.add(nukeMesh);
+  beep(220, 1.2, 0.2);
+}
+
+function updateNuke(now: number): void {
+  if (!nukeAt) return;
+  const left = nukeAt - now;
+  if (left > 0) {
+    if (nukeMesh) nukeMesh.position.set(0, 2 + 80 * (left / STREAK.nukeMs) ** 1.5, 0);
+    $('center-msg').textContent = `☢ БОМБА через ${Math.ceil(left / 1000)}`;
+    return;
+  }
+  // Удар: белая вспышка на весь экран и грохот
+  nukeAt = 0;
+  if (nukeMesh) { scene.remove(nukeMesh); nukeMesh = null; }
+  $('center-msg').textContent = '';
+  const flash = $('flash');
+  flash.classList.remove('fade');
+  flash.classList.add('on');
+  void flash.offsetWidth; // перезапуск анимации
+  flash.classList.add('fade');
+  shotSound('boom', 1);
+  setTimeout(() => shotSound('boom', 0.8), 120);
+}
+
+// ======================= время матча и голосование =======================
+let matchEndsAt = 0;
+let voting = false;
+let voteEndsAt = 0;
+
+function timerText(): string {
+  const left = Math.max(0, Math.ceil((matchEndsAt - performance.now()) / 1000));
+  return `⏱ ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+}
+function timerEl(): HTMLElement {
+  const el = textEl('small', timerText(), 'timer');
+  el.id = 'match-timer';
+  return el;
+}
+
+function onVote(m: VoteMsg): void {
+  if (!voting) {
+    voting = true;
+    voteEndsAt = performance.now() + m.ms;
+    document.exitPointerLock();
+    $('pause').classList.add('hidden');
+    $('vote').classList.remove('hidden');
+  }
+  $('vote-title').textContent = overText || 'Матч окончен';
+  const list = $('vote-maps');
+  list.textContent = '';
+  for (const id of MAP_ORDER) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = id === m.mine ? 'active' : '';
+    b.append(textEl('span', MAPS[id].name), textEl('small', ` · голосов: ${m.counts[id]}`));
+    b.addEventListener('click', () => sendMsg({ t: 'vote', map: id }));
+    list.append(b);
+  }
+}
+
+function updateVote(now: number): void {
+  if (!voting) return;
+  $('vote-timer').textContent = `Новый матч через ${Math.max(0, Math.ceil((voteEndsAt - now) / 1000))} сек. При равенстве голосов карта выбирается случайно.`;
+}
+
+function onNewMap(id: MapId): void {
+  voting = false;
+  roundOver = false;
+  $('vote').classList.add('hidden');
+  loadMap(id);
+  feedNote(`🗺 Новый матч: ${MAPS[id].name}`);
+  // Мышь отпущена на время голосования — вернуть её можно кликом по «ИГРАТЬ»
+  if (!locked) $('pause').classList.remove('hidden');
+}
+
 // ======================= прицеливание =======================
 /** ПКМ: камера приближается, оружие уходит в центр, разброс уменьшается. */
 function updateAim(dt: number): void {
@@ -1891,7 +2316,8 @@ function frame(now: number): void {
   if (joined) {
     if (me.alive) {
       move(dt);
-      eyeH += ((low ? SLIDE.eye : PLAYER.eye) - eyeH) * Math.min(1, dt * 14);
+      const eyeTarget = (low ? SLIDE.eye : PLAYER.eye) * (me.big ? STREAK.bigScale : 1);
+      eyeH += (eyeTarget - eyeH) * Math.min(1, dt * 14);
       camera.position.set(me.pos.x, me.pos.y + eyeH, me.pos.z);
     } else {
       // После смерти камера смотрит на место гибели сверху
@@ -1903,6 +2329,8 @@ function frame(now: number): void {
       }
     }
     camera.rotation.set(me.alive ? Math.min(1.5, me.pitch + recoil) : -0.9, me.alive ? me.yaw : 0, 0);
+    // Камера ракеты с неба перекрывает обычный вид
+    updateMissile(now, dt);
 
     updateShooting(now);
     updateAim(dt);
@@ -1939,7 +2367,7 @@ function frame(now: number): void {
     camera.lookAt(0, 0, 0);
   }
   const scoped = me.weapon === 'sniper' && adsK > 0.85;
-  viewModel.visible = joined && me.alive && !scoped;
+  viewModel.visible = joined && me.alive && !scoped && !missileCtl;
   $('scope').classList.toggle('hidden', !(joined && me.alive && scoped));
   $('crosshair').classList.toggle('ads', adsK > 0.5);
   // С коллиматором своя красная точка, крест в прицеле не нужен
@@ -1971,6 +2399,12 @@ function frame(now: number): void {
   updateSprays(now);
   updateMedkits(now);
   updateSteps(dt);
+  updateKnives(dt);
+  updateMinimap(now);
+  updateNuke(now);
+  updateVote(now);
+  const timer = document.getElementById('match-timer');
+  if (timer) timer.textContent = timerText();
   renderer.render(scene, camera);
 }
 
@@ -1980,11 +2414,15 @@ requestAnimationFrame(frame);
 // Для отладки из консоли
 declare global {
   interface Window {
-    game: { me: typeof me; remotes: typeof remotes; keys: typeof keys; dbg: () => Record<string, unknown> };
+    game: {
+      me: typeof me; remotes: typeof remotes; keys: typeof keys;
+      steer: (yaw: number, pitch: number) => void; dbg: () => Record<string, unknown>;
+    };
   }
 }
 window.game = {
   me, remotes, keys,
-  dbg: () => ({ low, adsK, fov: camera.fov, crateState, crateAt, eyeH, recoil, corpses: corpses.length, sprays: sprays.length,
+  steer: (yaw: number, pitch: number) => { if (missileCtl) { missileCtl.yaw = yaw; missileCtl.pitch = pitch; } },
+  dbg: () => ({ missile: missileCtl ? missileCtl.pos.toArray() : null, low, adsK, fov: camera.fov, crateState, crateAt, eyeH, recoil, corpses: corpses.length, sprays: sprays.length,
     steps: stepCount, medkits: medkitFx.size, boltUntil, menuClosed, armor: me.armor }),
 };

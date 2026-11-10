@@ -21,14 +21,6 @@
     <div id="ammo">
       <div id="weapon-name">Пистолет</div>
       <div><span id="ammo-count">12</span><span class="label" id="ammo-total"> / ∞</span></div>
-      <div id="slots">
-        <span data-w="pistol">1 Пистолет</span>
-        <span data-w="shotgun">2 Дробовик</span>
-        <span data-w="rifle">3 Автомат</span>
-        <span data-w="sniper">4 Снайперка</span>
-        <span data-w="knife">5 Нож</span>
-        <span data-w="rocket" class="hidden">6 Ракетница</span>
-      </div>
     </div>
     <div id="center-msg"></div>
     <div id="crate-prompt" class="hidden">
@@ -36,16 +28,32 @@
       <div id="crate-bar"><div id="crate-fill"></div></div>
     </div>
     <div id="toast" class="hidden"></div>
+    <div id="streak" title="Убийств подряд без смерти"><span class="label">🔥 Серия</span> <b id="streak-count">0</b> <small id="streak-next"></small></div>
+    <div id="hotbar"></div>
+    <canvas id="minimap" class="hidden" width="180" height="180"></canvas>
+    <div id="missile-view" class="hidden"><div class="frame"></div><div id="missile-alt"></div></div>
     <div id="crown-note" class="hidden">♛ Корона у тебя</div>
     <div id="upgrade-note" class="hidden">Есть очко прокачки — нажми Esc</div>
     <div id="scoreboard" class="hidden"></div>
+  </div>
+
+  <div id="flash"></div>
+
+  <div id="vote" class="overlay hidden">
+    <div class="panel">
+      <h2 id="vote-title">Матч окончен</h2>
+      <p>Голосуй за следующую карту</p>
+      <div id="vote-maps"></div>
+      <small id="vote-timer"></small>
+    </div>
   </div>
 
   <div id="pause" class="overlay hidden">
     <div class="panel wide">
       <button id="resume" class="primary" type="button">ИГРАТЬ</button>
       <p>WASD — движение · Shift — спринт · C в спринте — подкат · Пробел — прыжок<br>
-         ЛКМ — огонь · ПКМ — прицел · 1–5 или колесо — оружие · 6 — ракетница<br>
+         ЛКМ — огонь · ПКМ — прицел · G — бросить нож · 1–4, 0 или колесо — оружие<br>
+         5 — БПЛА · 6 — ракета с неба · 7 — ракетница · 8 — бомба (награды за серию убийств)<br>
          R — перезарядка · F — открыть ящик · T — эмодзи на стене · Tab — счёт · Esc — это меню</p>
 
       <h3>Настройки</h3>
@@ -78,6 +86,10 @@
       <div class="field">Карта
         <div class="choice" id="map-choice"></div>
         <small id="mode-note"></small>
+      </div>
+
+      <div class="field">Время матча
+        <div class="choice" id="time-choice"></div>
       </div>
 
       <div class="field">Цвет
