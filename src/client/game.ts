@@ -342,6 +342,12 @@ interface Gun {
    * и на каком расстоянии от него глаз (relief, метры). Приклад при этом уходит к щеке, за пределы обзора.
    */
   aim?: { y: number; z: number; relief: number };
+  /** Оптика снайперки — снимается и надевается на V */
+  scope?: THREE.Object3D;
+  scopeY: number;
+  scopeZ: number;
+  /** Куда смотрит глаз без оптики — по мушке и целику */
+  iron?: { y: number; z: number; relief: number };
 }
 
 /** Коллиматорный прицел: рамка со стеклом и красная точка в центре. */
@@ -384,6 +390,8 @@ function buildGun(type: WeaponId): Gun {
   let mag: THREE.Object3D | undefined, bolt: THREE.Object3D | undefined, shell: THREE.Object3D | undefined;
   let sight: Gun['sight'];
   let aim: Gun['aim'];
+  let scope: THREE.Object3D | undefined;
+  let iron: Gun['iron'];
   if (type === 'pistol') {
     add(0.05, 0.07, 0.24, 0x2b2b2b, 0, 0, -0.12);
     add(0.045, 0.13, 0.06, 0x3a2a1a, 0, -0.09, -0.03);
@@ -403,7 +411,11 @@ function buildGun(type: WeaponId): Gun {
   } else if (type === 'sniper') {
     add(0.06, 0.08, 0.75, 0x2f3a2c, 0, 0, -0.25);
     add(0.03, 0.03, 0.42, 0x1c1c1c, 0, 0.01, -0.83);
-    add(0.065, 0.065, 0.32, 0x111111, 0, 0.085, -0.26); // оптика
+    scope = part(0.065, 0.065, 0.32, 0x111111, 0, 0.085, -0.26); // оптика
+    // Мушка у дула и целик над затвором: по ним целятся, когда оптика снята
+    add(0.012, 0.03, 0.012, 0x0c0c0c, 0, 0.04, -0.98);
+    for (const side of [-1, 1]) add(0.012, 0.03, 0.012, 0x0c0c0c, side * 0.014, 0.04, -0.02);
+    iron = { y: 0.055, z: -0.02, relief: 0.2 };
     add(0.06, 0.11, 0.26, 0x4a3a28, 0, -0.02, 0.24);
     add(0.045, 0.15, 0.06, 0x1c1c1c, 0, -0.1, -0.05);
     mag = part(0.04, 0.07, 0.09, 0x111111, 0, -0.07, -0.2);
@@ -459,7 +471,10 @@ function buildGun(type: WeaponId): Gun {
   flash.position.set(0, 0, muzzleZ - 0.05);
   flash.visible = false;
   group.add(flash);
-  return { group, flash, muzzleZ, mag, magY: mag?.position.y ?? 0, bolt, boltZ: bolt?.position.z ?? 0, shell, sight, aim };
+  return {
+    group, flash, muzzleZ, mag, magY: mag?.position.y ?? 0, bolt, boltZ: bolt?.position.z ?? 0, shell, sight, aim,
+    scope, scopeY: scope?.position.y ?? 0, scopeZ: scope?.position.z ?? 0, iron,
+  };
 }
 
 function muzzleWorld(gun: Gun): THREE.Vector3 {
@@ -782,6 +797,7 @@ function setWeapon(w: WeaponId): void {
   me.nextShot = Math.max(me.nextShot, performance.now() + 250);
   viewModel.remove(viewGun.group);
   viewGun = buildGun(w);
+  if (viewGun.scope) viewGun.scope.visible = scopeOn;
   viewModel.add(viewGun.group);
   updateHud();
 }
@@ -1420,6 +1436,7 @@ document.addEventListener('keydown', (e) => {
   const slot = hotbar().find((h) => `Digit${h.key}` === e.code);
   if (slot && !e.repeat) useSlot(slot.id);
   if (e.code === 'KeyG' && !e.repeat) throwKnife();
+  if (e.code === 'KeyV' && !e.repeat) toggleScope(performance.now());
   if (e.code === 'KeyC' && !e.repeat) trySlide(performance.now());
   if (e.code === 'KeyT' && !e.repeat) trySpray(performance.now());
   if (e.code === 'KeyF' && !e.repeat) {
@@ -2995,10 +3012,12 @@ function onNewMap(id: MapId): void {
 /** ПКМ: камера приближается, оружие уходит в центр, разброс уменьшается. */
 function updateAim(dt: number): void {
   const w = WEAPONS[me.weapon];
-  const aiming = aimHeld && w.zoom !== null && me.alive && !me.reloadUntil && !openingUntil;
+  const aiming = aimHeld && w.zoom !== null && me.alive && !me.reloadUntil && !openingUntil && !scopeAnim;
   adsK += ((aiming ? 1 : 0) - adsK) * Math.min(1, dt * 12);
   if (adsK < 0.001) adsK = 0;
-  const fov = BASE_FOV + ((w.zoom ?? BASE_FOV) - BASE_FOV) * adsK;
+  // Снайперка без оптики — по мушке, с небольшим приближением
+  const zoom = me.weapon === 'sniper' && !scopeOn ? IRON_ZOOM : w.zoom ?? BASE_FOV;
+  const fov = BASE_FOV + (zoom - BASE_FOV) * adsK;
   if (Math.abs(camera.fov - fov) > 0.01) {
     camera.fov = fov;
     camera.updateProjectionMatrix();
@@ -3006,8 +3025,82 @@ function updateAim(dt: number): void {
   const handX = settings.hand === 'left' ? -0.22 : 0.22;
   viewModel.position.x = handX * (1 - adsK);
   // В прицеле центр прицела встаёт ровно на линию взгляда (красная точка — в центр экрана)
-  const aimY = viewGun.aim ? -viewGun.aim.y * viewModel.scale.y : -0.13;
+  const aimPt = me.weapon === 'sniper' && !scopeOn ? viewGun.iron : viewGun.aim;
+  const aimY = aimPt ? -aimPt.y * viewModel.scale.y : -0.13;
   viewModel.position.y = -0.2 + (aimY + 0.2) * adsK;
+}
+
+// ======================= снайперка: оптика на V и тряска в движении =======================
+/** Оптика на снайперке: снимается и надевается на V */
+let scopeOn = true;
+/** Анимация руки, которая снимает или надевает оптику */
+let scopeAnim: { until: number; to: boolean } | null = null;
+const SCOPE_ANIM_MS = 700;
+/** Приближение по мушке, без оптики */
+const IRON_ZOOM = 50;
+let scopeHand: THREE.Mesh | null = null;
+
+function toggleScope(now: number): void {
+  if (me.weapon !== 'sniper' || !me.alive || scopeAnim || me.reloadUntil) return;
+  scopeAnim = { until: now + SCOPE_ANIM_MS, to: !scopeOn };
+  aimHeld = false; // во время возни с оптикой не целимся
+  beep(scopeOn ? 520 : 760, 0.08, 0.06);
+}
+
+/**
+ * Квадратная рука тянется к оптике: при снятии — забирает её и уносит вниз,
+ * при надевании — приносит снизу и ставит на место.
+ */
+function animateScope(now: number): void {
+  const g = viewGun;
+  if (!g.scope) { if (scopeHand) scopeHand.visible = false; return; }
+  if (!scopeHand) {
+    scopeHand = box(0.11, 0.07, 0.13, 0xd9a07a); // квадратная ладонь
+    viewModel.add(scopeHand);
+  }
+  if (!scopeAnim) {
+    scopeHand.visible = false;
+    g.scope.visible = scopeOn;
+    g.scope.position.set(0, g.scopeY, g.scopeZ);
+    return;
+  }
+  const p = 1 - Math.max(0, scopeAnim.until - now) / SCOPE_ANIM_MS;
+  const mount = new THREE.Vector3(0, g.scopeY + 0.07, g.scopeZ);
+  const below = new THREE.Vector3(0.12, -0.35, g.scopeZ + 0.1);
+  // Рука: снизу к оптике (0…0.45) и обратно вниз (0.55…1)
+  const up = ramp(p, 0, 0.45), down = ramp(p, 0.55, 1);
+  const hand = below.clone().lerp(mount, up).lerp(below, down);
+  scopeHand.visible = true;
+  scopeHand.position.copy(hand);
+  if (scopeAnim.to) {
+    // Надеваем: оптика в руке поднимается и встаёт на место
+    g.scope.visible = true;
+    if (p < 0.5) g.scope.position.copy(hand).add(new THREE.Vector3(0, -0.07, 0));
+    else g.scope.position.set(0, g.scopeY, g.scopeZ);
+  } else {
+    // Снимаем: оптика стоит, пока рука не дотянулась, дальше уходит вместе с рукой
+    g.scope.visible = p < 0.95;
+    if (p < 0.5) g.scope.position.set(0, g.scopeY, g.scopeZ);
+    else g.scope.position.copy(hand).add(new THREE.Vector3(0, -0.07, 0));
+  }
+  if (now >= scopeAnim.until) {
+    scopeOn = scopeAnim.to;
+    scopeAnim = null;
+    toast(scopeOn ? '🔭 Оптика надета' : '🔭 Оптика снята — целься по мушке (V — надеть)');
+  }
+}
+
+/**
+ * Тряска снайперки в прицеле, пока игрок двигается: чем быстрее, тем сильнее.
+ * Стоя на месте прицел спокойный. Выстрел летит туда, куда смотрит камера, — с учётом тряски.
+ */
+function sniperSway(now: number): { yaw: number; pitch: number } {
+  if (me.weapon !== 'sniper' || adsK < 0.3 || !me.alive) return { yaw: 0, pitch: 0 };
+  const speed = Math.hypot(me.vel.x, me.vel.z) + (me.grounded ? 0 : 4);
+  const amp = Math.min(1, speed / SPEED) * 0.04 * adsK;
+  if (amp < 0.0005) return { yaw: 0, pitch: 0 };
+  const t = now / 1000;
+  return { yaw: amp * Math.sin(t * 6.3), pitch: amp * 0.7 * Math.sin(t * 12.1 + 1) };
 }
 
 // ======================= анимации оружия =======================
@@ -3079,7 +3172,8 @@ function frame(now: number): void {
         $('center-msg').textContent = `${first}\nВозрождение через ${left} сек.`;
       }
     }
-    camera.rotation.set(me.alive ? Math.min(1.5, me.pitch + recoil) : -0.9, me.alive ? me.yaw : 0, 0);
+    const sway = sniperSway(now);
+    camera.rotation.set(me.alive ? Math.min(1.5, me.pitch + recoil + sway.pitch) : -0.9, me.alive ? me.yaw + sway.yaw : 0, 0);
     // Камера ракеты с неба перекрывает обычный вид
     updateMissile(now, dt);
     updateGunship(now, dt);
@@ -3093,7 +3187,7 @@ function frame(now: number): void {
     const swing = sw >= 0 ? Math.sin(Math.PI * sw) : 0;
     // В прицеле глаз подводится к прицелу: прицел оказывается в aim.relief метрах перед глазом,
     // а приклад уходит назад к щеке, за пределы обзора. Отдача в прицеле мягче.
-    const aim = viewGun.aim;
+    const aim = me.weapon === 'sniper' && !scopeOn ? viewGun.iron : viewGun.aim;
     const aimZ = aim ? -aim.relief - aim.z * viewModel.scale.z : -0.25;
     viewModel.position.z = -0.45 + (aimZ + 0.45) * adsK + kick * (1 - 0.7 * adsK) - swing * 0.12;
     viewModel.position.x += sw >= 0 ? 0.2 - 0.4 * sw : 0;
@@ -3101,6 +3195,7 @@ function frame(now: number): void {
     viewModel.rotation.z = sw >= 0 ? -Math.PI / 2 * swing * 0.6 : 0;
     viewModel.rotation.x = kick * 1.5;
     animateGun(now);
+    animateScope(now);
 
     sendAcc += dt;
     if (sendAcc >= 0.05) {
@@ -3118,7 +3213,7 @@ function frame(now: number): void {
     camera.position.set(Math.sin(a) * r, r * 0.62, Math.cos(a) * r);
     camera.lookAt(0, 0, 0);
   }
-  const scoped = me.weapon === 'sniper' && adsK > 0.85;
+  const scoped = me.weapon === 'sniper' && scopeOn && adsK > 0.85;
   viewModel.visible = joined && me.alive && !scoped && !missileCtl && !gunner;
   $('scope').classList.toggle('hidden', !(joined && me.alive && scoped));
   $('crosshair').classList.toggle('ads', adsK > 0.5);
@@ -3184,7 +3279,7 @@ window.game = {
     if (gunner) { gunner.yaw = yaw; gunner.pitch = pitch; }
   },
   faces: () => FACE_STEPS.map((_, l) => { faceTexture(l); return faceUrl[l]!; }),
-  dbg: () => ({ gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
+  dbg: () => ({ scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
     kit: settings.kit, reserve: { ...me.reserve }, hotbar: hotbar().map((h) => `${h.key}:${h.label}`).join(' '),
     missile: missileCtl ? missileCtl.pos.toArray() : null, low, adsK, fov: camera.fov, crateState, crateAt, eyeH, recoil, corpses: corpses.length, sprays: sprays.length,
     steps: stepCount, medkits: medkitFx.size, boltUntil, menuClosed, armor: me.armor }),
