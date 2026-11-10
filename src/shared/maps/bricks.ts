@@ -81,5 +81,6 @@ export const BRICKS: GameMap = {
   sky: '#bfe3ff',
   boxes,
   ladders,
+  crate: [0, TOWER_H, 0], // на вершине башни
   spawns,
 };

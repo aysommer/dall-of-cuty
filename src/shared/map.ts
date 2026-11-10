@@ -25,7 +25,13 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
   pistol:  { name: 'Пистолет', dmg: 25, pellets: 1, rate: 280, mag: 12, reload: 1200, spread: 0.008, auto: false },
   shotgun: { name: 'Дробовик', dmg: 13, pellets: 8, rate: 900, mag: 6,  reload: 2200, spread: 0.07,  auto: false },
   rifle:   { name: 'Винтовка', dmg: 30, pellets: 1, rate: 110, mag: 30, reload: 2000, spread: 0.018, auto: true },
+  // Ракетница достаётся только из ящика: 6 ракет, без перезарядки
+  rocket:  { name: 'Ракетница', dmg: 999, pellets: 1, rate: 900, mag: 6, reload: 0, spread: 0, auto: false },
 };
+
+/** Ящик с ракетницей и сами ракеты. */
+export const CRATE = { size: 1.2, height: 0.9, reach: 2.4, openMs: 5000 };
+export const ROCKET = { speed: 35, radius: 4, lifeMs: 4000 };
 export const WEAPON_ORDER: WeaponId[] = ['pistol', 'shotgun', 'rifle'];
 
 export const MAPS: Record<MapId, GameMap> = { sands: SANDS, bricks: BRICKS, depot: DEPOT };

@@ -119,6 +119,12 @@ details.field .settings { margin-top: 10px; }
 #slots span { margin-left: 10px; color: #8a909b; }
 #slots span.active { color: #fff; }
 
+#crate-prompt {
+  position: absolute; left: 50%; top: 62%; transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.5); padding: 8px 16px; font-size: 15px; text-align: center; white-space: nowrap;
+}
+#crate-bar { margin-top: 8px; height: 8px; width: 260px; background: rgba(255, 255, 255, 0.2); }
+#crate-fill { height: 100%; width: 0; background: #ffc928; }
 #crown-note {
   position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
   background: rgba(0, 0, 0, 0.45); padding: 4px 12px; font-size: 14px; color: #ffc928; white-space: nowrap;

@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import {
-  MAPS, MAP_ORDER, WEAPONS, WEAPON_ORDER, PLAYER, rayBox, rayWorld,
+  CRATE, MAPS, MAP_ORDER, ROCKET, WEAPONS, WEAPON_ORDER, PLAYER, rayBox, rayWorld,
   type Box, type GameMap, type Ladder, type MapId,
 } from '../shared/map.js';
 import {
   KILLS_PER_POINT, STATS, UPGRADES, maxLevel, multiplier, newProfile, pointsLeft, type Profile,
 } from '../shared/progress.js';
 import type {
+  BoomMsg, CrateMsg, CrateState, RocketMsg,
   ClientMsg, InfoMsg, KillMsg, Mode, OverMsg, PlayerInfo, PlayersMsg, ProfileMsg, ServerMsg,
   ShotMsg, SnapMsg, SpawnMsg, Team, Vec3, WeaponId,
 } from '../shared/protocol.js';
@@ -113,6 +114,75 @@ function buildLadder(l: Ladder): THREE.Group {
   return g;
 }
 
+// ---------- ящик с ракетницей ----------
+let crateState: CrateState = 'idle';
+let crateBy: number | null = null;
+let crateMesh: THREE.Mesh | null = null;
+let crateBox: Box | null = null;
+/** Когда закончится открытие, которое веду я (0 — не открываю). */
+let openingUntil = 0;
+
+/** Сторона ящика: доски, нарисованный смайлик с рожками и надпись. */
+function crateTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 192;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = '#b07a3a';
+  ctx.fillRect(0, 0, 256, 192);
+  ctx.strokeStyle = '#6b4520';
+  ctx.lineWidth = 10;
+  ctx.strokeRect(5, 5, 246, 182);
+  ctx.lineWidth = 3;
+  for (const y of [66, 128]) { ctx.beginPath(); ctx.moveTo(8, y); ctx.lineTo(248, y); ctx.stroke(); }
+
+  // Смайлик: круг, рожки, хитрые брови, глаза и ухмылка
+  const x = 128, y = 74, r = 46;
+  ctx.fillStyle = '#7b3fc4';
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(x + side * 20, y - 38); ctx.lineTo(x + side * 44, y - 62); ctx.lineTo(x + side * 42, y - 22);
+    ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#1b1b1b'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+  for (const side of [-1, 1]) {
+    ctx.beginPath(); ctx.moveTo(x + side * 30, y - 24); ctx.lineTo(x + side * 8, y - 12); ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(x + side * 17, y - 4, 7, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.beginPath(); ctx.arc(x, y + 4, 28, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+
+  ctx.fillStyle = '#1b1b1b';
+  ctx.font = 'bold 34px system-ui, "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Open me 😈', 128, 158);
+  return new THREE.CanvasTexture(c);
+}
+
+function buildCrate(): THREE.Mesh {
+  const side = new THREE.MeshLambertMaterial({ map: crateTexture() });
+  const wood = new THREE.MeshLambertMaterial({ color: 0x9a6a30 });
+  // Порядок граней куба: +x, -x, +y, -y, +z, -z — картинка на четырёх боковых
+  return new THREE.Mesh(
+    new THREE.BoxGeometry(CRATE.size, CRATE.height, CRATE.size),
+    [side, side, wood, wood, side, side],
+  );
+}
+
+function nearCrate(): boolean {
+  const [cx, cy, cz] = currentMap.crate;
+  return Math.hypot(me.pos.x - cx, me.pos.z - cz) <= CRATE.reach && Math.abs(me.pos.y - cy) <= 1.5;
+}
+
+function onCrate(m: CrateMsg): void {
+  crateState = m.state;
+  crateBy = m.by;
+  if (crateMesh) crateMesh.visible = m.state !== 'gone';
+  openingUntil = m.state === 'opening' && m.by === me.id ? performance.now() + m.ms : 0;
+  if (m.state === 'gone' && m.by === null) beep(520, 0.3, 0.1);
+}
+
 function loadMap(id: MapId): void {
   if (loadedMap === id) return;
   loadedMap = id;
@@ -120,7 +190,11 @@ function loadMap(id: MapId): void {
   mapGroup.traverse((o) => {
     if (o instanceof THREE.Mesh) {
       o.geometry.dispose();
-      (o.material as THREE.Material).dispose();
+      const materials = (Array.isArray(o.material) ? o.material : [o.material]) as THREE.Material[];
+      for (const mat of materials) {
+        (mat as THREE.MeshLambertMaterial).map?.dispose();
+        mat.dispose();
+      }
     }
   });
   mapGroup.clear();
@@ -137,6 +211,14 @@ function loadMap(id: MapId): void {
     mapGroup.add(m);
   }
   for (const l of currentMap.ladders) mapGroup.add(buildLadder(l));
+
+  const [cx, cy, cz] = currentMap.crate;
+  crateMesh = buildCrate();
+  crateMesh.position.set(cx, cy + CRATE.height / 2, cz);
+  crateMesh.visible = crateState !== 'gone';
+  mapGroup.add(crateMesh);
+  const half = CRATE.size / 2;
+  crateBox = { min: [cx - half, cy, cz - half], max: [cx + half, cy + CRATE.height, cz + half], color: '' };
 }
 loadMap('sands');
 
@@ -165,6 +247,12 @@ function buildGun(type: WeaponId): Gun {
     add(0.075, 0.06, 0.2, 0x7a4a22, 0, -0.055, -0.42);
     add(0.06, 0.1, 0.28, 0x7a4a22, 0, -0.03, 0.12);
     muzzleZ = -0.72;
+  } else if (type === 'rocket') {
+    add(0.15, 0.15, 0.9, 0x4c5a3a, 0, 0.02, -0.25);
+    add(0.19, 0.19, 0.12, 0x2b2b2b, 0, 0.02, -0.7);
+    add(0.19, 0.19, 0.12, 0x2b2b2b, 0, 0.02, 0.2);
+    add(0.05, 0.14, 0.07, 0x2b2b2b, 0, -0.12, -0.2);
+    muzzleZ = -0.78;
   } else {
     add(0.06, 0.09, 0.5, 0x30343a, 0, 0, -0.2);
     add(0.035, 0.035, 0.3, 0x1c1c1c, 0, 0.01, -0.58);
@@ -297,7 +385,7 @@ const me = {
   pitch: 0,
   grounded: false,
   weapon: 'pistol' as WeaponId,
-  ammo: { pistol: WEAPONS.pistol.mag, shotgun: WEAPONS.shotgun.mag, rifle: WEAPONS.rifle.mag } as Record<WeaponId, number>,
+  ammo: { pistol: WEAPONS.pistol.mag, shotgun: WEAPONS.shotgun.mag, rifle: WEAPONS.rifle.mag, rocket: 0 } as Record<WeaponId, number>,
   reloadUntil: 0,
   nextShot: 0,
 };
@@ -321,6 +409,7 @@ viewModel.add(viewGun.group);
 let kick = 0;
 
 function setWeapon(w: WeaponId): void {
+  if (w === 'rocket' && me.ammo.rocket <= 0) return;
   me.weapon = w;
   me.reloadUntil = 0;
   me.nextShot = Math.max(me.nextShot, performance.now() + 250);
@@ -342,9 +431,9 @@ function initAudio(): void {
     master.connect(audio.destination);
   } catch { /* без звука */ }
 }
-function shotSound(w: WeaponId, volume = 1): void {
+function shotSound(w: WeaponId | 'boom', volume = 1): void {
   if (!audio || !master || volume <= 0.01) return;
-  const dur = w === 'shotgun' ? 0.35 : w === 'rifle' ? 0.14 : 0.18;
+  const dur = w === 'boom' ? 0.8 : w === 'shotgun' || w === 'rocket' ? 0.35 : w === 'rifle' ? 0.14 : 0.18;
   const buf = audio.createBuffer(1, Math.floor(audio.sampleRate * dur), audio.sampleRate);
   const data = buf.getChannelData(0);
   for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 3);
@@ -352,9 +441,9 @@ function shotSound(w: WeaponId, volume = 1): void {
   src.buffer = buf;
   const filter = audio.createBiquadFilter();
   filter.type = 'lowpass';
-  filter.frequency.value = w === 'shotgun' ? 900 : w === 'rifle' ? 2600 : 1800;
+  filter.frequency.value = w === 'boom' ? 350 : w === 'rocket' ? 600 : w === 'shotgun' ? 900 : w === 'rifle' ? 2600 : 1800;
   const gain = audio.createGain();
-  gain.gain.value = 0.35 * volume;
+  gain.gain.value = (w === 'boom' ? 0.9 : 0.35) * volume;
   src.connect(filter).connect(gain).connect(master);
   src.start();
 }
@@ -375,6 +464,8 @@ interface Effect {
   born: number;
   life: number;
   fade: boolean;
+  /** Во сколько раз объект вырастает за время жизни (взрыв) */
+  grow?: number;
 }
 const effects: Effect[] = [];
 
@@ -402,9 +493,60 @@ function updateEffects(now: number): void {
       e.obj.geometry.dispose();
       material.dispose();
       effects.splice(i, 1);
-    } else if (e.fade) {
-      material.opacity = 0.9 * (1 - age / e.life);
+    } else {
+      if (e.fade) material.opacity = 0.9 * (1 - age / e.life);
+      if (e.grow) e.obj.scale.setScalar(1 + (e.grow - 1) * (age / e.life));
     }
+  }
+}
+
+// ======================= ракеты =======================
+interface RocketFx { mesh: THREE.Mesh; dir: THREE.Vector3; born: number }
+const rocketFx = new Map<number, RocketFx>();
+
+function onRocket(m: RocketMsg): void {
+  const mesh = box(0.14, 0.14, 0.5, 0xfff0c0, false);
+  const dir = new THREE.Vector3(m.d[0], m.d[1], m.d[2]);
+  mesh.position.set(m.o[0], m.o[1], m.o[2]).addScaledVector(dir, 0.8);
+  mesh.lookAt(mesh.position.clone().add(dir));
+  scene.add(mesh);
+  rocketFx.set(m.id, { mesh, dir, born: performance.now() });
+  const dist = mesh.position.distanceTo(camera.position);
+  shotSound('rocket', m.by === me.id ? 1 : Math.max(0, 1 - dist / 70));
+}
+
+function removeRocket(id: number): void {
+  const r = rocketFx.get(id);
+  if (!r) return;
+  scene.remove(r.mesh);
+  r.mesh.geometry.dispose();
+  (r.mesh.material as THREE.Material).dispose();
+  rocketFx.delete(id);
+}
+
+function onBoom(m: BoomMsg): void {
+  removeRocket(m.id);
+  const now = performance.now();
+  // Взрыв — растущий и гаснущий куб размером с зону поражения
+  for (const [color, size, life] of [[0xff8a1f, ROCKET.radius * 2, 380], [0xfff0a0, ROCKET.radius, 260]] as const) {
+    const blast = box(1, 1, 1, color, false);
+    (blast.material as THREE.Material).transparent = true;
+    blast.position.set(m.p[0], m.p[1], m.p[2]);
+    scene.add(blast);
+    effects.push({ obj: blast, born: now, life, fade: true, grow: size });
+  }
+  const dist = Math.hypot(m.p[0] - camera.position.x, m.p[1] - camera.position.y, m.p[2] - camera.position.z);
+  shotSound('boom', Math.max(0, 1 - dist / 90));
+}
+
+function updateRockets(now: number, dt: number): void {
+  for (const [id, r] of rocketFx) {
+    // Сервер пришлёт точку взрыва; до тех пор ракета просто летит, а у стены замирает
+    const p = r.mesh.position;
+    const step = ROCKET.speed * dt;
+    const d: Vec3 = [r.dir.x, r.dir.y, r.dir.z];
+    if (rayWorld(currentMap.boxes, [p.x, p.y, p.z], d, step) >= step) p.addScaledVector(r.dir, step);
+    if (now - r.born > ROCKET.lifeMs + 1000) removeRocket(id);
   }
 }
 
@@ -448,6 +590,17 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
     case 'kill': onKill(m); break;
     case 'over': onOver(m); break;
     case 'profile': onProfile(m); break;
+    case 'crate': onCrate(m); break;
+    case 'rocket': onRocket(m); break;
+    case 'boom': onBoom(m); break;
+    case 'rockets': {
+      const had = me.ammo.rocket;
+      me.ammo.rocket = m.n;
+      if (m.n > 0 && had === 0) { setWeapon('rocket'); beep(990, 0.3); }
+      if (m.n === 0 && me.weapon === 'rocket') setWeapon('pistol');
+      updateHud();
+      break;
+    }
     case 'reset':
       roundOver = false;
       $('center-msg').textContent = '';
@@ -494,6 +647,7 @@ function onSpawn(m: SpawnMsg): void {
     me.alive = true;
     me.hp = 100;
     for (const w of WEAPON_ORDER) me.ammo[w] = WEAPONS[w].mag;
+    if (me.ammo.rocket === 0 && me.weapon === 'rocket') setWeapon('pistol');
     me.reloadUntil = 0;
     if (!roundOver) $('center-msg').textContent = '';
     updateHud();
@@ -664,9 +818,10 @@ document.addEventListener('mousedown', (e) => {
 document.addEventListener('mouseup', (e) => { if (e.button === 0) mouseDown = false; });
 document.addEventListener('wheel', (e) => {
   if (!locked) return;
-  const i = WEAPON_ORDER.indexOf(me.weapon);
-  const n = WEAPON_ORDER.length;
-  setWeapon(WEAPON_ORDER[(i + (e.deltaY > 0 ? 1 : n - 1)) % n]!);
+  const order: WeaponId[] = me.ammo.rocket > 0 ? [...WEAPON_ORDER, 'rocket'] : WEAPON_ORDER;
+  const i = order.indexOf(me.weapon);
+  const n = order.length;
+  setWeapon(order[(i + (e.deltaY > 0 ? 1 : n - 1)) % n]!);
 });
 document.addEventListener('keydown', (e) => {
   if (!joined || e.target instanceof HTMLInputElement) return;
@@ -676,6 +831,12 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'Digit1') setWeapon('pistol');
   if (e.code === 'Digit2') setWeapon('shotgun');
   if (e.code === 'Digit3') setWeapon('rifle');
+  if (e.code === 'Digit4') setWeapon('rocket');
+  if (e.code === 'KeyF' && !e.repeat) {
+    // F — начать открывать ящик; повторное нажатие отменяет и сбрасывает прогресс
+    if (openingUntil) sendMsg({ t: 'open', on: false });
+    else if (me.alive && crateState === 'idle' && nearCrate()) sendMsg({ t: 'open', on: true });
+  }
   if (e.code === 'KeyR') startReload();
   if (e.code === 'Space') e.preventDefault();
 });
@@ -692,6 +853,11 @@ function hitBox(p: THREE.Vector3): Box | null {
         p.y + PLAYER.h > b.min[1] && p.y < b.max[1] &&
         p.z + r > b.min[2] && p.z - r < b.max[2]) return b;
   }
+  // Ящик тоже твёрдый, пока его не открыли
+  const c = crateState !== 'gone' ? crateBox : null;
+  if (c && p.x + r > c.min[0] && p.x - r < c.max[0] &&
+      p.y + PLAYER.h > c.min[1] && p.y < c.max[1] &&
+      p.z + r > c.min[2] && p.z - r < c.max[2]) return c;
   return null;
 }
 
@@ -719,7 +885,7 @@ function climb(ladder: Ladder, f: number, wish: { x: number; z: number }, now: n
   const vy = f * (me.pitch > -0.4 && !facingAway ? 1 : -1) * CLIMB;
   if (me.grounded && vy <= 0) return false; // стоим на земле и не лезем вверх — обычная ходьба
 
-  if (keys.Space && !jumpHeld) {
+  if (keys.Space && !jumpHeld && !openingUntil) {
     me.vel.set(nx * 4.5, 3, nz * 4.5);
     ladderBlockedUntil = now + 350;
     return false;
@@ -740,8 +906,10 @@ function climb(ladder: Ladder, f: number, wish: { x: number; z: number }, now: n
 }
 
 function move(dt: number): void {
-  const f = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
-  const s = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
+  // Пока открываем ящик — стоим на месте
+  const frozen = openingUntil > 0;
+  const f = frozen ? 0 : (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
+  const s = frozen ? 0 : (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
   const len = Math.hypot(f, s) || 1;
   const sin = Math.sin(me.yaw), cos = Math.cos(me.yaw);
   let speed = SPEED * multiplier(profile.levels, 'walk');
@@ -756,7 +924,7 @@ function move(dt: number): void {
     const k = Math.min(1, accel * dt);
     me.vel.x += (wish.x - me.vel.x) * k;
     me.vel.z += (wish.z - me.vel.z) * k;
-    if (keys.Space && me.grounded) { me.vel.y = JUMP; me.grounded = false; }
+    if (keys.Space && me.grounded && !frozen) { me.vel.y = JUMP; me.grounded = false; }
     me.vel.y -= GRAVITY * dt;
   }
   jumpHeld = !!keys.Space;
@@ -783,6 +951,7 @@ function move(dt: number): void {
 // ======================= стрельба =======================
 function startReload(): void {
   const w = WEAPONS[me.weapon];
+  if (me.weapon === 'rocket') return; // ракетница не перезаряжается
   if (me.reloadUntil || me.ammo[me.weapon] >= w.mag || !me.alive) return;
   me.reloadUntil = performance.now() + w.reload / multiplier(profile.levels, 'reload');
   beep(300, 0.08, 0.08);
@@ -839,15 +1008,28 @@ function fire(now: number): void {
   updateHud();
 }
 
+function fireRocket(now: number): void {
+  if (me.ammo.rocket <= 0) return;
+  me.nextShot = now + WEAPONS.rocket.rate;
+  firedThisPress = true;
+  me.ammo.rocket--; // сервер пришлёт точное число
+  camera.getWorldDirection(_dir);
+  sendMsg({ t: 'rocket', d: [+_dir.x.toFixed(4), +_dir.y.toFixed(4), +_dir.z.toFixed(4)] });
+  kick = 0.16;
+  me.pitch = Math.min(1.5, me.pitch + 0.04);
+  updateHud();
+}
+
 function updateShooting(now: number): void {
   if (me.reloadUntil && now >= me.reloadUntil) {
     me.ammo[me.weapon] = WEAPONS[me.weapon].mag;
     me.reloadUntil = 0;
     updateHud();
   }
-  if (!mouseDown || !me.alive || !locked || me.reloadUntil || now < me.nextShot) return;
+  if (!mouseDown || !me.alive || !locked || me.reloadUntil || now < me.nextShot || openingUntil) return;
   const w = WEAPONS[me.weapon];
   if (!w.auto && firedThisPress) return;
+  if (me.weapon === 'rocket') { fireRocket(now); return; }
   if (me.ammo[me.weapon] <= 0) { startReload(); return; }
   fire(now);
 }
@@ -879,8 +1061,10 @@ function updateHud(): void {
   $('health').classList.toggle('low', me.hp <= 30);
   $('weapon-name').textContent = WEAPONS[me.weapon].name;
   $('ammo-count').textContent = me.reloadUntil ? '…' : String(me.ammo[me.weapon]);
+  $('ammo-total').textContent = me.weapon === 'rocket' ? ' ракет' : ' / ∞';
   for (const s of $('slots').querySelectorAll<HTMLElement>('span')) {
     s.classList.toggle('active', s.dataset.w === me.weapon);
+    if (s.dataset.w === 'rocket') s.classList.toggle('hidden', me.ammo.rocket <= 0);
   }
 
   const score = $('score');
@@ -1020,6 +1204,27 @@ function renderUpgrades(): void {
 }
 renderUpgrades();
 
+// ======================= подсказка и полоска открытия ящика =======================
+function updateCratePrompt(now: number): void {
+  const prompt = $('crate-prompt');
+  let text = '';
+  let progress = -1;
+  if (joined && me.alive && crateState !== 'gone') {
+    if (openingUntil) {
+      progress = Math.max(0, Math.min(1, 1 - (openingUntil - now) / CRATE.openMs));
+      text = 'Открываю ящик… F — отмена';
+    } else if (nearCrate()) {
+      const opener = crateState === 'opening' ? roster.find((p) => p.id === crateBy) : null;
+      text = opener ? `Ящик открывает ${opener.name}` : 'F — открыть ящик (5 сек., двигаться нельзя)';
+    }
+  }
+  prompt.classList.toggle('hidden', !text);
+  if (!text) return;
+  $('crate-text').textContent = text;
+  $('crate-bar').classList.toggle('hidden', progress < 0);
+  $('crate-fill').style.width = `${Math.round(Math.max(0, progress) * 100)}%`;
+}
+
 // ======================= главный цикл =======================
 let last = performance.now(), sendAcc = 0;
 function frame(now: number): void {
@@ -1076,7 +1281,9 @@ function frame(now: number): void {
     r.gun.flash.visible = now < r.flashUntil;
   }
 
+  updateRockets(now, dt);
   updateEffects(now);
+  updateCratePrompt(now);
   renderer.render(scene, camera);
 }
 

@@ -19,14 +19,19 @@
     <div id="health"><span class="label">HP</span><span id="hp">100</span></div>
     <div id="ammo">
       <div id="weapon-name">Пистолет</div>
-      <div><span id="ammo-count">12</span><span class="label"> / ∞</span></div>
+      <div><span id="ammo-count">12</span><span class="label" id="ammo-total"> / ∞</span></div>
       <div id="slots">
         <span data-w="pistol">1 Пистолет</span>
         <span data-w="shotgun">2 Дробовик</span>
         <span data-w="rifle">3 Винтовка</span>
+        <span data-w="rocket" class="hidden">4 Ракетница</span>
       </div>
     </div>
     <div id="center-msg"></div>
+    <div id="crate-prompt" class="hidden">
+      <div id="crate-text"></div>
+      <div id="crate-bar"><div id="crate-fill"></div></div>
+    </div>
     <div id="crown-note" class="hidden">♛ Корона у тебя</div>
     <div id="upgrade-note" class="hidden">Есть очко прокачки — нажми Esc</div>
     <div id="scoreboard" class="hidden"></div>
@@ -36,7 +41,7 @@
     <div class="panel wide">
       <button id="resume" class="primary" type="button">ИГРАТЬ</button>
       <p>WASD — движение · Shift — спринт · Пробел — прыжок · ЛКМ — огонь<br>
-         1 / 2 / 3 или колесо — оружие · R — перезарядка · Tab — счёт · Esc — это меню</p>
+         1 / 2 / 3 или колесо — оружие · R — перезарядка · F — открыть ящик · Tab — счёт · Esc — это меню</p>
 
       <h3>Настройки</h3>
       <div class="settings"></div>

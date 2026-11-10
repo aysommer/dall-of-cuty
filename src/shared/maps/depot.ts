@@ -61,6 +61,7 @@ export const DEPOT: GameMap = {
   sky: '#cfd8e3',
   boxes,
   ladders,
+  crate: [0, DECK, 0], // посередине моста
   spawns: {
     green,
     red,

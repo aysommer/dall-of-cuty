@@ -79,5 +79,6 @@ export const SANDS: GameMap = {
   sky: '#9fc9ea',
   boxes,
   ladders: [],
+  crate: [25, 0, 0], // в туннеле, на равном расстоянии от обеих баз
   spawns,
 };
