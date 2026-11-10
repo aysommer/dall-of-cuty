@@ -289,6 +289,22 @@ function loadMap(id: MapId): void {
     mapGroup.add(m);
   }
   for (const l of currentMap.ladders) mapGroup.add(buildLadder(l));
+  for (const pad of currentMap.pads ?? []) {
+    const cx = (pad.min[0] + pad.max[0]) / 2, cz = (pad.min[2] + pad.max[2]) / 2;
+    const glow = box(pad.max[0] - pad.min[0] - 0.4, 0.04, pad.max[2] - pad.min[2] - 0.4, 0xffb3d9, false);
+    glow.position.set(cx, pad.max[1] + 0.02, cz);
+    mapGroup.add(glow);
+    // Стрелка из двух полосок, острием к цели прыжка
+    const yaw = Math.atan2(pad.vel[0], pad.vel[2]);
+    for (const side of [-1, 1]) {
+      const bar = box(0.12, 0.05, 0.9, 0xff3d9a, false);
+      bar.position.set(cx, pad.max[1] + 0.05, cz);
+      bar.rotation.y = yaw + side * 0.6;
+      bar.translateZ(0.25);
+      bar.translateX(side * -0.2);
+      mapGroup.add(bar);
+    }
+  }
 
   crateMesh = buildCrate();
   crateMesh.visible = false;
@@ -1419,6 +1435,19 @@ function touchingLadder(p: THREE.Vector3): Ladder | null {
 }
 
 let ladderBlockedUntil = 0; // после спрыгивания лестница ненадолго «не липнет»
+/** Шаг на невысокий уступ (трамплин, ступенька): до STEP_UP метров — без прыжка. */
+const STEP_UP = 0.35;
+function stepUp(p: THREE.Vector3): boolean {
+  if (!me.grounded) return false;
+  const b = hitBox(p);
+  if (!b || b.max[1] - p.y > STEP_UP || b.max[1] <= p.y) return false;
+  const y = p.y;
+  p.y = b.max[1] + 0.001;
+  if (hitBox(p)) { p.y = y; return false; } // сверху нет места
+  return true;
+}
+/** Летим после трамплина — до приземления */
+let padFlight = false;
 let jumpHeld = false;
 
 /**
@@ -1496,7 +1525,8 @@ function move(dt: number): void {
     me.vel.z = slideDir.z * v;
     me.vel.y -= GRAVITY * dt;
   } else if (!ladder || !climb(ladder, f, wish, now)) {
-    const accel = me.grounded ? 14 : 4;
+    // В полёте после трамплина скорость почти не гасится — иначе до острова не долететь
+    const accel = me.grounded ? 14 : padFlight ? 0.6 : 4;
     const k = Math.min(1, accel * dt);
     me.vel.x += (wish.x - me.vel.x) * k;
     me.vel.z += (wish.z - me.vel.z) * k;
@@ -1506,9 +1536,9 @@ function move(dt: number): void {
   jumpHeld = !!keys.Space;
 
   p.x += me.vel.x * dt;
-  if (hitBox(p)) { p.x -= me.vel.x * dt; me.vel.x = 0; }
+  if (hitBox(p) && !stepUp(p)) { p.x -= me.vel.x * dt; me.vel.x = 0; }
   p.z += me.vel.z * dt;
-  if (hitBox(p)) { p.z -= me.vel.z * dt; me.vel.z = 0; }
+  if (hitBox(p) && !stepUp(p)) { p.z -= me.vel.z * dt; me.vel.z = 0; }
 
   p.y += me.vel.y * dt;
   me.grounded = false;
@@ -1521,6 +1551,22 @@ function move(dt: number): void {
       if (me.vel.y <= 0) { p.y = b.max[1]; me.grounded = true; }
       else p.y = b.min[1] - (low ? SLIDE.height : PLAYER.h) - 0.001;
       me.vel.y = 0;
+    }
+  }
+  if (me.grounded) padFlight = false;
+
+  // Трамплин: встал на него — подбрасывает в его сторону
+  if (me.grounded && !frozen) {
+    for (const pad of currentMap.pads ?? []) {
+      if (p.x >= pad.min[0] && p.x <= pad.max[0] && p.z >= pad.min[2] && p.z <= pad.max[2] &&
+          Math.abs(p.y - pad.max[1]) < 0.05) {
+        me.vel.set(pad.vel[0], pad.vel[1], pad.vel[2]);
+        me.grounded = false;
+        padFlight = true;
+        beep(320, 0.12, 0.12);
+        setTimeout(() => beep(640, 0.15, 0.1), 60);
+        break;
+      }
     }
   }
 
