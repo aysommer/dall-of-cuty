@@ -3,6 +3,7 @@
 import type { Vec3, WeaponId } from './protocol.js';
 import { SANDS } from './maps/sands.js';
 import { BRICKS } from './maps/bricks.js';
+import { DEPOT } from './maps/depot.js';
 import type { Box, GameMap, MapId } from './maps/types.js';
 
 export type { Box, GameMap, Ladder, MapId, SpawnPoint } from './maps/types.js';
@@ -27,8 +28,8 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
 };
 export const WEAPON_ORDER: WeaponId[] = ['pistol', 'shotgun', 'rifle'];
 
-export const MAPS: Record<MapId, GameMap> = { sands: SANDS, bricks: BRICKS };
-export const MAP_ORDER: MapId[] = ['sands', 'bricks'];
+export const MAPS: Record<MapId, GameMap> = { sands: SANDS, bricks: BRICKS, depot: DEPOT };
+export const MAP_ORDER: MapId[] = ['sands', 'bricks', 'depot'];
 
 export function isMapId(v: unknown): v is MapId {
   return typeof v === 'string' && Object.hasOwn(MAPS, v);

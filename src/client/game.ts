@@ -202,9 +202,38 @@ function nameSprite(text: string, team: Team): THREE.Sprite {
   return s;
 }
 
+/** Корона лидера — тоже из кубиков: обод и зубцы. */
+function buildCrown(): THREE.Group {
+  const GOLD = 0xffc928;
+  const g = new THREE.Group();
+  const band = box(0.52, 0.1, 0.52, GOLD);
+  band.position.y = 0.05;
+  g.add(band);
+  for (const [x, z] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2], [0, -0.2], [0, 0.2], [-0.2, 0], [0.2, 0]] as const) {
+    const prong = box(0.1, 0.16, 0.1, GOLD);
+    prong.position.set(x, 0.18, z);
+    g.add(prong);
+  }
+  g.position.y = PLAYER.h;
+  g.visible = false;
+  return g;
+}
+
+/** Лидер — единственный игрок с наибольшим числом убийств. При ничьей лидера нет. */
+function leaderId(): number | null {
+  let best: PlayerInfo | null = null, tie = false;
+  for (const p of roster) {
+    if (!best || p.kills > best.kills) { best = p; tie = false; }
+    else if (p.kills === best.kills) tie = true;
+  }
+  return best && !tie && best.kills > 0 ? best.id : null;
+}
+
 interface Remote {
   info: PlayerInfo;
   g: THREE.Group;
+  crown: THREE.Group;
+  label: THREE.Sprite;
   hand: THREE.Group;
   gun: Gun;
   w: WeaponId;
@@ -237,11 +266,13 @@ function buildPlayer(info: PlayerInfo): Remote {
   const label = nameSprite(info.name, info.team);
   label.position.y = PLAYER.h + 0.35;
   g.add(label);
+  const crown = buildCrown();
+  g.add(crown);
   scene.add(g);
   const gun = remoteGun('pistol');
   hand.add(gun.group);
   return {
-    info, g, hand, gun, w: 'pistol',
+    info, g, crown, label, hand, gun, w: 'pistol',
     pos: new THREE.Vector3(), target: new THREE.Vector3(),
     yaw: 0, targetYaw: 0, pitch: 0, flashUntil: 0,
   };
@@ -445,6 +476,12 @@ function onPlayers(m: PlayersMsg): void {
   for (const [id, r] of remotes) {
     if (!seen.has(id)) { scene.remove(r.g); remotes.delete(id); }
   }
+  const leader = leaderId();
+  for (const [id, r] of remotes) {
+    r.crown.visible = id === leader;
+    r.label.position.y = PLAYER.h + (id === leader ? 0.7 : 0.35); // имя — над короной
+  }
+  $('crown-note').classList.toggle('hidden', leader !== me.id);
   updateHud();
 }
 
@@ -874,13 +911,14 @@ function renderScoreboard(): void {
     th.className = cls;
     head.append(th);
   }
+  const leader = leaderId();
   const order: Record<Team, number> = { green: 0, red: 1 };
   const list = [...roster].sort((a, b) =>
     (mode === 'tdm' ? order[a.team] - order[b.team] : 0) || b.kills - a.kills);
   for (const p of list) {
     const row = table.insertRow();
     if (p.id === me.id) row.className = 'me';
-    const n = row.insertCell(); n.textContent = p.name; n.className = 't-' + p.team;
+    const n = row.insertCell(); n.textContent = (p.id === leader ? '♛ ' : '') + p.name; n.className = 't-' + p.team;
     const k = row.insertCell(); k.textContent = String(p.kills); k.className = 'n';
     const d = row.insertCell(); d.textContent = String(p.deaths); d.className = 'n';
   }
