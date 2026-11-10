@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { MAPS, WEAPONS, PLAYER, isMapId, isWeapon, lineOfSight, type MapId, type SpawnPoint } from '../shared/map.js';
+import { MAPS, WEAPONS, PLAYER, isMapId, isWeapon, lineOfSight, type MapId } from '../shared/map.js';
+import { chooseSpawn } from './spawn.js';
 import { isStat, maxLevel, pointsLeft, type Profile } from '../shared/progress.js';
 import { decodeProfile, encodeProfile } from './progress.js';
 import type { InfoMsg, Mode, ServerMsg, SnapRow, Team, Vec3, WeaponId, Winner } from '../shared/protocol.js';
@@ -126,26 +127,8 @@ function broadcastPlayers(): void {
   });
 }
 
-function pickSpawn(p: Player): SpawnPoint {
-  const spawns = MAPS[mapId].spawns;
-  const list = mode === 'tdm' ? spawns[p.team] : spawns.ffa;
-  // Выбираем точку, максимально удалённую от остальных живых игроков
-  let best = list[0]!;
-  let bestDist = -1;
-  for (const s of list) {
-    let d = 1000;
-    for (const o of players.values()) {
-      if (o.id === p.id || !o.alive) continue;
-      d = Math.min(d, Math.hypot(o.pos[0] - s[0], o.pos[2] - s[1]));
-    }
-    d += Math.random() * 3;
-    if (d > bestDist) { bestDist = d; best = s; }
-  }
-  return best;
-}
-
 function spawn(p: Player): void {
-  const s = pickSpawn(p);
+  const s = chooseSpawn(MAPS[mapId], mode, p, players.values());
   p.pos = [s[0], s[3] ?? 0, s[1]];
   p.yaw = s[2];
   p.hp = 100;

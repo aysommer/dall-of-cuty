@@ -2,7 +2,7 @@
 // Две базы на возвышении друг напротив друга, открытая середина с укрытиями
 // и башня в центре, на которую ведут две лестницы.
 // Цвета блоков нарочно не зелёные и не красные, чтобы игроки с ними не сливались.
-import { builder, type GameMap, type Ladder } from './types.js';
+import { builder, type GameMap, type Ladder, type SpawnPoint } from './types.js';
 
 const HALF = { x: 16, z: 28 };
 const WALL_H = 7;
@@ -32,6 +32,8 @@ sym(-6, 22, -2, 22.8, 1.2, YELLOW, BASE_H);
 sym(2, 22, 6, 22.8, 1.2, YELLOW, BASE_H);
 sym(10, 22, 14, 22.8, 1.2, BLUE, BASE_H);
 sym(13, 25, 16, 28, 1.2, ORANGE, BASE_H);                   // угловая тумба повыше
+sym(-11, 24.2, -4, 24.8, 2.6, CYAN, BASE_H);                // стенки, за которыми появляются игроки:
+sym(4, 24.2, 11, 24.8, 2.6, CYAN, BASE_H);                  // закрывают и от чужой базы, и от башни
 
 // --- Середина ---
 sym(-12, 9, -5, 10, 1.4, ORANGE);                           // длинная низкая стенка
@@ -55,13 +57,19 @@ const ladders: Ladder[] = [
   { min: [-TOWER - LADDER_D, 0, -LADDER_W], max: [-TOWER, TOWER_H + 0.4, LADDER_W], normal: [-1, 0] },
 ];
 
-const N = Math.PI; // взгляд на юг (+z)
+const S = Math.PI; // взгляд на юг (+z)
+const P = BASE_H;
+const green: SpawnPoint[] = [
+  [-9.5, 26.6, 0, P], [-5.5, 26.6, 0, P], [5.5, 26.6, 0, P], [9.5, 26.6, 0, P], [-7.5, 26.6, 0, P], [7.5, 26.6, 0, P],
+];
+const red: SpawnPoint[] = green.map(([x, z, , y]) => [-x, -z, S, y]);
 const spawns: GameMap['spawns'] = {
-  green: [[-9, 25.5, 0, BASE_H], [-3, 25.5, 0, BASE_H], [3, 25.5, 0, BASE_H], [9, 25.5, 0, BASE_H]],
-  red: [[-9, -25.5, N, BASE_H], [-3, -25.5, N, BASE_H], [3, -25.5, N, BASE_H], [9, -25.5, N, BASE_H]],
+  green,
+  red,
   ffa: [
-    [-9, 25.5, 0, BASE_H], [9, 25.5, 0, BASE_H], [-9, -25.5, N, BASE_H], [9, -25.5, N, BASE_H],
-    [-14, 6, 0], [14, -6, N], [13, 17, 0], [-13, -17, N],
+    ...green, ...red,
+    [-14, 6, 0], [14, -6, S], [13, 17, 0], [-13, -17, S],
+    [7, 14.2, 0], [-7, -14.2, S], [-8, 19.2, 0], [8, -19.2, S],
   ],
 };
 

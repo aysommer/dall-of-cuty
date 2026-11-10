@@ -1,5 +1,5 @@
 // Карта «Пески»: две базы и три линии — открытая «длина», центр с дверями, крытый туннель.
-import { builder, type GameMap } from './types.js';
+import { builder, type GameMap, type SpawnPoint } from './types.js';
 
 const WORLD = { half: 30, wallH: 6 };
 
@@ -58,13 +58,16 @@ b(-22, 23, -20, 25, 1.2, CRATE_LIGHT);
 b(20, -25, 22, -23, 1.2, CRATE_LIGHT);
 
 // Точки появления: [x, z, yaw]. yaw = 0 — взгляд на север (-z).
+const S = Math.PI; // взгляд на юг (+z)
+const green: SpawnPoint[] = [[-12, 26, 0], [-6, 26, 0], [6, 26, 0], [12, 26, 0], [-24, 27, 0], [24, 27, 0]];
+const red: SpawnPoint[] = [[-12, -26, S], [-6, -26, S], [6, -26, S], [12, -26, S], [-24, -27, S], [24, -27, S]];
 const spawns: GameMap['spawns'] = {
-  green: [[-6, 26, 0], [-2, 26, 0], [2, 26, 0], [6, 26, 0]],
-  red: [[-6, -26, Math.PI], [-2, -26, Math.PI], [2, -26, Math.PI], [6, -26, Math.PI]],
+  green,
+  red,
   ffa: [
-    [-6, 26, 0], [6, 26, 0], [-6, -26, Math.PI], [6, -26, Math.PI],
-    [-26, 16, 0], [-26, -18, Math.PI], [26, 16, 0], [26, -16, Math.PI],
-    [-22, 27, 0], [22, -27, Math.PI],
+    ...green, ...red,
+    [-26, 16, 0], [-26, -18, S], [26, 16, 0], [26, -16, S],
+    [-22, 4, 0], [16, 6, S], [-16, -6, 0], [27, -7, S],
   ],
 };
 
