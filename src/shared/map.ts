@@ -46,7 +46,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
  */
 export const CRATE = {
   size: 1.2, height: 0.9, reach: 2.4, openMs: 5000,
-  dropEveryMs: 180_000, dropChance: 0.5, fallMs: 4000, fallHeight: 40, lifeMs: 120_000,
+  dropEveryMs: 60_000, dropChance: 0.5, fallMs: 4000, fallHeight: 40, lifeMs: 120_000,
   trapChance: 0.1, trapRadius: 5,
 };
 export const ROCKET = { speed: 35, radius: 4, lifeMs: 4000 };
