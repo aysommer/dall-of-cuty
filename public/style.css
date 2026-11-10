@@ -146,6 +146,11 @@ details.field .settings { margin-top: 10px; }
 }
 #toast { top: 70%; }
 #armor { margin-left: 14px; color: #c9d48a; }
+#helmet { margin-left: 10px; color: #b8c2cc; }
+/* Своё пиксельное лицо рядом с HP */
+#my-face { width: 48px; height: 30px; image-rendering: pixelated; margin-right: 10px; vertical-align: middle; background: #2a2f3a; }
+#limit-value { margin-top: 6px; }
+#scoreboard .rank { color: #c9b98a; font-size: 11px; }
 #crosshair.sight { display: none; }
 #crown-note {
   position: absolute; top: 56px; left: 50%; transform: translateX(-50%);

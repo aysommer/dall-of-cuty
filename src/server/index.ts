@@ -6,13 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
   AMMO_PACK, ARMOR, CRATE, DEFAULT_KIT, HEAD, MAPS, MAP_ORDER, MATCH, MEDKIT, PLAYER, ROCKET, SLIDE, STREAK, THROW, WEAPONS,
-  bodyPoints, isKit, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
-  type MapId, type StreakKind,
+  WEATHER, bodyPoints, isKit, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
+  type LimitKind, type MapId, type StreakKind, type WeatherKind,
 } from '../shared/map.js';
 import { chooseSpawn } from './spawn.js';
 import { isStat, maxLevel, pointsLeft, type Profile } from '../shared/progress.js';
 import { decodeProfile, encodeProfile } from './progress.js';
 import { EMOJIS, SPRAY } from '../shared/emoji.js';
+import { rankOf } from '../shared/ranks.js';
 import type {
   CrateState, InfoMsg, KillWeapon, Mode, ServerMsg, SnapRow, Team, Vec3, WeaponId, Winner,
 } from '../shared/protocol.js';
@@ -23,7 +24,6 @@ const PORT = Number(process.env.PORT) || 3000;
 const MAX_PLAYERS = 4;
 const TEAM_SIZE = 2;
 const RESPAWN_MS = 3000;
-const LIMIT: Record<Mode, number> = { tdm: 20, ffa: 15 };
 
 interface Player {
   id: number;
@@ -59,6 +59,8 @@ interface Player {
   uavUntil: number;
   /** Суперброня: игрок в 1,5 раза больше */
   big: boolean;
+  /** Шлем Джаггернаута: сколько попаданий в голову ещё выдержит */
+  helmet: number;
   /** Выбранные стволы (не больше двух), нож — всегда */
   kit: WeaponId[];
   respawnTimer?: NodeJS.Timeout;
@@ -112,8 +114,13 @@ let mode: Mode = 'tdm';
 let mapId: MapId = 'sands';
 /** Матч окончен — идёт голосование за карту; урон и награды не засчитываются */
 let roundOver = false;
-let matchMinutes = 10;
+/** Матч ограничен временем (минуты) или числом убийств — на выбор первого игрока */
+let limitKind: LimitKind = 'time';
+let limitValue = 10;
 let matchEndsAt = 0;
+function startMatchClock(): void {
+  matchEndsAt = limitKind === 'time' ? Date.now() + limitValue * 60_000 : Infinity;
+}
 let voteTimer: NodeJS.Timeout | undefined;
 /** Голоса за карту: id игрока → карта */
 const votes = new Map<number, MapId>();
@@ -136,7 +143,7 @@ function teamCount(team: Team): number {
   return n;
 }
 function lobbyInfo(): InfoMsg {
-  return { t: 'info', mode, map: mapId, minutes: matchMinutes, count: players.size, green: teamCount('green'), red: teamCount('red'), max: MAX_PLAYERS };
+  return { t: 'info', mode, map: mapId, limitKind, limitValue, count: players.size, green: teamCount('green'), red: teamCount('red'), max: MAX_PLAYERS };
 }
 function broadcastInfo(): void {
   const data = JSON.stringify(lobbyInfo());
@@ -151,12 +158,12 @@ function broadcastPlayers(): void {
   broadcast({
     t: 'players',
     mode,
-    limit: LIMIT[mode],
-    left: roundOver ? 0 : Math.max(0, matchEndsAt - Date.now()),
+    limit: limitKind === 'kills' ? limitValue : 0,
+    left: roundOver || limitKind !== 'time' ? 0 : Math.max(0, matchEndsAt - Date.now()),
     scores: teamScores(),
     list: [...players.values()].map((p) => ({
       id: p.id, name: p.name, team: p.team, hp: p.hp, armor: p.armor, alive: p.alive, kills: p.kills, deaths: p.deaths,
-      big: p.big,
+      big: p.big, rank: rankOf(p.profile.kills), helmet: p.helmet,
     })),
   });
 }
@@ -168,6 +175,7 @@ function spawn(p: Player): void {
   p.hp = 100;
   p.armor = 0;
   p.big = false;
+  p.helmet = 0;
   p.slide = false;
   p.hasKnife = true; // нож возвращается после смерти
   p.alive = true;
@@ -200,12 +208,13 @@ function resetRound(): void {
 function checkWin(): void {
   if (roundOver) return;
   let winner: Winner | null = null;
+  if (limitKind !== 'kills') return;
   if (mode === 'tdm') {
     const s = teamScores();
-    if (s.green >= LIMIT.tdm) winner = { team: 'green' };
-    else if (s.red >= LIMIT.tdm) winner = { team: 'red' };
+    if (s.green >= limitValue) winner = { team: 'green' };
+    else if (s.red >= limitValue) winner = { team: 'red' };
   } else {
-    for (const p of players.values()) if (p.kills >= LIMIT.ffa) winner = { id: p.id, name: p.name };
+    for (const p of players.values()) if (p.kills >= limitValue) winner = { id: p.id, name: p.name };
   }
   if (winner) endMatch(winner);
 }
@@ -262,7 +271,7 @@ function finishVote(): void {
   votes.clear();
   voteTimer = undefined;
   broadcast({ t: 'newmap', map: mapId });
-  matchEndsAt = Date.now() + matchMinutes * 60_000;
+  startMatchClock();
   resetRound();
   broadcastInfo();
   console.log(`Новый матч на карте ${mapId}`);
@@ -281,6 +290,7 @@ function killPlayer(killer: Player | null, v: Player, w: KillWeapon, head = fals
   v.hp = 0;
   v.armor = 0;
   v.big = false;
+  v.helmet = 0;
   v.alive = false;
   v.deaths++;
   // Смерть обрывает серию; награды в запасе остаются
@@ -289,8 +299,11 @@ function killPlayer(killer: Player | null, v: Player, w: KillWeapon, head = fals
   // Подорвавшемуся на своей ракете убийство не засчитывается
   if (killer && killer !== v) {
     killer.kills++;
+    const rankBefore = rankOf(killer.profile.kills);
     killer.profile.kills++;
     sendProfile(killer);
+    const rank = rankOf(killer.profile.kills);
+    if (rank > rankBefore) send(killer.ws, { t: 'promoted', rank });
     // Убийства бомбой серию не продолжают
     if (w !== 'nuke' && killer.alive) addStreak(killer);
   }
@@ -319,8 +332,10 @@ function addStreak(p: Player): void {
   if (p.streak === STREAK.missile) p.missile++;
   if (p.streak === STREAK.launcher) setRockets(p, Math.max(p.rockets, 6));
   if (p.streak === STREAK.superArmor) {
+    // Джаггернаут: суперброня, полтора размера и шлем, который держит выстрелы в голову
     p.armor = STREAK.superArmorHp;
     p.big = true;
+    p.helmet = STREAK.helmetHits;
   }
   if (p.streak === STREAK.nuke) p.nuke++;
   sendLoadout(p);
@@ -480,8 +495,10 @@ function stepKnives(dt: number): void {
     let victim: Player | null = null;
     for (const v of players.values()) {
       if (!v.alive || !isEnemy(owner, v)) continue;
+      // Хитбокс для ножа чуть шире, чтобы бросок «впритирку» по краю засчитывался
       const [min, max] = playerBox(v.pos, v.yaw, v.slide, scaleOf(v));
-      const tv = rayBox(k.pos, dir, min, max);
+      const pad = THROW.pad;
+      const tv = rayBox(k.pos, dir, [min[0] - pad, min[1] - pad, min[2] - pad], [max[0] + pad, max[1] + pad, max[2] + pad]);
       if (tv < t) { t = tv; victim = v; }
     }
     const at: Vec3 = [k.pos[0] + dir[0] * t, k.pos[1] + dir[1] * t, k.pos[2] + dir[2] * t];
@@ -637,6 +654,29 @@ function explodeCrate([cx, cy, cz]: Vec3): void {
     if (!covered) killPlayer(null, v, 'crate');
   }
   broadcastPlayers();
+}
+
+// ---------- погода ----------
+let weather: { kind: WeatherKind; until: number } | null = null;
+let lastWeatherRoll = 0;
+function weatherMsg(): ServerMsg {
+  const now = Date.now();
+  return weather && weather.until > now
+    ? { t: 'weather', kind: weather.kind, ms: weather.until - now }
+    : { t: 'weather', kind: null, ms: 0 };
+}
+/** Раз в WEATHER.everyMs с вероятностью WEATHER.chance — дождь или снег на минуту. */
+function stepWeather(now: number): void {
+  if (weather && now >= weather.until) {
+    weather = null;
+    broadcast(weatherMsg());
+  }
+  if (!lastWeatherRoll) lastWeatherRoll = now;
+  if (now - lastWeatherRoll < WEATHER.everyMs) return;
+  lastWeatherRoll = now;
+  if (weather || roundOver || Math.random() >= WEATHER.chance) return;
+  weather = { kind: Math.random() < 0.5 ? 'rain' : 'snow', until: now + WEATHER.ms };
+  broadcast(weatherMsg());
 }
 
 // ---------- патроны с трупов ----------
@@ -818,7 +858,8 @@ function handleSpray(p: Player, msg: Incoming): void {
 function hurt(attacker: Player, v: Player, dmg: number, w: KillWeapon, head: boolean): void {
   const absorbed = Math.min(v.armor, dmg);
   v.armor = Math.round(v.armor - absorbed);
-  if (v.armor <= 0) v.big = false; // суперброня кончилась — игрок снова обычного размера
+  // Суперброня кончилась — игрок снова обычного размера и без шлема
+  if (v.armor <= 0) { v.big = false; v.helmet = 0; }
   v.hp = Math.max(0, Math.round(v.hp - (dmg - absorbed)));
   if (v.hp <= 0) killPlayer(attacker, v, w, head);
 }
@@ -859,6 +900,13 @@ function handleShoot(p: Player, msg: Incoming): void {
     // Голову засчитываем, только если её видно и игрок стоит (в подкате головы как зоны нет)
     const headPt: Vec3 = [v.pos[0], v.pos[1] + (PLAYER.h - 0.1) * scaleOf(v), v.pos[2]];
     if (head && (v.slide || !lineOfSight(walls, eye, headPt))) { body += head; head = 0; }
+    // Шлем Джаггернаута: выстрел в голову урона не наносит, а только сбивает шлем (одно попадание за выстрел)
+    if (head && v.helmet > 0) {
+      v.helmet--;
+      head = 0;
+      broadcast({ t: 'helmet', id: v.id, by: p.id, left: v.helmet });
+      if (body === 0) { broadcastPlayers(); continue; }
+    }
 
     if (w.melee) { killPlayer(p, v, weaponId); continue; }
     if (head && w.headKill) { killPlayer(p, v, weaponId, true); continue; }
@@ -881,9 +929,15 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
   if (players.size === 0) {
     mode = msg.mode === 'ffa' ? 'ffa' : 'tdm';
     mapId = isMapId(msg.map) ? msg.map : 'sands';
-    const minutes = Number(msg.minutes);
-    matchMinutes = (MATCH.minutes as readonly number[]).includes(minutes) ? minutes : 10;
-    matchEndsAt = Date.now() + matchMinutes * 60_000;
+    const value = Number(msg.limitValue);
+    if (msg.limitKind === 'kills' && (MATCH.kills as readonly number[]).includes(value)) {
+      limitKind = 'kills';
+      limitValue = value;
+    } else {
+      limitKind = 'time';
+      limitValue = (MATCH.minutes as readonly number[]).includes(value) ? value : 10;
+    }
+    startMatchClock();
     roundOver = false;
     clearTimeout(voteTimer);
     votes.clear();
@@ -902,7 +956,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
     hp: 100, armor: 0, alive: false, kills: 0, deaths: 0, lastShot: 0, lastSpray: 0,
     profile: decodeProfile(msg.token),
     rockets: 0,
-    hasKnife: true, streak: 0, uav: 0, missile: 0, nuke: 0, uavUntil: 0, big: false,
+    hasKnife: true, streak: 0, uav: 0, missile: 0, nuke: 0, uavUntil: 0, big: false, helmet: 0,
     kit: isKit(msg.kit) ? msg.kit : [...DEFAULT_KIT],
   };
   players.set(p.id, p);
@@ -912,6 +966,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
   send(ws, crateMsg());
   send(ws, medkitsMsg());
   send(ws, packsMsg());
+  send(ws, weatherMsg());
   broadcastPlayers();
   spawn(p);
   broadcastPlayers();
@@ -996,6 +1051,8 @@ wss.on('connection', (ws) => {
       nukeTimer = undefined;
       votes.clear();
       roundOver = false;
+      weather = null;
+      lastWeatherRoll = 0;
       stopDrops();
     }
     broadcastPlayers();
@@ -1012,6 +1069,7 @@ setInterval(() => {
   if (players.size) {
     sendPings(now);
     expireAmmoPacks(now);
+    stepWeather(now);
     // Ракета с неба, которую не довели до цели, взрывается сама
     for (const m of missiles.values()) if (now - m.born > STREAK.missileMaxMs) detonateMissile(m, m.last);
     // Время матча вышло

@@ -2,11 +2,11 @@
 
 import type { Levels, Stat } from './progress.js';
 import type { MapId } from './maps/types.js';
-import type { StreakKind } from './map.js';
+import type { LimitKind, StreakKind, WeatherKind } from './map.js';
 
 export type Team = 'green' | 'red';
 export type Mode = 'tdm' | 'ffa';
-export type WeaponId = 'pistol' | 'shotgun' | 'rifle' | 'sniper' | 'knife' | 'rocket';
+export type WeaponId = 'pistol' | 'shotgun' | 'rifle' | 'lmg' | 'sniper' | 'knife' | 'rocket';
 /** falling — летит с неба, idle — лежит, opening — его открывают, gone — ящика нет */
 export type CrateState = 'falling' | 'idle' | 'opening' | 'gone';
 export type Vec3 = [number, number, number];
@@ -23,6 +23,10 @@ export interface PlayerInfo {
   deaths: number;
   /** Суперброня из серии: игрок в 1,5 раза больше */
   big: boolean;
+  /** Звание: номер в RANKS (по убийствам за всё время) */
+  rank: number;
+  /** Шлем Джаггернаута: сколько попаданий в голову он ещё выдержит (0 — шлема нет) */
+  helmet: number;
 }
 
 /** [id, x, y, z, yaw, pitch, оружие, подкат 0/1] */
@@ -39,8 +43,11 @@ export interface Winner {
 /** Чем убили: оружие, ящик-ловушка, метательный нож, ракета с неба или бомба. */
 export type KillWeapon = WeaponId | 'crate' | 'throw' | 'missile' | 'nuke';
 
-export type InfoMsg = { t: 'info'; mode: Mode; map: MapId; minutes: number; count: number; green: number; red: number; max: number };
-/** left — сколько миллисекунд осталось до конца матча */
+export type InfoMsg = {
+  t: 'info'; mode: Mode; map: MapId; limitKind: LimitKind; limitValue: number;
+  count: number; green: number; red: number; max: number;
+};
+/** limit — до скольких убийств идёт матч (0 — по времени); left — сколько миллисекунд осталось (0 — по убийствам) */
 export type PlayersMsg = { t: 'players'; mode: Mode; limit: number; left: number; scores: Record<Team, number>; list: PlayerInfo[] };
 export type SpawnMsg = { t: 'spawn'; id: number; p: Vec3; yaw: number };
 export type SnapMsg = { t: 'snap'; ps: SnapRow[] };
@@ -74,6 +81,8 @@ export type MissileMsg = { t: 'missile'; id: number; by: number; p: Vec3 };
 /** Бомба: через ms упадёт и убьёт всех */
 export type NukeMsg = { t: 'nuke'; by: number; ms: number };
 /** Патроны, выпавшие из погибших */
+/** Погода: дождь или снег на ms миллисекунд; kind = null — ясно. */
+export type WeatherMsg = { t: 'weather'; kind: WeatherKind | null; ms: number };
 export type AmmoPacksMsg = { t: 'ammopacks'; list: Array<{ id: number; at: Vec3 }> };
 
 export type ServerMsg =
@@ -98,6 +107,10 @@ export type ServerMsg =
   | MissileMsg
   | NukeMsg
   | AmmoPacksMsg
+  | WeatherMsg
+  /** Попадание в шлем Джаггернаута: by — кто стрелял, left — сколько попаданий шлем ещё выдержит */
+  | { t: 'helmet'; id: number; by: number; left: number }
+  | { t: 'promoted'; rank: number }
   | { t: 'ammo' }
   | { t: 'uav'; ms: number }
   | { t: 'missile-go'; id: number; p: Vec3 }
@@ -108,7 +121,10 @@ export type ServerMsg =
   | { t: 'reset' };
 
 export type ClientMsg =
-  | { t: 'join'; name: string; team: Team; mode: Mode; map: MapId; minutes: number; kit: WeaponId[]; token?: string }
+  | {
+    t: 'join'; name: string; team: Team; mode: Mode; map: MapId;
+    limitKind: LimitKind; limitValue: number; kit: WeaponId[]; token?: string;
+  }
   | { t: 'vote'; map: MapId }
   | { t: 'kit'; guns: WeaponId[] }
   | { t: 'throw'; d: Vec3 }

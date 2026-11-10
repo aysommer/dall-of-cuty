@@ -1,18 +1,19 @@
 import * as THREE from 'three';
 import {
   AMMO_PACK, CRATE, DEFAULT_KIT, GUNS, HEAD, HIP_SPREAD, KIT_SIZE, MAPS, MAP_ORDER, MATCH, MEDKIT, ROCKET, SLIDE, STREAK,
-  THROW, WEAPONS, WEAPON_ORDER, WORLD_BOTTOM, PLAYER, isKit,
+  THROW, WEAPONS, WEAPON_ORDER, WORLD_BOTTOM, PLAYER, isKit, type LimitKind, type WeatherKind,
   playerBox, rayBox, rayWorld, type StreakKind,
   type Box, type GameMap, type Ladder, type MapId,
 } from '../shared/map.js';
 import { EMOJIS, SPRAY } from '../shared/emoji.js';
 import { UNDERGROUND_Y } from '../shared/maps/sewer.js';
+import { RANKS, rankOf } from '../shared/ranks.js';
 import {
   KILLS_PER_POINT, STATS, UPGRADES, maxLevel, multiplier, newProfile, pointsLeft, type Profile,
 } from '../shared/progress.js';
 import type {
   AmmoPacksMsg, BoomMsg, CrateMsg, CrateState, KillWeapon, LoadoutMsg, MedkitsMsg, MissileMsg, NukeMsg, PingMsg, RocketMsg, SprayMsg,
-  ThrowEndMsg, ThrowMsg, VoteMsg,
+  ThrowEndMsg, ThrowMsg, VoteMsg, WeatherMsg,
   ClientMsg, InfoMsg, KillMsg, Mode, OverMsg, PlayerInfo, PlayersMsg, ProfileMsg, ServerMsg,
   ShotMsg, SnapMsg, SpawnMsg, Team, Vec3, WeaponId,
 } from '../shared/protocol.js';
@@ -279,6 +280,11 @@ function loadMap(id: MapId): void {
   for (const b of currentMap.boxes) {
     const w = b.max[0] - b.min[0], h = b.max[1] - b.min[1], d = b.max[2] - b.min[2];
     const m = box(w, h, d, b.color);
+    if (b.top) {
+      // Грани куба: +x, -x, +y, -y, +z, -z — верх своим цветом
+      const side = m.material as THREE.MeshLambertMaterial;
+      m.material = [side, side, new THREE.MeshLambertMaterial({ color: b.top }), side, side, side];
+    }
     m.position.set(b.min[0] + w / 2, b.min[1] + h / 2, b.min[2] + d / 2);
     mapGroup.add(m);
   }
@@ -405,6 +411,21 @@ function buildGun(type: WeaponId): Gun {
     add(0.19, 0.19, 0.12, 0x2b2b2b, 0, 0.02, 0.2);
     add(0.05, 0.14, 0.07, 0x2b2b2b, 0, -0.12, -0.2);
     muzzleZ = -0.78;
+  } else if (type === 'lmg') {
+    add(0.08, 0.11, 0.62, 0x2c3027, 0, 0, -0.22);            // ствольная коробка
+    add(0.045, 0.045, 0.42, 0x1c1c1c, 0, 0.01, -0.73);       // ствол
+    add(0.07, 0.03, 0.26, 0x1c1c1c, 0, 0.07, -0.42);         // кожух сверху
+    mag = part(0.12, 0.13, 0.15, 0x3d4a2e, 0.02, -0.12, -0.16); // короб с лентой
+    add(0.06, 0.12, 0.26, 0x4a3a28, 0, -0.02, 0.2);          // приклад
+    for (const side of [-1, 1]) {                            // сошки
+      const leg = box(0.015, 0.16, 0.015, 0x1c1c1c);
+      leg.position.set(side * 0.04, -0.09, -0.78);
+      leg.rotation.z = side * 0.3;
+      group.add(leg);
+    }
+    sight = { y: 0.13, z: -0.08 };
+    aim = { ...sight, relief: 0.24 };
+    muzzleZ = -0.96;
   } else {
     add(0.06, 0.09, 0.5, 0x30343a, 0, 0, -0.2);
     add(0.035, 0.035, 0.3, 0x1c1c1c, 0, 0.01, -0.58);
@@ -445,6 +466,117 @@ function nameSprite(text: string, team: Team): THREE.Sprite {
 }
 
 /** Корона лидера — тоже из кубиков: обод и зубцы. */
+// ======================= пиксельные лица =======================
+/** Сколько убийств в матче нужно для каждой ступени: от спокойного лица к свирепому. */
+const FACE_STEPS = [0, 2, 5, 9, 14];
+const faceLevel = (kills: number): number => FACE_STEPS.filter((k) => kills >= k).length - 1;
+const faceCache: THREE.CanvasTexture[] = [];
+const faceUrl: string[] = [];
+
+/**
+ * Лицо 16×10 «пикселей»: глаза, брови и рот. Чем выше ступень — тем ниже и круче брови,
+ * уже глаза, а рот из ровной черты превращается в оскал; на последней ступени глаза красные.
+ */
+function drawFace(level: number): HTMLCanvasElement {
+  const P = 8, W = 16, H = 10;
+  const c = document.createElement('canvas');
+  c.width = W * P; c.height = H * P;
+  const ctx = c.getContext('2d')!;
+  const px = (x: number, y: number, color: string, w = 1, h = 1) => { ctx.fillStyle = color; ctx.fillRect(x * P, y * P, w * P, h * P); };
+  const INK = '#141414', WHITE = '#f4f4f4', TEETH = '#f0ead6';
+  const pupil = level >= 4 ? '#e01b1b' : INK;
+  // Глаза: у спокойного — открытые 3×3, дальше всё уже
+  const eyeH = level >= 3 ? 1 : level >= 1 ? 2 : 3;
+  const eyeY = 4 - Math.floor(eyeH / 2);
+  for (const ex of [3, 10]) {
+    px(ex, eyeY, WHITE, 3, eyeH);
+    px(ex + 1, eyeY + Math.floor(eyeH / 2), pupil);
+  }
+  // Брови: ровные → наклонённые к переносице, всё ниже и толще
+  for (let i = 0; i < 4; i++) {
+    const tilt = Math.min(level, 3) * 0.4 * i;
+    const yl = Math.round(1 + (level >= 2 ? 1 : 0) + tilt * 0.5);
+    px(2 + i, Math.min(yl, eyeY - 1), INK, 1, level >= 3 ? 2 : 1);   // левая: внутренний край (правее) ниже
+    px(13 - i, Math.min(yl, eyeY - 1), INK, 1, level >= 3 ? 2 : 1);  // правая — зеркально
+  }
+  // Рот
+  if (level === 0) px(5, 8, INK, 6, 1);                                       // ровная черта
+  else if (level === 1) { px(5, 8, INK, 6, 1); px(4, 9, INK); px(11, 9, INK); } // уголки вниз
+  else if (level === 2) { px(5, 7, INK, 6, 1); px(5, 8, TEETH, 6, 1); px(5, 9, INK, 6, 1); } // сжатые зубы
+  else {
+    // Оскал: широкий рот с зубами, на последней ступени — раскрытый крик
+    const w = level >= 4 ? 10 : 8, x0 = 8 - w / 2;
+    px(x0, 7, INK, w, 1);
+    px(x0, 8, TEETH, w, level >= 4 ? 1 : 1);
+    for (let x = x0 + 1; x < x0 + w; x += 2) px(x, 8, INK);
+    px(x0, 9, INK, w, 1);
+  }
+  return c;
+}
+
+function faceTexture(level: number): THREE.CanvasTexture {
+  if (!faceCache[level]) {
+    const canvasEl = drawFace(level);
+    const t = new THREE.CanvasTexture(canvasEl);
+    t.magFilter = THREE.NearestFilter; // чёткие пиксели
+    t.minFilter = THREE.NearestFilter;
+    faceCache[level] = t;
+    faceUrl[level] = canvasEl.toDataURL();
+  }
+  return faceCache[level];
+}
+
+/**
+ * Шлем Джаггернаута: тёмный металлический колпак на голову с наушниками по бокам
+ * и козырьком; лицо под ним остаётся видно.
+ */
+function buildHelmet(): THREE.Group {
+  const g = new THREE.Group();
+  const METAL = 0x3a3f45, EDGE = 0x22262b;
+  const top = box(PLAYER.w + 0.1, 0.16, PLAYER.w + 0.1, METAL);
+  top.position.y = PLAYER.h + 0.03;
+  const back = box(PLAYER.w + 0.1, 0.34, 0.08, METAL);
+  back.position.set(0, PLAYER.h - 0.13, PLAYER.w / 2 + 0.01);
+  const brim = box(PLAYER.w + 0.14, 0.05, 0.14, EDGE);
+  brim.position.set(0, PLAYER.h - 0.06, -PLAYER.w / 2 - 0.05);
+  g.add(top, back, brim);
+  for (const side of [-1, 1]) {
+    const ear = box(0.08, 0.34, PLAYER.w + 0.06, METAL);
+    ear.position.set(side * (PLAYER.w / 2 + 0.01), PLAYER.h - 0.13, 0);
+    g.add(ear);
+  }
+  g.visible = false;
+  return g;
+}
+
+/** Сбитый шлем: копия слетает с головы, кувыркаясь, и уходит под землю. */
+function dropHelmet(r: Remote): void {
+  r.helmet.updateWorldMatrix(true, true);
+  const flying = buildHelmet();
+  flying.visible = true;
+  r.helmet.getWorldPosition(flying.position);
+  flying.scale.copy(r.g.scale);
+  flying.rotation.y = r.yaw;
+  scene.add(flying);
+  const vel = new THREE.Vector3((Math.random() - 0.5) * 3, 4, (Math.random() - 0.5) * 3);
+  const born = performance.now();
+  const floorY = r.pos.y;
+  const tick = (): void => {
+    const age = (performance.now() - born) / 1000;
+    if (age > 3) { scene.remove(flying); return; }
+    if (age < 1.2) {
+      vel.y -= 14 * (1 / 60);
+      flying.position.addScaledVector(vel, 1 / 60);
+      flying.rotation.x += 0.2;
+      if (flying.position.y < floorY - PLAYER.h) { flying.position.y = floorY - PLAYER.h; vel.set(0, 0, 0); }
+    } else {
+      flying.position.y -= 0.02; // лежит и уходит под землю
+    }
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+
 function buildCrown(): THREE.Group {
   const GOLD = 0xffc928;
   const g = new THREE.Group();
@@ -481,8 +613,12 @@ interface Remote {
   poseK: number;
   labelY: number;
   crown: THREE.Group;
+  face: THREE.Mesh;
+  faceLevel: number;
   /** Бронежилет: закрывает корпус, голова и ноги видны */
   armor: THREE.Mesh;
+  /** Шлем Джаггернаута */
+  helmet: THREE.Group;
   label: THREE.Sprite;
   /** Для звука шагов: пройденный путь с прошлого шага */
   stepAcc: number;
@@ -512,9 +648,14 @@ function buildPlayer(info: PlayerInfo): Remote {
   const body = box(PLAYER.w, PLAYER.h, PLAYER.w, TEAM_COLOR[info.team]);
   body.position.y = PLAYER.h / 2;
   pose.add(body);
-  const visor = box(PLAYER.w * 0.8, 0.16, 0.06, 0x111111); // показывает, куда смотрит игрок
-  visor.position.set(0, PLAYER.eye, -PLAYER.w / 2);
-  pose.add(visor);
+  // Пиксельное лицо спереди: показывает, куда смотрит игрок, и злеет с каждым убийством
+  const face = new THREE.Mesh(
+    new THREE.PlaneGeometry(PLAYER.w * 0.9, 0.42),
+    new THREE.MeshLambertMaterial({ map: faceTexture(0), transparent: true }),
+  );
+  face.position.set(0, PLAYER.eye - 0.05, -PLAYER.w / 2 - 0.005);
+  face.rotation.y = Math.PI;
+  pose.add(face);
   const hand = new THREE.Group();
   hand.position.set(PLAYER.w / 2 + 0.06, 1.25, -0.25);
   pose.add(hand);
@@ -527,11 +668,13 @@ function buildPlayer(info: PlayerInfo): Remote {
   armor.position.y = 0.55 + 0.4; // от бёдер (0.55) до плеч (1.35)
   armor.visible = false;
   pose.add(armor);
+  const helmet = buildHelmet();
+  pose.add(helmet);
   scene.add(g);
   const gun = remoteGun('pistol');
   hand.add(gun.group);
   return {
-    info, g, pose, slide: false, poseK: 0, labelY: PLAYER.h + 0.35, crown, armor, label, hand, gun, w: 'pistol',
+    info, g, pose, slide: false, poseK: 0, labelY: PLAYER.h + 0.35, crown, face, faceLevel: 0, armor, helmet, label, hand, gun, w: 'pistol',
     stepAcc: 0, lastPos: new THREE.Vector3(),
     pos: new THREE.Vector3(), target: new THREE.Vector3(),
     yaw: 0, targetYaw: 0, pitch: 0, flashUntil: 0,
@@ -561,12 +704,12 @@ const me = {
   weapon: 'pistol' as WeaponId,
   ammo: {
     pistol: WEAPONS.pistol.mag, shotgun: WEAPONS.shotgun.mag, rifle: WEAPONS.rifle.mag,
-    sniper: WEAPONS.sniper.mag, knife: 0, rocket: 0,
+    sniper: WEAPONS.sniper.mag, lmg: WEAPONS.lmg.mag, knife: 0, rocket: 0,
   } as Record<WeaponId, number>,
   /** Запас патронов сверх магазина; кончится — перезаряжаться нечем */
   reserve: {
     pistol: WEAPONS.pistol.reserve, shotgun: WEAPONS.shotgun.reserve, rifle: WEAPONS.rifle.reserve,
-    sniper: WEAPONS.sniper.reserve, knife: 0, rocket: 0,
+    sniper: WEAPONS.sniper.reserve, lmg: WEAPONS.lmg.reserve, knife: 0, rocket: 0,
   } as Record<WeaponId, number>,
   reloadUntil: 0,
   /** Длительность текущей перезарядки — для анимации */
@@ -640,6 +783,7 @@ const SOUND: Record<WeaponId | 'boom' | 'slide', { dur: number; freq: number; ga
   pistol: { dur: 0.18, freq: 1800, gain: 0.35 },
   shotgun: { dur: 0.35, freq: 900, gain: 0.35 },
   rifle: { dur: 0.14, freq: 2600, gain: 0.35 },
+  lmg: { dur: 0.16, freq: 1700, gain: 0.4 },
   sniper: { dur: 0.5, freq: 1300, gain: 0.55 },
   knife: { dur: 0.12, freq: 2500, gain: 0.25, high: true },
   rocket: { dur: 0.35, freq: 600, gain: 0.35 },
@@ -802,6 +946,7 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
       me.id = m.id;
       mode = m.mode;
       loadMap(m.map);
+      applyFog();
       joined = true;
       setWeapon(settings.kit[0]!);
       $('menu').classList.add('hidden');
@@ -822,11 +967,29 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
     case 'medkits': onMedkits(m); break;
     case 'loadout': onLoadout(m); break;
     case 'ammopacks': onAmmoPacks(m); break;
+    case 'weather': onWeather(m); break;
+    case 'helmet': {
+      // Попадание в шлем: стрелку — «звон» металла и маркер, всем — сообщение, когда шлем слетел
+      if (m.by === me.id) { showHit(false); beep(2400, 0.08, 0.1); beep(3100, 0.06, 0.06); }
+      if (m.id === me.id) beep(1800, 0.1, 0.12);
+      if (m.left === 0) {
+        const who = m.id === me.id ? 'С тебя' : `С ${roster.find((p) => p.id === m.id)?.name ?? 'Джаггернаута'}`;
+        feedNote(`🪖 ${who} сбит шлем`);
+      } else if (m.by === me.id) toast(`🪖 Шлем держит: ещё ${m.left} попад.`);
+      break;
+    }
+    case 'promoted': {
+      const r = RANKS[m.rank]!;
+      toast(`🎖 Новое звание: ${r.name} (${r.abbr})`);
+      beep(990, 0.4, 0.12);
+      break;
+    }
     case 'ammo': {
       // Патроны с погибшего: к своим стволам — половина полного запаса
       for (const w of settings.kit) {
+        // Всего патронов не больше полного запаса (магазин + запас); у пулемёта это его лента на 100
         const full = WEAPONS[w].mag + WEAPONS[w].reserve;
-        me.reserve[w] = Math.min(WEAPONS[w].reserve, me.reserve[w] + Math.ceil(full * AMMO_PACK.share));
+        me.reserve[w] = Math.min(full - me.ammo[w], me.reserve[w] + Math.ceil(full * AMMO_PACK.share));
       }
       toast('🎒 Патроны +50%');
       beep(760, 0.15, 0.1);
@@ -885,6 +1048,10 @@ function onPlayers(m: PlayersMsg): void {
     r.info = p;
     r.g.visible = p.alive;
     r.armor.visible = p.armor > 0;
+    // Шлем сбили — он слетает с головы
+    if (r.helmet.visible && p.helmet === 0 && p.alive) dropHelmet(r);
+    r.helmet.visible = p.helmet > 0;
+    r.crown.position.y = PLAYER.h + (p.helmet > 0 ? 0.14 : 0); // корона — поверх шлема
     r.g.scale.setScalar(p.big ? STREAK.bigScale : 1); // суперброня — в полтора раза больше
   }
   for (const [id, r] of remotes) {
@@ -893,6 +1060,11 @@ function onPlayers(m: PlayersMsg): void {
   const leader = leaderId();
   for (const [id, r] of remotes) {
     r.crown.visible = id === leader;
+    const lvl = faceLevel(r.info.kills);
+    if (lvl !== r.faceLevel) {
+      r.faceLevel = lvl;
+      (r.face.material as THREE.MeshLambertMaterial).map = faceTexture(lvl);
+    }
     r.labelY = PLAYER.h + (id === leader ? 0.7 : 0.35); // имя — над короной
   }
   $('crown-note').classList.toggle('hidden', leader !== me.id);
@@ -1008,7 +1180,8 @@ function onOver(m: OverMsg): void {
 // ======================= меню =======================
 let chosenMode: Mode = 'tdm';
 let chosenMap: MapId = 'sands';
-let chosenMinutes = 10;
+let chosenLimitKind: LimitKind = 'time';
+let chosenLimitValue = 10;
 let chosenTeam: Team = 'green';
 let lastInfo: InfoMsg | null = null;
 const nameInput = $<HTMLInputElement>('name');
@@ -1033,9 +1206,29 @@ function onInfo(m: InfoMsg): void {
     b.classList.toggle('active', b.dataset.map === chosenMap);
     b.disabled = modeLocked;
   }
-  if (modeLocked) chosenMinutes = m.minutes;
-  for (const b of buttonsOf('time-choice')) {
-    b.classList.toggle('active', Number(b.dataset.min) === chosenMinutes);
+  if (modeLocked) { chosenLimitKind = m.limitKind; chosenLimitValue = m.limitValue; }
+  for (const b of buttonsOf('limit-kind')) {
+    b.classList.toggle('active', b.dataset.kind === chosenLimitKind);
+    b.disabled = modeLocked;
+  }
+  // Значения — минуты или убийства, смотря что выбрано
+  const values: readonly number[] = chosenLimitKind === 'time' ? MATCH.minutes : MATCH.kills;
+  const unit = chosenLimitKind === 'time' ? 'мин' : 'убийств';
+  const valueBox = $('limit-value');
+  if (valueBox.dataset.kind !== chosenLimitKind) {
+    valueBox.dataset.kind = chosenLimitKind;
+    valueBox.textContent = '';
+    for (const v of values) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.v = String(v);
+      b.textContent = `${v} ${unit}`;
+      valueBox.append(b);
+    }
+  }
+  if (!values.includes(chosenLimitValue)) chosenLimitValue = values[1]!;
+  for (const b of buttonsOf('limit-value')) {
+    b.classList.toggle('active', Number(b.dataset.v) === chosenLimitValue);
     b.disabled = modeLocked;
   }
   loadMap(chosenMap); // карта видна за меню
@@ -1076,17 +1269,16 @@ $('map-choice').addEventListener('click', (e) => {
   chosenMap = MAP_ORDER.find((id) => id === b.dataset.map) ?? 'sands';
   if (lastInfo) onInfo(lastInfo);
 });
-for (const min of MATCH.minutes) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.dataset.min = String(min);
-  b.textContent = `${min} мин`;
-  $('time-choice').append(b);
-}
-$('time-choice').addEventListener('click', (e) => {
+$('limit-kind').addEventListener('click', (e) => {
   const b = pickedButton(e);
   if (!b) return;
-  chosenMinutes = Number(b.dataset.min);
+  chosenLimitKind = b.dataset.kind === 'kills' ? 'kills' : 'time';
+  if (lastInfo) onInfo(lastInfo);
+});
+$('limit-value').addEventListener('click', (e) => {
+  const b = pickedButton(e);
+  if (!b) return;
+  chosenLimitValue = Number(b.dataset.v);
   if (lastInfo) onInfo(lastInfo);
 });
 $('team-choice').addEventListener('click', (e) => {
@@ -1101,7 +1293,7 @@ $('join-form').addEventListener('submit', (e) => {
   const name = nameInput.value.trim();
   localStorage.setItem('doc-name', name);
   playBtn.disabled = true;
-  sendMsg({ t: 'join', name, team: chosenTeam, mode: chosenMode, map: chosenMap, minutes: chosenMinutes, kit: settings.kit, token: localStorage.getItem(TOKEN_KEY) ?? undefined });
+  sendMsg({ t: 'join', name, team: chosenTeam, mode: chosenMode, map: chosenMap, limitKind: chosenLimitKind, limitValue: chosenLimitValue, kit: settings.kit, token: localStorage.getItem(TOKEN_KEY) ?? undefined });
 });
 
 // ======================= управление =======================
@@ -1403,7 +1595,8 @@ function fire(now: number): void {
   shotSound(me.weapon);
   if (me.weapon === 'sniper' && me.ammo.sniper > 0) boltUntil = now + BOLT_MS;
   const RECOIL: Partial<Record<WeaponId, [number, number]>> = {
-    shotgun: [0.12, 0.035], rifle: [0.05, 0.012], sniper: [0.14, 0.05],
+    // Пулемёт бьёт вдвое сильнее автомата
+    shotgun: [0.12, 0.035], rifle: [0.05, 0.012], lmg: [0.1, 0.024], sniper: [0.14, 0.05],
   };
   const [k, lift] = RECOIL[me.weapon] ?? [0.05, 0.015];
   kick = k;
@@ -1508,8 +1701,14 @@ function textEl(tag: 'span' | 'small', text: string, cls = ''): HTMLElement {
 
 function updateHud(): void {
   $('hp').textContent = String(me.alive ? me.hp : 0);
+  const myKills = roster.find((p) => p.id === me.id)?.kills ?? 0;
+  faceTexture(faceLevel(myKills));
+  $<HTMLImageElement>('my-face').src = faceUrl[faceLevel(myKills)]!;
   $('armor').classList.toggle('hidden', !(me.alive && me.armor > 0));
   $('armor-val').textContent = String(me.armor);
+  const myHelmet = roster.find((p) => p.id === me.id)?.helmet ?? 0;
+  $('helmet').classList.toggle('hidden', !(me.alive && myHelmet > 0));
+  $('helmet-val').textContent = String(myHelmet);
   $('health').classList.toggle('low', me.hp <= 30);
   $('weapon-name').textContent = WEAPONS[me.weapon].name;
   const melee = !!WEAPONS[me.weapon].melee;
@@ -1524,15 +1723,14 @@ function updateHud(): void {
     score.append(
       textEl('span', `Зелёные ${scores.green}`, 'g'), ' : ',
       textEl('span', `${scores.red} Красные`, 'r'),
-      textEl('small', `до ${limit}`),
     );
-    score.append(timerEl());
+    score.append(limit > 0 ? textEl('small', `до ${limit}`) : timerEl());
   } else {
     const mine = roster.find((p) => p.id === me.id);
     const top = [...roster].sort((a, b) => b.kills - a.kills)[0];
     score.append(`Ты: ${mine?.kills ?? 0}`);
-    if (top) score.append(textEl('small', `лидер: ${top.name} — ${top.kills} · до ${limit}`));
-    score.append(timerEl());
+    if (top) score.append(textEl('small', `лидер: ${top.name} — ${top.kills}${limit > 0 ? ` · до ${limit}` : ''}`));
+    if (limit === 0) score.append(timerEl());
   }
   if (!$('scoreboard').classList.contains('hidden')) renderScoreboard();
 }
@@ -1555,7 +1753,13 @@ function renderScoreboard(): void {
   for (const p of list) {
     const row = table.insertRow();
     if (p.id === me.id) row.className = 'me';
-    const n = row.insertCell(); n.textContent = (p.id === leader ? '♛ ' : '') + p.name; n.className = 't-' + p.team;
+    const n = row.insertCell();
+    n.className = 't-' + p.team;
+    n.textContent = (p.id === leader ? '♛ ' : '') + p.name;
+    const rank = RANKS[p.rank]!;
+    const badge = textEl('small', ` ${rank.abbr} · ${rank.name}`, 'rank');
+    badge.title = rank.name;
+    n.append(badge);
     const k = row.insertCell(); k.textContent = String(p.kills); k.className = 'n';
     const d = row.insertCell(); d.textContent = String(p.deaths); d.className = 'n';
   }
@@ -1629,7 +1833,7 @@ function renderUpgrades(): void {
   const points = pointsLeft(profile);
   const toNext = KILLS_PER_POINT - (profile.kills % KILLS_PER_POINT);
   $('upgrade-points').textContent =
-    `Убийств: ${profile.kills} · свободных очков: ${points} · до следующего очка: ${toNext}`;
+    `Звание: ${RANKS[rankOf(profile.kills)]!.name} · убийств: ${profile.kills} · свободных очков: ${points} · до следующего очка: ${toNext}`;
   $('upgrade-note').classList.toggle('hidden', points <= 0);
 
   const root = $('upgrades');
@@ -2004,7 +2208,7 @@ function onLoadout(m: LoadoutMsg): void {
   if (got('uav')) toast('🎁 БПЛА готов — нажми 5');
   if (got('missile')) toast('🎁 Ракета с неба готова — нажми 6');
   if (got('nuke')) toast('🎁 Бомба готова — нажми 8');
-  if (m.streak === STREAK.superArmor && streak < m.streak) toast('🛡 Суперброня: +500, ты стал больше');
+  if (m.streak === STREAK.superArmor && streak < m.streak) toast('🛡 Ты Джаггернаут: +500 брони, шлем держит 3 выстрела в голову');
   if (got('uav') || got('missile') || got('nuke')) beep(1200, 0.3, 0.12);
   hasKnife = m.knife;
   streak = m.streak;
@@ -2112,18 +2316,72 @@ function updateUnderground(): void {
   const now = camera.position.y < UNDERGROUND_Y - 0.2;
   if (now === underground) return;
   underground = now;
-  hemi.intensity = now ? 0.35 : 1.5;
-  sun.intensity = now ? 0 : 1.6;
+  // Внизу темно за счёт тёмного бетона; солнце и небо остаются — из люка видно улицу.
+  // Фонарь включаем только себе и только под землёй, чтобы он не подсвечивал улицу.
   for (const l of lampLights) l.visible = now;
-  if (now) {
-    sky.set(0x0b0c0e);
-    fog.color.set(0x0b0c0e);
-    fog.near = 4; fog.far = 34;
-  } else {
-    sky.set(currentMap.sky);
-    fog.color.set(currentMap.sky);
-    fog.near = 50; fog.far = 130;
+}
+
+// ======================= погода: дождь и снег =======================
+let weatherKind: WeatherKind | null = null;
+let weatherFx: THREE.Points | THREE.LineSegments | null = null;
+const WEATHER_BOX = { x: 40, y: 22, z: 40 };
+
+/** Капли (короткие черты) или снежинки (точки) в коробке вокруг камеры. */
+function buildWeather(kind: WeatherKind): THREE.Points | THREE.LineSegments {
+  const n = kind === 'rain' ? 1800 : 1400;
+  const pts: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const x = (Math.random() - 0.5) * WEATHER_BOX.x;
+    const y = Math.random() * WEATHER_BOX.y;
+    const z = (Math.random() - 0.5) * WEATHER_BOX.z;
+    if (kind === 'rain') pts.push(x, y, z, x, y - 0.6, z);
+    else pts.push(x, y, z);
   }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return kind === 'rain'
+    ? new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: 0xaac4dd, transparent: true, opacity: 0.55 }))
+    : new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.06 }));
+}
+
+/** Видимость: в дождь туман ближе и серее, в снег — ещё ближе и белее. */
+function applyFog(): void {
+  if (weatherKind === 'rain') { fog.near = 8; fog.far = 45; fog.color.set(0x7d8791); sky.set(0x7d8791); }
+  else if (weatherKind === 'snow') { fog.near = 5; fog.far = 30; fog.color.set(0xd5dce3); sky.set(0xd5dce3); }
+  else { fog.near = 50; fog.far = 130; fog.color.set(currentMap.sky); sky.set(currentMap.sky); }
+}
+
+function onWeather(m: WeatherMsg): void {
+  if (m.kind === weatherKind) return;
+  if (weatherFx) { scene.remove(weatherFx); weatherFx.geometry.dispose(); weatherFx = null; }
+  const was = weatherKind;
+  weatherKind = m.kind;
+  if (m.kind) {
+    weatherFx = buildWeather(m.kind);
+    scene.add(weatherFx);
+    if (joined) toast(m.kind === 'rain' ? '🌧 Пошёл дождь — видно хуже' : '❄ Пошёл снег — видно хуже');
+  } else if (was && joined) toast('☀ Прояснилось');
+  applyFog();
+}
+
+function updateWeather(dt: number): void {
+  if (!weatherFx || !weatherKind) return;
+  // Под землёй не идёт; наверху «коробка» с осадками ездит за камерой, частицы падают и возвращаются наверх
+  weatherFx.visible = !underground;
+  weatherFx.position.set(camera.position.x, camera.position.y - 6, camera.position.z);
+  const pos = weatherFx.geometry.getAttribute('position') as THREE.BufferAttribute;
+  const speed = weatherKind === 'rain' ? 26 : 2.2;
+  const step = weatherKind === 'rain' ? 2 : 1;
+  const t = performance.now() / 1000;
+  for (let i = 0; i < pos.count; i += step) {
+    let y = pos.getY(i) - speed * dt;
+    let x = pos.getX(i);
+    if (weatherKind === 'snow') x += Math.sin(t + i) * 0.3 * dt; // снег кружится
+    if (y < 0) y += WEATHER_BOX.y;
+    pos.setXY(i, x, y);
+    if (step === 2) pos.setXY(i + 1, x, y - 0.6);
+  }
+  pos.needsUpdate = true;
 }
 
 // ======================= метательный нож =======================
@@ -2152,7 +2410,10 @@ function throwKnife(): void {
   updateHud();
 }
 
+/** Свои брошенные ножи — чтобы показать попадание */
+const myKnives = new Set<number>();
 function onThrow(m: ThrowMsg): void {
+  if (m.by === me.id) myKnives.add(m.id);
   const mesh = knifeModel();
   mesh.position.set(m.o[0], m.o[1], m.o[2]);
   scene.add(mesh);
@@ -2160,6 +2421,7 @@ function onThrow(m: ThrowMsg): void {
 }
 
 function onThrown(m: ThrowEndMsg): void {
+  if (myKnives.delete(m.id) && m.hit) { showHit(false); beep(1400, 0.05, 0.08); }
   const fx = knifeFx.get(m.id);
   if (!fx) return;
   knifeFx.delete(m.id);
@@ -2403,6 +2665,7 @@ function onNewMap(id: MapId): void {
   roundOver = false;
   $('vote').classList.add('hidden');
   loadMap(id);
+  applyFog(); // туман и небо — под текущую погоду
   feedNote(`🗺 Новый матч: ${MAPS[id].name}`);
   // Мышь отпущена на время голосования — вернуть её можно кликом по «ИГРАТЬ»
   if (!locked) $('pause').classList.remove('hidden');
@@ -2571,6 +2834,7 @@ function frame(now: number): void {
   updateSinking(now);
   updateAmmoPacks(now);
   updateUnderground();
+  updateWeather(dt);
   updateMinimap(now);
   updateNuke(now);
   updateVote(now);
@@ -2587,14 +2851,15 @@ declare global {
   interface Window {
     game: {
       me: typeof me; remotes: typeof remotes; keys: typeof keys;
-      steer: (yaw: number, pitch: number) => void; dbg: () => Record<string, unknown>;
+      steer: (yaw: number, pitch: number) => void; faces: () => string[]; dbg: () => Record<string, unknown>;
     };
   }
 }
 window.game = {
   me, remotes, keys,
   steer: (yaw: number, pitch: number) => { if (missileCtl) { missileCtl.yaw = yaw; missileCtl.pitch = pitch; } },
-  dbg: () => ({ underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
+  faces: () => FACE_STEPS.map((_, l) => { faceTexture(l); return faceUrl[l]!; }),
+  dbg: () => ({ weather: weatherKind, fogFar: fog.far, underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
     kit: settings.kit, reserve: { ...me.reserve }, hotbar: hotbar().map((h) => `${h.key}:${h.label}`).join(' '),
     missile: missileCtl ? missileCtl.pos.toArray() : null, low, adsK, fov: camera.fov, crateState, crateAt, eyeH, recoil, corpses: corpses.length, sprays: sprays.length,
     steps: stepCount, medkits: medkitFx.size, boltUntil, menuClosed, armor: me.armor }),

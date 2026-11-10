@@ -52,6 +52,8 @@ export const MEDKIT = {
 export const WEAPONS: Record<WeaponId, Weapon> = {
   pistol:  { name: 'Пистолет', dmg: 25, pellets: 1, rate: 280, mag: 12, reserve: 24, reload: 1200, spread: 0.006, auto: false, zoom: 60 },
   shotgun: { name: 'Дробовик', dmg: 13, pellets: 8, rate: 900, mag: 6, reserve: 18, reload: 2200, spread: 0.045, auto: false, zoom: 62 },
+  // Пулемёт: лента на 100 патронов, отдача вдвое сильнее, чем у автомата
+  lmg:     { name: 'Пулемёт', dmg: 22, pellets: 1, rate: 95, mag: 100, reserve: 0, reload: 4200, spread: 0.014, auto: true, zoom: 58 },
   rifle:   { name: 'Автомат', dmg: 21, pellets: 1, rate: 110, mag: 30, reserve: 60, reload: 2000, spread: 0.009, auto: true, zoom: 55 },
   sniper:  { name: 'Снайперка', dmg: 80, pellets: 1, rate: 1300, mag: 5, reserve: 19, reload: 2800, spread: 0.0015, auto: false, zoom: 20, headKill: true },
   knife:   { name: 'Нож', dmg: 100, pellets: 1, rate: 650, mag: 0, reserve: 0, reload: 0, spread: 0, auto: false, zoom: null, melee: 2 },
@@ -72,10 +74,20 @@ export const CRATE = {
 export const ROCKET = { speed: 70, radius: 4, lifeMs: 4000 };
 
 /** Метательный нож: один на жизнь, после смерти появляется снова. */
-export const THROW = { dmg: 50, speed: 32, gravity: 9, lifeMs: 3000 };
+/** pad — насколько попадание ножом «прощает» промах мимо края хитбокса, м. */
+export const THROW = { dmg: 50, speed: 42, gravity: 1.5, lifeMs: 3000, pad: 0.15 };
 
 /** Длительность матча на выбор и голосование за карту после него. */
-export const MATCH = { minutes: [5, 10, 15] as const, voteMs: 15_000 };
+/**
+ * Ограничение матча — на выбор первого игрока: по времени (минуты) или по убийствам
+ * (команды — сумма убийств команды, «каждый сам за себя» — убийства игрока).
+ */
+export const MATCH = { minutes: [5, 10, 15] as const, kills: [50, 100, 150] as const, voteMs: 15_000 };
+export type LimitKind = 'time' | 'kills';
+
+/** Погода: раз в everyMs с вероятностью chance начинается дождь или снег на ms. */
+export const WEATHER = { everyMs: 180_000, chance: 0.25, ms: 60_000 };
+export type WeatherKind = 'rain' | 'snow';
 
 /**
  * Серия убийств (без смертей): награды за 3, 4, 5, 7 и 15 убийств подряд.
@@ -86,13 +98,15 @@ export const STREAK = {
   uavMs: 30_000, pingMs: 2000,
   missileHeight: 60, missileSpeed: 18, missileBoost: 55, missileRadius: 6, missileMaxMs: 20_000,
   superArmorHp: 500, bigScale: 1.5,
+  /** Шлем Джаггернаута: голова неуязвима, пока шлем не собьют этим числом попаданий */
+  helmetHits: 3,
   nukeMs: 4000,
 };
 export type StreakKind = 'uav' | 'missile' | 'nuke';
-export const WEAPON_ORDER: WeaponId[] = ['pistol', 'shotgun', 'rifle', 'sniper', 'knife'];
+export const WEAPON_ORDER: WeaponId[] = ['pistol', 'shotgun', 'rifle', 'lmg', 'sniper', 'knife'];
 
 /** Огнестрел, из которого собирают набор: не больше двух стволов, нож есть всегда. */
-export const GUNS: WeaponId[] = ['pistol', 'shotgun', 'rifle', 'sniper'];
+export const GUNS: WeaponId[] = ['pistol', 'shotgun', 'rifle', 'lmg', 'sniper'];
 export const KIT_SIZE = 2;
 export const DEFAULT_KIT: WeaponId[] = ['rifle', 'pistol'];
 export function isKit(v: unknown): v is WeaponId[] {
