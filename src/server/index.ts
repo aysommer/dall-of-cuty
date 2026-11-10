@@ -5,8 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  AMMO_PACK, ARMOR, CRATE, DEFAULT_KIT, GUNSHIP, HEAD, MAPS, MAP_ORDER, MATCH, MEDKIT, PLAYER, ROCKET, SLIDE, STREAK, THROW, WEAPONS,
-  WEATHER, bodyPoints, gunshipPos, isKit, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
+  AMMO_PACK, ARMOR, CRATE, DEFAULT_KIT, GRENADE, GUNSHIP, HEAD, MAPS, MAP_ORDER, MATCH, MEDKIT, PLAYER, ROCKET, SLIDE, STREAK, THROW, WEAPONS,
+  WEATHER, bodyPoints, clipWalls, gunshipPos, isKit, stepGrenade, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
   type LimitKind, type MapId, type StreakKind, type WeatherKind,
 } from '../shared/map.js';
 import { chooseSpawn } from './spawn.js';
@@ -15,7 +15,7 @@ import { decodeProfile, encodeProfile } from './progress.js';
 import { EMOJIS, SPRAY } from '../shared/emoji.js';
 import { rankOf } from '../shared/ranks.js';
 import type {
-  CrateState, InfoMsg, KillWeapon, Mode, ServerMsg, SnapRow, Team, Vec3, WeaponId, Winner,
+  CrateState, InfoMsg, KillWeapon, MeleeKind, Mode, ServerMsg, SnapRow, Team, Vec3, WeaponId, Winner,
 } from '../shared/protocol.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -47,6 +47,12 @@ interface Player {
   profile: Profile;
   /** Сколько ракет осталось (ракетница из ящика или за серию) */
   rockets: number;
+  /** Что в слоте 1: нож или граната (выбор действует со следующей жизни) */
+  melee: MeleeKind;
+  /** Гранат в руках (одна на жизнь) */
+  grenades: number;
+  /** Когда сорвана чека гранаты в руке (0 — не держит) */
+  cookStart: number;
   /** Метательный нож: один на жизнь */
   hasKnife: boolean;
   /** Убийств подряд без смерти */
@@ -179,7 +185,10 @@ function spawn(p: Player): void {
   p.big = false;
   p.helmet = 0;
   p.slide = false;
-  p.hasKnife = true; // нож возвращается после смерти
+  // Нож или граната возвращаются после смерти — смотря что выбрано
+  p.hasKnife = p.melee === 'knife';
+  p.grenades = p.melee === 'grenade' ? 1 : 0;
+  p.cookStart = 0;
   p.alive = true;
   sendLoadout(p);
   broadcast({ t: 'spawn', id: p.id, p: p.pos, yaw: p.yaw });
@@ -198,6 +207,7 @@ function resetRound(): void {
   // Новый раунд начинается без ящика; следующий упадёт по расписанию
   rockets = [];
   knives = [];
+  grenades = [];
   missiles.clear();
   clearCrate();
   clearMedkits();
@@ -250,6 +260,7 @@ function endMatch(winner: Winner): void {
   votes.clear();
   rockets = [];
   knives = [];
+  grenades = [];
   missiles.clear();
   clearTimeout(nukeTimer);
   nukeTimer = undefined;
@@ -312,6 +323,8 @@ function killPlayer(killer: Player | null, v: Player, w: KillWeapon, head = fals
     if (w !== 'nuke' && killer.alive) addStreak(killer);
   }
   broadcast({ t: 'kill', killer: killer?.id ?? null, victim: v.id, w, head });
+  // Убит с сорванной чекой — граната выпадает из руки и взорвётся по своему отсчёту
+  if (v.cookStart) dropCookedGrenade(v);
   // Погибший теряет ракетницу и перестаёт открывать ящик, а на месте гибели остаются патроны
   setRockets(v, 0);
   dropAmmo(v.pos);
@@ -327,7 +340,7 @@ function killPlayer(killer: Player | null, v: Player, w: KillWeapon, head = fals
 // ---------- серия убийств ----------
 function sendLoadout(p: Player): void {
   send(p.ws, {
-    t: 'loadout', knife: p.hasKnife, streak: p.streak, uav: p.uav, missile: p.missile, nuke: p.nuke, gunship: p.gunship,
+    t: 'loadout', knife: p.hasKnife, grenades: p.grenades, streak: p.streak, uav: p.uav, missile: p.missile, nuke: p.nuke, gunship: p.gunship,
   });
 }
 
@@ -540,6 +553,82 @@ function callNuke(p: Player): void {
 interface Knife { id: number; owner: number; pos: Vec3; vel: Vec3; born: number }
 let knives: Knife[] = [];
 let nextKnifeId = 1;
+
+// ---------- граната ----------
+interface Grenade { id: number; owner: number; pos: Vec3; vel: Vec3; explodeAt: number }
+let grenades: Grenade[] = [];
+let nextGrenadeId = 1;
+
+/** Зажал ЛКМ с гранатой — чека сорвана, пошёл отсчёт. */
+function pullPin(p: Player): void {
+  if (!p.alive || roundOver || p.grenades <= 0 || p.cookStart) return;
+  p.grenades--;
+  p.cookStart = Date.now();
+  sendLoadout(p);
+}
+function spawnGrenade(p: Player, pos: Vec3, vel: Vec3): void {
+  grenades.push({ id: nextGrenadeId++, owner: p.id, pos, vel, explodeAt: p.cookStart + GRENADE.fuseMs });
+  p.cookStart = 0;
+}
+/** Отпустил ЛКМ — бросок: сколько держал, столько отсчёта уже прошло. */
+function throwGrenade(p: Player, msg: Incoming): void {
+  if (!p.alive || !p.cookStart || !isVec3(msg.d)) return;
+  const len = Math.hypot(msg.d[0], msg.d[1], msg.d[2]);
+  if (len < 0.5) return;
+  const d: Vec3 = [msg.d[0] / len, msg.d[1] / len, msg.d[2] / len];
+  const eye = eyeOf(p);
+  spawnGrenade(p, [eye[0] + d[0] * 0.4, eye[1] + d[1] * 0.4, eye[2] + d[2] * 0.4],
+    [d[0] * GRENADE.speed, d[1] * GRENADE.speed + GRENADE.lift, d[2] * GRENADE.speed]);
+}
+function dropCookedGrenade(p: Player): void {
+  spawnGrenade(p, [p.pos[0], p.pos[1] + 0.3, p.pos[2]], [0, 0, 0]);
+}
+
+/**
+ * Взрыв гранаты: в killR — насмерть, дальше урон падает до нуля к maxR; стена закрывает.
+ * Задевает противников и самого бросившего, союзников — нет.
+ */
+function explodeGrenade(ownerId: number, at: Vec3, id: number): void {
+  broadcast({ t: 'boom', id: -5000 - id, p: at });
+  const owner = players.get(ownerId);
+  if (!owner || roundOver) return;
+  const walls = MAPS[mapId].boxes;
+  const from: Vec3 = [at[0], at[1] + 0.2, at[2]];
+  for (const v of players.values()) {
+    if (!v.alive || (v !== owner && !isEnemy(owner, v))) continue;
+    const d = distToPlayer(v, at);
+    if (d > GRENADE.maxR) continue;
+    if (bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt))) continue;
+    if (d <= GRENADE.killR) killPlayer(owner, v, 'grenade');
+    else hurt(owner, v, GRENADE.maxDmg * (1 - (d - GRENADE.killR) / (GRENADE.maxR - GRENADE.killR)), 'grenade', false);
+  }
+  broadcastPlayers();
+  checkWin();
+}
+
+function stepGrenades(dt: number, now: number): void {
+  // Передержал — граната взрывается в руке
+  for (const p of players.values()) {
+    if (p.cookStart && now - p.cookStart >= GRENADE.fuseMs) {
+      p.cookStart = 0;
+      explodeGrenade(p.id, eyeOf(p), nextGrenadeId++);
+    }
+  }
+  if (!grenades.length) return;
+  // Отскакивает от всех блоков карты и от невидимых стен по краю
+  const solids = [...MAPS[mapId].boxes, ...clipWalls(MAPS[mapId].half)];
+  const left: Grenade[] = [];
+  for (const g of grenades) {
+    for (let i = 0; i < 5; i++) stepGrenade(solids, g, dt / 5);
+    if (now >= g.explodeAt) explodeGrenade(g.owner, [...g.pos], g.id);
+    else left.push(g);
+  }
+  grenades = left;
+  broadcast({
+    t: 'grenades',
+    list: grenades.map((g) => [g.id, +g.pos[0].toFixed(2), +g.pos[1].toFixed(2), +g.pos[2].toFixed(2), g.explodeAt - now]),
+  });
+}
 
 function handleThrow(p: Player, msg: Incoming): void {
   if (!p.alive || !p.hasKnife || roundOver || !isVec3(msg.d)) return;
@@ -1049,6 +1138,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
     rockets: 0,
     hasKnife: true, streak: 0, uav: 0, missile: 0, nuke: 0, gunship: 0, uavUntil: 0, big: false, helmet: 0,
     kit: isKit(msg.kit) ? msg.kit : [...DEFAULT_KIT],
+    melee: msg.melee === 'grenade' ? 'grenade' : 'knife', grenades: 0, cookStart: 0,
   };
   players.set(p.id, p);
   send(ws, { t: 'welcome', id: p.id, mode, map: mapId });
@@ -1116,6 +1206,13 @@ wss.on('connection', (ws) => {
       missilePos(me, msg);
     } else if (msg.t === 'gsfire') {
       gunshipFire(me, msg);
+    } else if (msg.t === 'pin') {
+      pullPin(me);
+    } else if (msg.t === 'gthrow') {
+      throwGrenade(me, msg);
+    } else if (msg.t === 'melee') {
+      // Новый выбор вступит в силу со следующей жизни
+      if (msg.kind === 'knife' || msg.kind === 'grenade') me.melee = msg.kind;
     } else if (msg.t === 'gsrocket') {
       gunshipRocket(me, msg);
     } else if (msg.t === 'mhit') {
@@ -1162,6 +1259,7 @@ wss.on('connection', (ws) => {
 setInterval(() => {
   stepRockets(0.05);
   stepKnives(0.05);
+  stepGrenades(0.05, Date.now());
   const now = Date.now();
   if (players.size) {
     sendPings(now);

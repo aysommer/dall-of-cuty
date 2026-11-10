@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  AMMO_PACK, CRATE, DEFAULT_KIT, GUNS, GUNSHIP, clipWalls, gunshipPos, HEAD, HIP_SPREAD, KIT_SIZE, MAPS, MAP_ORDER, MATCH, MEDKIT, ROCKET, SLIDE, STREAK,
+  AMMO_PACK, CRATE, DEFAULT_KIT, GRENADE, GUNS, GUNSHIP, clipWalls, gunshipPos, HEAD, HIP_SPREAD, KIT_SIZE, MAPS, MAP_ORDER, MATCH, MEDKIT, ROCKET, SLIDE, STREAK,
   THROW, WEAPONS, WEAPON_ORDER, WORLD_BOTTOM, PLAYER, isKit, type LimitKind, type WeatherKind,
   playerBox, rayBox, rayWorld, type StreakKind,
   type Box, type GameMap, type Ladder, type MapId,
@@ -12,7 +12,7 @@ import {
   KILLS_PER_POINT, STATS, UPGRADES, maxLevel, multiplier, newProfile, pointsLeft, type Profile,
 } from '../shared/progress.js';
 import type {
-  AmmoPacksMsg, BoomMsg, CrateMsg, GunshipMsg, CrateState, KillWeapon, LoadoutMsg, MedkitsMsg, MissileMsg, NukeMsg, PingMsg, RocketMsg, SprayMsg,
+  AmmoPacksMsg, BoomMsg, CrateMsg, GrenadesMsg, GunshipMsg, MeleeKind, CrateState, KillWeapon, LoadoutMsg, MedkitsMsg, MissileMsg, NukeMsg, PingMsg, RocketMsg, SprayMsg,
   ThrowEndMsg, ThrowMsg, VoteMsg, WeatherMsg,
   ClientMsg, InfoMsg, KillMsg, Mode, OverMsg, PlayerInfo, PlayersMsg, ProfileMsg, ServerMsg,
   ShotMsg, SnapMsg, SpawnMsg, Team, Vec3, WeaponId,
@@ -37,18 +37,21 @@ interface Settings {
   hand: 'right' | 'left';
   /** Выбранные стволы — не больше двух, нож есть всегда */
   kit: WeaponId[];
+  /** Слот 1: нож или граната */
+  melee: MeleeKind;
 }
 const SETTINGS_KEY = 'doc-settings';
 const TOKEN_KEY = 'doc-progress';
 
 function loadSettings(): Settings {
-  const s: Settings = { volume: 0.7, sens: 1, hand: 'right', kit: [...DEFAULT_KIT] };
+  const s: Settings = { volume: 0.7, sens: 1, hand: 'right', kit: [...DEFAULT_KIT], melee: 'knife' };
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>;
     if (typeof raw.volume === 'number') s.volume = Math.max(0, Math.min(1, raw.volume));
     if (typeof raw.sens === 'number') s.sens = Math.max(0.2, Math.min(3, raw.sens));
     if (raw.hand === 'left') s.hand = 'left';
     if (isKit(raw.kit)) s.kit = raw.kit;
+    if (raw.melee === 'grenade') s.melee = 'grenade';
   } catch { /* испорченные настройки — берём стандартные */ }
   return s;
 }
@@ -431,6 +434,13 @@ function buildGun(type: WeaponId): Gun {
     bolt = b;
     aim = { y: 0.085, z: -0.1, relief: 0.08 }; // глаз у окуляра оптики
     muzzleZ = -1.05;
+  } else if (type === 'grenade') {
+    // Ярко-красная граната с запалом и кольцом чеки
+    const body = part(0.09, 0.11, 0.09, 0xe0101a, 0, 0, -0.1);
+    (body.material as THREE.MeshLambertMaterial).emissive = new THREE.Color(0x550000);
+    add(0.04, 0.04, 0.04, 0x333333, 0, 0.075, -0.1);
+    add(0.05, 0.012, 0.012, 0xcccccc, 0.035, 0.09, -0.1);
+    muzzleZ = -0.15;
   } else if (type === 'knife') {
     add(0.035, 0.05, 0.12, 0x1c1c1c, 0, 0, 0);
     add(0.07, 0.025, 0.02, 0x555555, 0, 0, -0.07);
@@ -738,12 +748,12 @@ const me = {
   weapon: 'pistol' as WeaponId,
   ammo: {
     pistol: WEAPONS.pistol.mag, shotgun: WEAPONS.shotgun.mag, rifle: WEAPONS.rifle.mag,
-    sniper: WEAPONS.sniper.mag, lmg: WEAPONS.lmg.mag, knife: 0, rocket: 0,
+    sniper: WEAPONS.sniper.mag, lmg: WEAPONS.lmg.mag, knife: 0, grenade: 0, rocket: 0,
   } as Record<WeaponId, number>,
   /** Запас патронов сверх магазина; кончится — перезаряжаться нечем */
   reserve: {
     pistol: WEAPONS.pistol.reserve, shotgun: WEAPONS.shotgun.reserve, rifle: WEAPONS.rifle.reserve,
-    sniper: WEAPONS.sniper.reserve, lmg: WEAPONS.lmg.reserve, knife: 0, rocket: 0,
+    sniper: WEAPONS.sniper.reserve, lmg: WEAPONS.lmg.reserve, knife: 0, grenade: 0, rocket: 0,
   } as Record<WeaponId, number>,
   reloadUntil: 0,
   /** Длительность текущей перезарядки — для анимации */
@@ -790,6 +800,7 @@ let kick = 0;
 function setWeapon(w: WeaponId): void {
   if (w === 'rocket' && me.ammo.rocket <= 0) return;
   if (w === 'knife' && !hasKnife) return; // нож брошен — до смерти его нет
+  if (w === 'grenade' && myGrenades <= 0 && !cookStart) return; // граната одна на жизнь
   if (GUNS.includes(w) && !settings.kit.includes(w)) return; // ствол не из набора
   adsK = 0;
   me.weapon = w;
@@ -819,6 +830,7 @@ const SOUND: Record<WeaponId | 'boom' | 'slide', { dur: number; freq: number; ga
   shotgun: { dur: 0.35, freq: 900, gain: 0.35 },
   rifle: { dur: 0.14, freq: 2600, gain: 0.35 },
   lmg: { dur: 0.16, freq: 1700, gain: 0.4 },
+  grenade: { dur: 0.12, freq: 2500, gain: 0.25, high: true },
   sniper: { dur: 0.5, freq: 1300, gain: 0.55 },
   knife: { dur: 0.12, freq: 2500, gain: 0.25, high: true },
   rocket: { dur: 0.35, freq: 600, gain: 0.35 },
@@ -1004,6 +1016,7 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
     case 'medkits': onMedkits(m); break;
     case 'loadout': onLoadout(m); break;
     case 'ammopacks': onAmmoPacks(m); break;
+    case 'grenades': onGrenades(m); break;
     case 'weather': onWeather(m); break;
     case 'helmet': {
       // Попадание в шлем: стрелку — «звон» металла и маркер, всем — сообщение, когда шлем слетел
@@ -1347,7 +1360,7 @@ $('join-form').addEventListener('submit', (e) => {
   const name = nameInput.value.trim();
   localStorage.setItem('doc-name', name);
   playBtn.disabled = true;
-  sendMsg({ t: 'join', name, team: chosenTeam, mode: chosenMode, map: chosenMap, limitKind: chosenLimitKind, limitValue: chosenLimitValue, kit: settings.kit, token: localStorage.getItem(TOKEN_KEY) ?? undefined });
+  sendMsg({ t: 'join', name, team: chosenTeam, mode: chosenMode, map: chosenMap, limitKind: chosenLimitKind, limitValue: chosenLimitValue, kit: settings.kit, melee: settings.melee, token: localStorage.getItem(TOKEN_KEY) ?? undefined });
 });
 
 // ======================= управление =======================
@@ -1757,6 +1770,7 @@ function updateShooting(now: number): void {
     me.reloadUntil = 0;
     updateHud();
   }
+  if (me.weapon === 'grenade') { updateGrenadeHand(now); return; }
   if (!mouseDown || !me.alive || !locked || me.reloadUntil || now < me.nextShot || openingUntil || now < boltUntil) return;
   if (missileCtl || gunner) return; // ЛКМ сейчас — ускорение ракеты или пулемёт самолёта
   const w = WEAPONS[me.weapon];
@@ -1806,8 +1820,9 @@ function updateHud(): void {
   $('health').classList.toggle('low', me.hp <= 30);
   $('weapon-name').textContent = WEAPONS[me.weapon].name;
   const melee = !!WEAPONS[me.weapon].melee;
-  $('ammo-count').textContent = melee ? '—' : me.reloadUntil ? '…' : String(me.ammo[me.weapon]);
-  $('ammo-total').textContent = melee ? '' : me.weapon === 'rocket' ? ' ракет' : ` / ${me.reserve[me.weapon]}`;
+  $('ammo-count').textContent = me.weapon === 'grenade' ? String(myGrenades + (cookStart ? 1 : 0))
+    : melee ? '—' : me.reloadUntil ? '…' : String(me.ammo[me.weapon]);
+  $('ammo-total').textContent = melee ? '' : me.weapon === 'grenade' ? ' шт.' : me.weapon === 'rocket' ? ' ракет' : ` / ${me.reserve[me.weapon]}`;
   renderHotbar();
   renderStreak();
 
@@ -2235,7 +2250,7 @@ type SlotId = WeaponId | StreakKind;
 function hotbar(): Array<{ key: string; id: SlotId; label: string }> {
   const kit = settings.kit.map((id, i) => ({ key: String(i + 2), id: id as SlotId, label: WEAPONS[id].name }));
   return [
-    { key: '1', id: 'knife', label: 'Нож' },
+    settings.melee === 'grenade' ? { key: '1', id: 'grenade', label: 'Граната' } : { key: '1', id: 'knife', label: 'Нож' },
     ...kit,
     { key: '5', id: 'uav', label: 'БПЛА' },
     { key: '6', id: 'missile', label: 'Ракета с неба' },
@@ -2251,6 +2266,7 @@ const isStreakKind = (id: SlotId): id is StreakKind =>
 function slotReady(id: SlotId): boolean {
   if (isStreakKind(id)) return rewards[id] > 0;
   if (id === 'knife') return hasKnife;
+  if (id === 'grenade') return myGrenades > 0 || cookStart > 0;
   if (id === 'rocket') return me.ammo.rocket > 0;
   return true;
 }
@@ -2308,6 +2324,7 @@ function onLoadout(m: LoadoutMsg): void {
   if (m.streak === STREAK.superArmor && streak < m.streak) toast('🛡 Ты Джаггернаут: +500 брони, шлем держит 3 выстрела в голову');
   if (got('uav') || got('missile') || got('nuke') || got('gunship')) beep(1200, 0.3, 0.12);
   hasKnife = m.knife;
+  myGrenades = m.grenades;
   streak = m.streak;
   rewards.uav = m.uav;
   rewards.missile = m.missile;
@@ -2320,6 +2337,26 @@ function onLoadout(m: LoadoutMsg): void {
 function scaleOfRemote(r: Remote): number {
   return r.info.big ? STREAK.bigScale : 1;
 }
+
+// ======================= нож или граната (в меню Esc) =======================
+function setMelee(kind: MeleeKind): void {
+  if (settings.melee === kind) return;
+  settings.melee = kind;
+  applySettings();
+  sendMsg({ t: 'melee', kind });
+  renderMeleeChoice();
+  toast(kind === 'grenade' ? '💣 Граната вместо ножа — со следующей жизни' : '🔪 Нож вместо гранаты — со следующей жизни');
+  updateHud();
+}
+function renderMeleeChoice(): void {
+  for (const b of document.querySelectorAll<HTMLButtonElement>('.melee button')) {
+    b.classList.toggle('active', b.dataset.melee === settings.melee);
+  }
+}
+for (const b of document.querySelectorAll<HTMLButtonElement>('.melee button')) {
+  b.addEventListener('click', () => setMelee(b.dataset.melee === 'grenade' ? 'grenade' : 'knife'));
+}
+renderMeleeChoice();
 
 // ======================= набор оружия (в меню Esc) =======================
 function setKit(kit: WeaponId[]): void {
@@ -2456,6 +2493,93 @@ function updateFireworks(dt: number): void {
     // Гаснут к концу и слегка мерцают
     const t = age / bu.life;
     mat.opacity = (1 - t * t) * (0.75 + 0.25 * Math.sin(age / 35));
+  }
+}
+
+// ======================= граната =======================
+let myGrenades = 0;
+/** Когда сорвана чека гранаты в руке (0 — не держу) */
+let cookStart = 0;
+let cookBeepAt = 0;
+
+/** Писк гранаты: чем меньше осталось до взрыва, тем чаще. */
+function beepInterval(msLeft: number): number {
+  return 120 + 560 * Math.max(0, Math.min(1, msLeft / GRENADE.fuseMs));
+}
+
+/** Зажал ЛКМ — чека сорвана (пищит в руке); отпустил — бросок; передержал — взрыв в руке (решает сервер). */
+function updateGrenadeHand(now: number): void {
+  const flash = viewGun.group.children[0] as THREE.Mesh | undefined;
+  if (!cookStart) {
+    if (mouseDown && locked && me.alive && myGrenades > 0 && !openingUntil && !firedThisPress) {
+      cookStart = now;
+      cookBeepAt = now;
+      firedThisPress = true;
+      sendMsg({ t: 'pin' });
+      beep(900, 0.06, 0.1); // щелчок чеки
+    }
+    $('cook').classList.add('hidden');
+    return;
+  }
+  const left = GRENADE.fuseMs - (now - cookStart);
+  if (now >= cookBeepAt) { beep(1800, 0.05, 0.1); cookBeepAt = now + beepInterval(left); }
+  if (flash) (flash.material as THREE.MeshLambertMaterial).emissive.setHex(Math.floor(now / 120) % 2 ? 0xff2020 : 0x330000);
+  $('cook').classList.remove('hidden');
+  $('cook').textContent = `💣 ${Math.max(0, left / 1000).toFixed(1)} с — отпусти ЛКМ, чтобы бросить`;
+  if (left <= 0) { cookStart = 0; $('cook').classList.add('hidden'); return; } // взорвалась в руке
+  if (!mouseDown || !me.alive) {
+    camera.updateMatrixWorld(true);
+    camera.getWorldDirection(_dir);
+    sendMsg({ t: 'gthrow', d: [+_dir.x.toFixed(4), +_dir.y.toFixed(4), +_dir.z.toFixed(4)] });
+    cookStart = 0;
+    $('cook').classList.add('hidden');
+    shotSound('knife', 0.8);
+    setTimeout(() => { if (me.weapon === 'grenade' && !cookStart) setWeapon(settings.kit[0]!); }, 300);
+  }
+}
+
+interface GrenadeFx { mesh: THREE.Mesh; target: THREE.Vector3; msLeft: number; seen: number; nextBeep: number }
+const grenadeFx = new Map<number, GrenadeFx>();
+
+/** Позиции гранат с сервера: плавно догоняем, мигаем красным и пищим всё чаще. */
+function onGrenades(m: GrenadesMsg): void {
+  const now = performance.now();
+  const seen = new Set<number>();
+  for (const [id, x, y, z, ms] of m.list) {
+    seen.add(id);
+    let fx = grenadeFx.get(id);
+    if (!fx) {
+      const mesh = box(0.22, 0.26, 0.22, 0xff1020);
+      (mesh.material as THREE.MeshLambertMaterial).emissive = new THREE.Color(0x660000);
+      mesh.position.set(x, y, z);
+      scene.add(mesh);
+      fx = { mesh, target: new THREE.Vector3(x, y, z), msLeft: ms, seen: now, nextBeep: now };
+      grenadeFx.set(id, fx);
+    }
+    fx.target.set(x, y, z);
+    fx.msLeft = ms;
+    fx.seen = now;
+  }
+  for (const [id, fx] of grenadeFx) {
+    if (seen.has(id)) continue;
+    scene.remove(fx.mesh);
+    grenadeFx.delete(id);
+  }
+}
+
+function updateGrenades(now: number): void {
+  for (const fx of grenadeFx.values()) {
+    fx.mesh.position.lerp(fx.target, 0.35);
+    fx.mesh.rotation.x += 0.15;
+    const left = fx.msLeft - (now - fx.seen);
+    // Мигает: ярко-красный — тёмно-красный, чаще к концу
+    const period = beepInterval(left) / 2;
+    (fx.mesh.material as THREE.MeshLambertMaterial).emissive.setHex(Math.floor(now / period) % 2 ? 0xff3030 : 0x440000);
+    if (now >= fx.nextBeep) {
+      const dist = fx.mesh.position.distanceTo(camera.position);
+      if (dist < 30) beep(1900, 0.05, 0.12 * (1 - dist / 30));
+      fx.nextBeep = now + beepInterval(left);
+    }
   }
 }
 
@@ -3249,6 +3373,7 @@ function frame(now: number): void {
   updateKnives(dt);
   updateSinking(now);
   updateFireworks(dt);
+  updateGrenades(now);
   updateAmmoPacks(now);
   updateUnderground();
   updateWeather(dt);
@@ -3279,7 +3404,7 @@ window.game = {
     if (gunner) { gunner.yaw = yaw; gunner.pitch = pitch; }
   },
   faces: () => FACE_STEPS.map((_, l) => { faceTexture(l); return faceUrl[l]!; }),
-  dbg: () => ({ scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
+  dbg: () => ({ grenades: [...grenadeFx.values()].map((g) => g.mesh.position.toArray().map((v) => +v.toFixed(2))), myGrenades, cooking: cookStart > 0, scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
     kit: settings.kit, reserve: { ...me.reserve }, hotbar: hotbar().map((h) => `${h.key}:${h.label}`).join(' '),
     missile: missileCtl ? missileCtl.pos.toArray() : null, low, adsK, fov: camera.fov, crateState, crateAt, eyeH, recoil, corpses: corpses.length, sprays: sprays.length,
     steps: stepCount, medkits: medkitFx.size, boltUntil, menuClosed, armor: me.armor }),

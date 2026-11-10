@@ -60,6 +60,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
   sniper:  { name: 'Снайперка', dmg: 80, pellets: 1, rate: 1300, mag: 5, reserve: 19, reload: 2800, spread: 0.0015, auto: false, zoom: 20, headKill: true },
   knife:   { name: 'Нож', dmg: 100, pellets: 1, rate: 650, mag: 0, reserve: 0, reload: 0, spread: 0, auto: false, zoom: null, melee: 2 },
   // Ракетница достаётся только из ящика: 6 ракет, без перезарядки
+  grenade: { name: 'Граната', dmg: 0, pellets: 1, rate: 600, mag: 0, reserve: 0, reload: 0, spread: 0, auto: false, zoom: null },
   rocket:  { name: 'Ракетница', dmg: 999, pellets: 1, rate: 900, mag: 6, reserve: 0, reload: 0, spread: 0, auto: false, zoom: 60 },
 };
 
@@ -78,6 +79,36 @@ export const ROCKET = { speed: 70, radius: 4, lifeMs: 4000 };
 /** Метательный нож: один на жизнь, после смерти появляется снова. */
 /** pad — насколько попадание ножом «прощает» промах мимо края хитбокса, м. */
 export const THROW = { dmg: 50, speed: 42, gravity: 1.5, lifeMs: 3000, pad: 0.15 };
+
+/**
+ * Граната (вместо ножа, одна на жизнь): зажал ЛКМ — сорвана чека, через fuseMs взрыв.
+ * Отпустил — летит с инерцией и отскакивает. Взрыв убивает в killR, дальше урон падает до нуля к maxR.
+ */
+export const GRENADE = {
+  fuseMs: 3000, speed: 17, lift: 2.5, gravity: 16, bounce: 0.45, friction: 0.75, radius: 0.12,
+  killR: 3, maxR: 7, maxDmg: 100,
+};
+export interface GrenadeBody { pos: Vec3; vel: Vec3 }
+
+function grenadeInside(boxes: Box[], p: Vec3, r: number): boolean {
+  return boxes.some((b) => p[0] + r > b.min[0] && p[0] - r < b.max[0] && p[1] + r > b.min[1] && p[1] - r < b.max[1] &&
+    p[2] + r > b.min[2] && p[2] - r < b.max[2]);
+}
+
+/** Шаг полёта гранаты: тяжесть, отскок от блоков по каждой оси, трение о поверхность. */
+export function stepGrenade(boxes: Box[], g: GrenadeBody, dt: number): void {
+  const r = GRENADE.radius;
+  g.vel[1] -= GRENADE.gravity * dt;
+  for (const axis of [0, 1, 2] as const) {
+    const prev = g.pos[axis];
+    g.pos[axis] += g.vel[axis] * dt;
+    if (!grenadeInside(boxes, g.pos, r)) continue;
+    g.pos[axis] = prev;
+    g.vel[axis] = -g.vel[axis] * GRENADE.bounce;
+    for (const k of [0, 1, 2] as const) if (k !== axis) g.vel[k] *= GRENADE.friction;
+    if (axis === 1 && Math.abs(g.vel[1]) < 0.8) g.vel[1] = 0; // легла
+  }
+}
 
 /** Длительность матча на выбор и голосование за карту после него. */
 /**
