@@ -6,7 +6,7 @@ import type { LimitKind, StreakKind, WeatherKind } from './map.js';
 
 export type Team = 'green' | 'red';
 export type Mode = 'tdm' | 'ffa';
-export type WeaponId = 'pistol' | 'shotgun' | 'rifle' | 'lmg' | 'sniper' | 'knife' | 'grenade' | 'rocket';
+export type WeaponId = 'pistol' | 'smg' | 'shotgun' | 'rifle' | 'lmg' | 'sniper' | 'knife' | 'grenade' | 'rocket';
 /** Что в слоте 1 вместо огнестрела: нож или граната */
 export type MeleeKind = 'knife' | 'grenade';
 /** falling — летит с неба, idle — лежит, opening — его открывают, gone — ящика нет */
@@ -124,6 +124,8 @@ export type ServerMsg =
   | GrenadesMsg
   /** Какие стёкла и двери уже разбиты */
   | { t: 'breaks'; broken: number[] }
+  /** Какие двери сейчас открыты */
+  | { t: 'doors'; open: number[] }
   | { t: 'gunship-hit'; id: number; left: number }
   | AmmoPacksMsg
   | WeatherMsg
@@ -156,6 +158,8 @@ export type ClientMsg =
   | { t: 'pin' }
   | { t: 'gthrow'; d: Vec3 }
   | { t: 'melee'; kind: MeleeKind }
+  /** F у двери — открыть или закрыть */
+  | { t: 'door'; id: number }
   | { t: 'upgrade'; stat: Stat }
   | { t: 'open'; on: boolean }
   | { t: 'rocket'; d: Vec3 }

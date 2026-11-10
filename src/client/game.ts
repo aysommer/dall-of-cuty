@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  AMMO_PACK, CRATE, DEFAULT_KIT, GRENADE, GUNS, GUNSHIP, clipWalls, gunshipPos, HEAD, HIP_SPREAD, KIT_SIZE, MAPS, MAP_ORDER, MATCH, MEDKIT, ROCKET, SLIDE, STREAK,
+  AMMO_PACK, CRATE, DEFAULT_KIT, DOOR, GRENADE, GUNS, GUNSHIP, clipWalls, gunshipPos, HEAD, HIP_SPREAD, KIT_SIZE, MAPS, MAP_ORDER, MATCH, MEDKIT, ROCKET, SLIDE, STREAK,
   THROW, WEAPONS, WEAPON_ORDER, WORLD_BOTTOM, PLAYER, isKit, type LimitKind, type WeatherKind,
   playerBox, rayBox, rayWorld, type StreakKind,
   type Box, type GameMap, type Ladder, type MapId,
@@ -99,7 +99,10 @@ let currentMap: GameMap = MAPS.sands;
 /** Блоки, которые мешают движению и выстрелам: карта плюс целые стёкла и двери */
 let solids: Box[] = MAPS.sands.boxes;
 const brokenIds = new Set<number>();
-const breakMeshes = new Map<number, THREE.Mesh>();
+const breakMeshes = new Map<number, THREE.Object3D>();
+/** Открытые двери и их петли (дверь поворачивается вокруг края) */
+const openDoors = new Set<number>();
+const doorHinges = new Map<number, { pivot: THREE.Group; angle: number }>();
 /** Невидимые стены по краю текущей карты */
 let clips: Box[] = clipWalls(MAPS.sands.half);
 /** Свет фонарей канализации — включается, когда камера под землёй */
@@ -301,6 +304,7 @@ function loadMap(id: MapId): void {
   }
   for (const l of currentMap.ladders) mapGroup.add(buildLadder(l));
   breakMeshes.clear();
+  doorHinges.clear();
   for (const x of currentMap.breakables ?? []) {
     const { min, max } = x.box;
     const w = max[0] - min[0], h = max[1] - min[1], d = max[2] - min[2];
@@ -315,6 +319,19 @@ function loadMap(id: MapId): void {
       knob.position.set(w > d ? w * 0.35 : 0, -0.1, w > d ? 0 : d * 0.35);
       knob.scale.set(w > d ? 1 : 3.5, 1, w > d ? 3.5 : 1);
       m.add(knob);
+    }
+    if (x.kind === 'door') {
+      // Петля — на одном краю двери: открытая дверь поворачивается на 90° внутрь комнаты
+      const alongZ = d > w;
+      const pivot = new THREE.Group();
+      pivot.position.set(alongZ ? min[0] + w / 2 : min[0], min[1], alongZ ? min[2] : min[2] + d / 2);
+      m.position.set(alongZ ? 0 : w / 2, h / 2, alongZ ? d / 2 : 0);
+      pivot.add(m);
+      pivot.visible = !brokenIds.has(x.id);
+      breakMeshes.set(x.id, pivot);
+      doorHinges.set(x.id, { pivot, angle: 0 });
+      mapGroup.add(pivot);
+      continue;
     }
     m.position.set(min[0] + w / 2, min[1] + h / 2, min[2] + d / 2);
     m.visible = !brokenIds.has(x.id);
@@ -494,6 +511,15 @@ function buildGun(type: WeaponId): Gun {
     sight = { y: 0.13, z: -0.08 };
     aim = { ...sight, relief: 0.24 };
     muzzleZ = -0.96;
+  } else if (type === 'smg') {
+    add(0.06, 0.08, 0.36, 0x26292e, 0, 0, -0.14);          // короткая коробка
+    add(0.035, 0.035, 0.16, 0x111111, 0, 0.01, -0.39);     // ствол
+    mag = part(0.04, 0.2, 0.06, 0x111111, 0, -0.14, -0.16); // длинный прямой магазин
+    add(0.045, 0.12, 0.06, 0x1c1c1c, 0, -0.09, 0.0);        // рукоять
+    add(0.05, 0.06, 0.2, 0x3a3a3a, 0, 0, 0.13);             // складной приклад
+    sight = { y: 0.085, z: -0.12 };
+    aim = { ...sight, relief: 0.22 };
+    muzzleZ = -0.48;
   } else {
     add(0.06, 0.09, 0.5, 0x30343a, 0, 0, -0.2);
     add(0.035, 0.035, 0.3, 0x1c1c1c, 0, 0.01, -0.58);
@@ -775,12 +801,12 @@ const me = {
   weapon: 'pistol' as WeaponId,
   ammo: {
     pistol: WEAPONS.pistol.mag, shotgun: WEAPONS.shotgun.mag, rifle: WEAPONS.rifle.mag,
-    sniper: WEAPONS.sniper.mag, lmg: WEAPONS.lmg.mag, knife: 0, grenade: 0, rocket: 0,
+    sniper: WEAPONS.sniper.mag, lmg: WEAPONS.lmg.mag, smg: WEAPONS.smg.mag, knife: 0, grenade: 0, rocket: 0,
   } as Record<WeaponId, number>,
   /** Запас патронов сверх магазина; кончится — перезаряжаться нечем */
   reserve: {
     pistol: WEAPONS.pistol.reserve, shotgun: WEAPONS.shotgun.reserve, rifle: WEAPONS.rifle.reserve,
-    sniper: WEAPONS.sniper.reserve, lmg: WEAPONS.lmg.reserve, knife: 0, grenade: 0, rocket: 0,
+    sniper: WEAPONS.sniper.reserve, lmg: WEAPONS.lmg.reserve, smg: WEAPONS.smg.reserve, knife: 0, grenade: 0, rocket: 0,
   } as Record<WeaponId, number>,
   reloadUntil: 0,
   /** Длительность текущей перезарядки — для анимации */
@@ -856,6 +882,7 @@ const SOUND: Record<WeaponId | 'boom' | 'slide', { dur: number; freq: number; ga
   pistol: { dur: 0.18, freq: 1800, gain: 0.35 },
   shotgun: { dur: 0.35, freq: 900, gain: 0.35 },
   rifle: { dur: 0.14, freq: 2600, gain: 0.35 },
+  smg: { dur: 0.1, freq: 3000, gain: 0.3 },
   lmg: { dur: 0.16, freq: 1700, gain: 0.4 },
   grenade: { dur: 0.12, freq: 2500, gain: 0.25, high: true },
   sniper: { dur: 0.5, freq: 1300, gain: 0.55 },
@@ -1045,6 +1072,14 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
     case 'ammopacks': onAmmoPacks(m); break;
     case 'grenades': onGrenades(m); break;
     case 'breaks': onBreaks(m.broken); break;
+    case 'doors': {
+      const was = new Set(openDoors);
+      openDoors.clear();
+      for (const id of m.open) openDoors.add(id);
+      if ([...openDoors].some((id) => !was.has(id)) || [...was].some((id) => !openDoors.has(id))) beep(240, 0.12, 0.06);
+      rebuildSolids();
+      break;
+    }
     case 'weather': onWeather(m); break;
     case 'helmet': {
       // Попадание в шлем: стрелку — «звон» металла и маркер, всем — сообщение, когда шлем слетел
@@ -1484,6 +1519,7 @@ document.addEventListener('keydown', (e) => {
     // F — начать открывать ящик; повторное нажатие отменяет и сбрасывает прогресс
     if (openingUntil) sendMsg({ t: 'open', on: false });
     else if (me.alive && crateState === 'idle' && nearCrate()) sendMsg({ t: 'open', on: true });
+    else { const door = nearDoor(); if (door) sendMsg({ t: 'door', id: door.id }); }
   }
   if (e.code === 'KeyR') startReload();
   if (e.code === 'Space') e.preventDefault();
@@ -1599,7 +1635,8 @@ function move(dt: number): void {
   const sin = Math.sin(me.yaw), cos = Math.cos(me.yaw);
   let speed = SPEED * multiplier(profile.levels, 'walk');
   // В прицеле не бегаем
-  if (sprintKey() && !aimHeld) speed *= multiplier(profile.levels, 'sprint');
+  // Бег — пока не целишься и не стреляешь (как в Call of Duty: выстрел прерывает спринт)
+  if (isSprinting()) speed *= multiplier(profile.levels, 'sprint');
   const wish = { x: (-sin * f + cos * s) / len * speed, z: (-cos * f - sin * s) / len * speed };
   const p = me.pos;
   const crate = crateSolid();
@@ -1739,7 +1776,7 @@ function fire(now: number): void {
   if (me.weapon === 'sniper' && me.ammo.sniper > 0) boltUntil = now + BOLT_MS;
   const RECOIL: Partial<Record<WeaponId, [number, number]>> = {
     // Пулемёт бьёт вдвое сильнее автомата
-    shotgun: [0.12, 0.035], rifle: [0.05, 0.012], lmg: [0.1, 0.024], sniper: [0.14, 0.05],
+    shotgun: [0.12, 0.035], rifle: [0.05, 0.012], smg: [0.035, 0.008], lmg: [0.1, 0.024], sniper: [0.14, 0.05],
   };
   const [k, lift] = RECOIL[me.weapon] ?? [0.05, 0.015];
   kick = k;
@@ -2022,6 +2059,10 @@ function updateCratePrompt(now: number): void {
         ? `Ящик открывает ${opener.name}`
         : `F — открыть ящик (${CRATE.openMs / 1000} сек., двигаться нельзя) · исчезнет через ${left} сек.`;
     }
+  }
+  if (!text && joined && me.alive) {
+    const door = nearDoor();
+    if (door) text = openDoors.has(door.id) ? 'F — закрыть дверь' : 'F — открыть дверь';
   }
   prompt.classList.toggle('hidden', !text);
   if (!text) return;
@@ -2623,7 +2664,7 @@ function updateGrenades(now: number): void {
 let lastWeather: WeatherMsg | null = null;
 
 function rebuildSolids(): void {
-  const intact = (currentMap.breakables ?? []).filter((x) => !brokenIds.has(x.id)).map((x) => x.box);
+  const intact = (currentMap.breakables ?? []).filter((x) => !brokenIds.has(x.id) && !openDoors.has(x.id)).map((x) => x.box);
   solids = intact.length ? [...currentMap.boxes, ...intact] : currentMap.boxes;
 }
 
@@ -3226,6 +3267,54 @@ function updateAim(dt: number): void {
   viewModel.position.y = -0.2 + (aimY + 0.2) * adsK;
 }
 
+// ======================= поза оружия: бег и стена =======================
+let sprintK = 0, wallK = 0;
+function isSprinting(): boolean {
+  return sprintKey() && !!keys.KeyW && !aimHeld && !mouseDown && me.grounded && !low;
+}
+/**
+ * При беге оружие поднимается и разворачивается стволом вверх-вбок; у стены — задирается
+ * и отходит назад, чтобы не проходить сквозь неё.
+ */
+function poseGun(dt: number): void {
+  const moving = Math.hypot(me.vel.x, me.vel.z) > SPEED * 0.9;
+  sprintK += ((isSprinting() && moving ? 1 : 0) - sprintK) * Math.min(1, dt * 10);
+  camera.getWorldDirection(_dir);
+  const eye: Vec3 = [camera.position.x, camera.position.y, camera.position.z];
+  const near = rayWorld(solids, eye, [_dir.x, _dir.y, _dir.z], 1.3);
+  const wallTarget = Math.max(0, Math.min(1, (1.3 - near) / 0.8));
+  wallK += (wallTarget - wallK) * Math.min(1, dt * 12);
+  const side = settings.hand === 'left' ? -1 : 1;
+  viewModel.rotation.x += 0.55 * sprintK + 1.0 * wallK;
+  viewModel.rotation.y += 0.45 * sprintK * side;
+  viewModel.rotation.z += 0.4 * sprintK * side;
+  viewModel.position.y += 0.05 * sprintK - 0.04 * wallK;
+  viewModel.position.x -= 0.06 * sprintK * side;
+  viewModel.position.z += 0.18 * wallK;
+}
+
+/** Ближайшая целая дверь, до которой можно дотянуться. */
+function nearDoor(): { id: number } | null {
+  let best: { id: number } | null = null, bestD = DOOR.reach;
+  for (const x of currentMap.breakables ?? []) {
+    if (x.kind !== 'door' || brokenIds.has(x.id)) continue;
+    const { min, max } = x.box;
+    const c = new THREE.Vector3((min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2);
+    const d = Math.hypot(c.x - me.pos.x, c.z - me.pos.z) - 0.5;
+    if (Math.abs(min[1] - me.pos.y) < 1.5 && d < bestD) { bestD = d; best = { id: x.id }; }
+  }
+  return best;
+}
+
+/** Двери плавно поворачиваются на петлях. */
+function updateDoors(dt: number): void {
+  for (const [id, h] of doorHinges) {
+    const target = openDoors.has(id) ? -Math.PI / 2 : 0;
+    h.angle += (target - h.angle) * Math.min(1, dt * 8);
+    h.pivot.rotation.y = h.angle;
+  }
+}
+
 // ======================= снайперка: оптика на V и тряска в движении =======================
 /** Оптика на снайперке: снимается и надевается на V */
 let scopeOn = true;
@@ -3390,6 +3479,7 @@ function frame(now: number): void {
     viewModel.rotation.y = sw >= 0 ? -1.1 + 2.2 * sw : 0;
     viewModel.rotation.z = sw >= 0 ? -Math.PI / 2 * swing * 0.6 : 0;
     viewModel.rotation.x = kick * 1.5;
+    poseGun(dt);
     animateGun(now);
     animateScope(now);
 
@@ -3445,6 +3535,7 @@ function frame(now: number): void {
   updateKnives(dt);
   updateSinking(now);
   updateFireworks(dt);
+  updateDoors(dt);
   updateGrenades(now);
   updateAmmoPacks(now);
   updateUnderground();
@@ -3476,7 +3567,7 @@ window.game = {
     if (gunner) { gunner.yaw = yaw; gunner.pitch = pitch; }
   },
   faces: () => FACE_STEPS.map((_, l) => { faceTexture(l); return faceUrl[l]!; }),
-  dbg: () => ({ broken: [...brokenIds], grenades: [...grenadeFx.values()].map((g) => g.mesh.position.toArray().map((v) => +v.toFixed(2))), myGrenades, cooking: cookStart > 0, scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
+  dbg: () => ({ openDoors: [...openDoors], sprintK, wallK, broken: [...brokenIds], grenades: [...grenadeFx.values()].map((g) => g.mesh.position.toArray().map((v) => +v.toFixed(2))), myGrenades, cooking: cookStart > 0, scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
     kit: settings.kit, reserve: { ...me.reserve }, hotbar: hotbar().map((h) => `${h.key}:${h.label}`).join(' '),
     missile: missileCtl ? missileCtl.pos.toArray() : null, low, adsK, fov: camera.fov, crateState, crateAt, eyeH, recoil, corpses: corpses.length, sprays: sprays.length,
     steps: stepCount, medkits: medkitFx.size, boltUntil, menuClosed, armor: me.armor }),

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  AMMO_PACK, ARMOR, CRATE, DEFAULT_KIT, GRENADE, GUNSHIP, HEAD, MAPS, MAP_ORDER, MATCH, MEDKIT, PLAYER, ROCKET, SLIDE, STREAK, THROW, WEAPONS,
+  AMMO_PACK, ARMOR, CRATE, DEFAULT_KIT, DOOR, GRENADE, GUNSHIP, HEAD, MAPS, MAP_ORDER, MATCH, MEDKIT, PLAYER, ROCKET, SLIDE, STREAK, THROW, WEAPONS,
   WEATHER, bodyPoints, clipWalls, gunshipPos, isKit, stepGrenade, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
   type Box, type LimitKind, type MapId, type StreakKind, type WeatherKind,
 } from '../shared/map.js';
@@ -830,19 +830,44 @@ function explodeCrate([cx, cy, cz]: Vec3): void {
 // Целые разрушаемые блоки твёрдые: закрывают видимость, останавливают пули, ракеты и гранаты.
 const brokenIds = new Set<number>();
 const breakHp = new Map<number, number>();
-let solidCache: { map: MapId; broken: number; boxes: Box[] } | null = null;
+/** Открытые двери не мешают ни движению, ни выстрелам */
+const openDoors = new Set<number>();
+let solidsVersion = 0;
+let solidCache: { map: MapId; version: number; boxes: Box[] } | null = null;
 
-/** Неподвижная геометрия карты плюс ещё не разбитые стёкла и двери. */
+/** Неподвижная геометрия карты плюс ещё не разбитые стёкла и закрытые двери. */
 function worldBoxes(): Box[] {
-  if (solidCache && solidCache.map === mapId && solidCache.broken === brokenIds.size) return solidCache.boxes;
+  if (solidCache && solidCache.map === mapId && solidCache.version === solidsVersion) return solidCache.boxes;
   const map = MAPS[mapId];
-  const intact = (map.breakables ?? []).filter((x) => !brokenIds.has(x.id)).map((x) => x.box);
-  solidCache = { map: mapId, broken: brokenIds.size, boxes: [...map.boxes, ...intact] };
+  const intact = (map.breakables ?? []).filter((x) => !brokenIds.has(x.id) && !openDoors.has(x.id)).map((x) => x.box);
+  solidCache = { map: mapId, version: solidsVersion, boxes: [...map.boxes, ...intact] };
   return solidCache.boxes;
 }
+
+/** F у двери: открыть или закрыть. Закрыть нельзя, если в проёме стоит игрок — он бы застрял. */
+function toggleDoor(p: Player, id: unknown): void {
+  const door = (MAPS[mapId].breakables ?? []).find((x) => x.id === id && x.kind === 'door');
+  if (!door || !p.alive || brokenIds.has(door.id)) return;
+  const { min, max } = door.box;
+  const d = distToPlayer(p, [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2]);
+  if (d > DOOR.reach) return;
+  if (openDoors.has(door.id)) {
+    const r = PLAYER.w / 2;
+    const blocked = [...players.values()].some((v) => v.alive && v.pos[0] + r > min[0] && v.pos[0] - r < max[0] &&
+      v.pos[1] + PLAYER.h > min[1] && v.pos[1] < max[1] && v.pos[2] + r > min[2] && v.pos[2] - r < max[2]);
+    if (blocked) return;
+    openDoors.delete(door.id);
+  } else openDoors.add(door.id);
+  solidsVersion++;
+  broadcast({ t: 'doors', open: [...openDoors] });
+}
+
 function resetBreakables(): void {
   brokenIds.clear();
   breakHp.clear();
+  openDoors.clear();
+  solidsVersion++;
+  broadcast({ t: 'doors', open: [] });
   for (const x of MAPS[mapId].breakables ?? []) breakHp.set(x.id, x.hp);
   solidCache = null;
   broadcast({ t: 'breaks', broken: [] });
@@ -853,6 +878,7 @@ function damageBreakable(id: number, dmg: number): void {
   breakHp.set(id, hp);
   if (hp > 0) return;
   brokenIds.add(id);
+  solidsVersion++;
   broadcast({ t: 'breaks', broken: [...brokenIds] });
 }
 /** Взрыв рядом — стекло бьётся сразу, двери получают большой урон. */
@@ -1202,6 +1228,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
   send(ws, packsMsg());
   send(ws, weatherMsg());
   send(ws, { t: 'breaks', broken: [...brokenIds] });
+  send(ws, { t: 'doors', open: [...openDoors] });
   if (gunship) send(ws, gunshipMsg(gunship));
   broadcastPlayers();
   spawn(p);
@@ -1264,6 +1291,8 @@ wss.on('connection', (ws) => {
       pullPin(me);
     } else if (msg.t === 'gthrow') {
       throwGrenade(me, msg);
+    } else if (msg.t === 'door') {
+      toggleDoor(me, msg.id);
     } else if (msg.t === 'melee') {
       // Новый выбор вступит в силу со следующей жизни
       if (msg.kind === 'knife' || msg.kind === 'grenade') me.melee = msg.kind;
