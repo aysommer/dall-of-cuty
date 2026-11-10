@@ -1332,10 +1332,9 @@ function onInfo(m: InfoMsg): void {
     b.disabled = modeLocked;
   }
   if (modeLocked) chosenMap = m.map;
-  for (const b of buttonsOf('map-choice')) {
-    b.classList.toggle('active', b.dataset.map === chosenMap);
-    b.disabled = modeLocked;
-  }
+  const mapSelect = $<HTMLSelectElement>('map-choice');
+  mapSelect.value = chosenMap;
+  mapSelect.disabled = modeLocked;
   if (modeLocked) { chosenLimitKind = m.limitKind; chosenLimitValue = m.limitValue; }
   for (const b of buttonsOf('limit-kind')) {
     b.classList.toggle('active', b.dataset.kind === chosenLimitKind);
@@ -1386,17 +1385,16 @@ $('mode-choice').addEventListener('click', (e) => {
   chosenMode = b.dataset.mode === 'ffa' ? 'ffa' : 'tdm';
   if (lastInfo) onInfo(lastInfo);
 });
+// Карт много — выбор выпадающим списком, чтобы ничего не вылезало за края меню
 for (const id of MAP_ORDER) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.dataset.map = id;
-  b.textContent = MAPS[id].name;
-  $('map-choice').append(b);
+  const o = document.createElement('option');
+  o.value = id;
+  o.textContent = MAPS[id].name;
+  $('map-choice').append(o);
 }
-$('map-choice').addEventListener('click', (e) => {
-  const b = pickedButton(e);
-  if (!b) return;
-  chosenMap = MAP_ORDER.find((id) => id === b.dataset.map) ?? 'sands';
+$('map-choice').addEventListener('change', () => {
+  const v = $<HTMLSelectElement>('map-choice').value;
+  chosenMap = MAP_ORDER.find((id) => id === v) ?? 'sands';
   if (lastInfo) onInfo(lastInfo);
 });
 $('limit-kind').addEventListener('click', (e) => {
