@@ -68,6 +68,25 @@ export const CRATE = {
   trapChance: 0.1, rocketChance: 0.4, trapRadius: 5,
 };
 export const ROCKET = { speed: 70, radius: 4, lifeMs: 4000 };
+
+/** Метательный нож: один на жизнь, после смерти появляется снова. */
+export const THROW = { dmg: 50, speed: 32, gravity: 9, lifeMs: 3000 };
+
+/** Длительность матча на выбор и голосование за карту после него. */
+export const MATCH = { minutes: [5, 10, 15] as const, voteMs: 15_000 };
+
+/**
+ * Серия убийств (без смертей): награды за 3, 4, 5, 7 и 15 убийств подряд.
+ * БПЛА, ракету с неба и бомбу можно использовать и после смерти — они лежат в запасе, пока их не применят.
+ */
+export const STREAK = {
+  uav: 3, missile: 4, launcher: 5, superArmor: 7, nuke: 15,
+  uavMs: 30_000, pingMs: 2000,
+  missileHeight: 60, missileSpeed: 18, missileBoost: 55, missileRadius: 6, missileMaxMs: 20_000,
+  superArmorHp: 500, bigScale: 1.5,
+  nukeMs: 4000,
+};
+export type StreakKind = 'uav' | 'missile' | 'nuke';
 export const WEAPON_ORDER: WeaponId[] = ['pistol', 'shotgun', 'rifle', 'sniper', 'knife'];
 
 /** Подкат: из спринта по C, игрок ложится и скользит ms миллисекунд. */
@@ -77,7 +96,7 @@ export const SLIDE = { ms: 1000, height: 0.8, eye: 0.6, boost: 1.35, endSpeed: 0
  * Хитбокс игрока. Стоя — столб PLAYER.w × PLAYER.h. В подкате — лежащий прямоугольник
  * длиной PLAYER.h вдоль взгляда и высотой SLIDE.height (берём охватывающий его AABB).
  */
-export function playerBox(pos: Vec3, yaw: number, sliding: boolean): [Vec3, Vec3] {
+export function playerBox(pos: Vec3, yaw: number, sliding: boolean, scale = 1): [Vec3, Vec3] {
   let hx = PLAYER.w / 2, hz = PLAYER.w / 2, h = PLAYER.h;
   if (sliding) {
     const s = Math.abs(Math.sin(yaw)), c = Math.abs(Math.cos(yaw));
@@ -85,12 +104,13 @@ export function playerBox(pos: Vec3, yaw: number, sliding: boolean): [Vec3, Vec3
     hz = (PLAYER.h / 2) * c + (PLAYER.w / 2) * s;
     h = SLIDE.height;
   }
+  hx *= scale; hz *= scale; h *= scale;
   return [[pos[0] - hx, pos[1], pos[2] - hz], [pos[0] + hx, pos[1] + h, pos[2] + hz]];
 }
 
 /** Точки тела для проверки прямой видимости: низ, середина и верх. */
-export function bodyPoints(pos: Vec3, sliding: boolean): Vec3[] {
-  const h = sliding ? SLIDE.height : PLAYER.h;
+export function bodyPoints(pos: Vec3, sliding: boolean, scale = 1): Vec3[] {
+  const h = (sliding ? SLIDE.height : PLAYER.h) * scale;
   return [0.2, h / 2, h - 0.1].map((y) => [pos[0], pos[1] + y, pos[2]] as Vec3);
 }
 
