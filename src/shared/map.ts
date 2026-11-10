@@ -15,6 +15,8 @@ export interface Weapon {
   /** Пауза между выстрелами, мс */
   rate: number;
   mag: number;
+  /** Запас патронов сверх магазина (всего патронов = mag + reserve) */
+  reserve: number;
   reload: number;
   /** Разброс при прицеливании (ПКМ), радианы. От бедра — в HIP_SPREAD раз больше. */
   spread: number;
@@ -48,13 +50,13 @@ export const MEDKIT = {
 };
 
 export const WEAPONS: Record<WeaponId, Weapon> = {
-  pistol:  { name: 'Пистолет', dmg: 25, pellets: 1, rate: 280, mag: 12, reload: 1200, spread: 0.006, auto: false, zoom: 60 },
-  shotgun: { name: 'Дробовик', dmg: 13, pellets: 8, rate: 900, mag: 6, reload: 2200, spread: 0.045, auto: false, zoom: 62 },
-  rifle:   { name: 'Автомат', dmg: 21, pellets: 1, rate: 110, mag: 30, reload: 2000, spread: 0.009, auto: true, zoom: 55 },
-  sniper:  { name: 'Снайперка', dmg: 80, pellets: 1, rate: 1300, mag: 5, reload: 2800, spread: 0.0015, auto: false, zoom: 20, headKill: true },
-  knife:   { name: 'Нож', dmg: 100, pellets: 1, rate: 650, mag: 0, reload: 0, spread: 0, auto: false, zoom: null, melee: 2 },
+  pistol:  { name: 'Пистолет', dmg: 25, pellets: 1, rate: 280, mag: 12, reserve: 24, reload: 1200, spread: 0.006, auto: false, zoom: 60 },
+  shotgun: { name: 'Дробовик', dmg: 13, pellets: 8, rate: 900, mag: 6, reserve: 18, reload: 2200, spread: 0.045, auto: false, zoom: 62 },
+  rifle:   { name: 'Автомат', dmg: 21, pellets: 1, rate: 110, mag: 30, reserve: 60, reload: 2000, spread: 0.009, auto: true, zoom: 55 },
+  sniper:  { name: 'Снайперка', dmg: 80, pellets: 1, rate: 1300, mag: 5, reserve: 19, reload: 2800, spread: 0.0015, auto: false, zoom: 20, headKill: true },
+  knife:   { name: 'Нож', dmg: 100, pellets: 1, rate: 650, mag: 0, reserve: 0, reload: 0, spread: 0, auto: false, zoom: null, melee: 2 },
   // Ракетница достаётся только из ящика: 6 ракет, без перезарядки
-  rocket:  { name: 'Ракетница', dmg: 999, pellets: 1, rate: 900, mag: 6, reload: 0, spread: 0, auto: false, zoom: 60 },
+  rocket:  { name: 'Ракетница', dmg: 999, pellets: 1, rate: 900, mag: 6, reserve: 0, reload: 0, spread: 0, auto: false, zoom: 60 },
 };
 
 /**
@@ -88,6 +90,18 @@ export const STREAK = {
 };
 export type StreakKind = 'uav' | 'missile' | 'nuke';
 export const WEAPON_ORDER: WeaponId[] = ['pistol', 'shotgun', 'rifle', 'sniper', 'knife'];
+
+/** Огнестрел, из которого собирают набор: не больше двух стволов, нож есть всегда. */
+export const GUNS: WeaponId[] = ['pistol', 'shotgun', 'rifle', 'sniper'];
+export const KIT_SIZE = 2;
+export const DEFAULT_KIT: WeaponId[] = ['rifle', 'pistol'];
+export function isKit(v: unknown): v is WeaponId[] {
+  return Array.isArray(v) && v.length >= 1 && v.length <= KIT_SIZE && new Set(v).size === v.length &&
+    v.every((w) => GUNS.includes(w as WeaponId));
+}
+
+/** Патроны с трупов: подобрав, получаешь половину полного запаса к своим стволам. */
+export const AMMO_PACK = { share: 0.5, lifeMs: 30_000, reach: 1.1 };
 
 /** Подкат: из спринта по C, игрок ложится и скользит ms миллисекунд. */
 export const SLIDE = { ms: 1000, height: 0.8, eye: 0.6, boost: 1.35, endSpeed: 0.35, cooldownMs: 500 };
@@ -141,10 +155,13 @@ export function rayBox(o: Vec3, d: Vec3, min: Vec3, max: Vec3): number {
 }
 
 // Ближайшее пересечение луча с геометрией карты (включая пол).
+/** Дно мира: ниже ничего нет (пол карты — плита из блоков, под ней канализация). */
+export const WORLD_BOTTOM = -6;
+
 export function rayWorld(boxes: Box[], o: Vec3, d: Vec3, maxDist = 200): number {
   let t = maxDist;
   if (d[1] < -1e-9) {
-    const tf = -o[1] / d[1];
+    const tf = (WORLD_BOTTOM - o[1]) / d[1];
     if (tf >= 0 && tf < t) t = tf;
   }
   for (const box of boxes) {

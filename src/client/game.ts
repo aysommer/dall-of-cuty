@@ -1,15 +1,17 @@
 import * as THREE from 'three';
 import {
-  CRATE, HEAD, HIP_SPREAD, MAPS, MAP_ORDER, MATCH, MEDKIT, ROCKET, SLIDE, STREAK, THROW, WEAPONS, WEAPON_ORDER, PLAYER,
+  AMMO_PACK, CRATE, DEFAULT_KIT, GUNS, HEAD, HIP_SPREAD, KIT_SIZE, MAPS, MAP_ORDER, MATCH, MEDKIT, ROCKET, SLIDE, STREAK,
+  THROW, WEAPONS, WEAPON_ORDER, WORLD_BOTTOM, PLAYER, isKit,
   playerBox, rayBox, rayWorld, type StreakKind,
   type Box, type GameMap, type Ladder, type MapId,
 } from '../shared/map.js';
 import { EMOJIS, SPRAY } from '../shared/emoji.js';
+import { UNDERGROUND_Y } from '../shared/maps/sewer.js';
 import {
   KILLS_PER_POINT, STATS, UPGRADES, maxLevel, multiplier, newProfile, pointsLeft, type Profile,
 } from '../shared/progress.js';
 import type {
-  BoomMsg, CrateMsg, CrateState, KillWeapon, LoadoutMsg, MedkitsMsg, MissileMsg, NukeMsg, PingMsg, RocketMsg, SprayMsg,
+  AmmoPacksMsg, BoomMsg, CrateMsg, CrateState, KillWeapon, LoadoutMsg, MedkitsMsg, MissileMsg, NukeMsg, PingMsg, RocketMsg, SprayMsg,
   ThrowEndMsg, ThrowMsg, VoteMsg,
   ClientMsg, InfoMsg, KillMsg, Mode, OverMsg, PlayerInfo, PlayersMsg, ProfileMsg, ServerMsg,
   ShotMsg, SnapMsg, SpawnMsg, Team, Vec3, WeaponId,
@@ -32,17 +34,20 @@ interface Settings {
   /** Множитель чувствительности мыши */
   sens: number;
   hand: 'right' | 'left';
+  /** Выбранные стволы — не больше двух, нож есть всегда */
+  kit: WeaponId[];
 }
 const SETTINGS_KEY = 'doc-settings';
 const TOKEN_KEY = 'doc-progress';
 
 function loadSettings(): Settings {
-  const s: Settings = { volume: 0.7, sens: 1, hand: 'right' };
+  const s: Settings = { volume: 0.7, sens: 1, hand: 'right', kit: [...DEFAULT_KIT] };
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>;
     if (typeof raw.volume === 'number') s.volume = Math.max(0, Math.min(1, raw.volume));
     if (typeof raw.sens === 'number') s.sens = Math.max(0.2, Math.min(3, raw.sens));
     if (raw.hand === 'left') s.hand = 'left';
+    if (isKit(raw.kit)) s.kit = raw.kit;
   } catch { /* испорченные настройки — берём стандартные */ }
   return s;
 }
@@ -66,7 +71,8 @@ const camera = new THREE.PerspectiveCamera(BASE_FOV, 1, 0.05, 300);
 camera.rotation.order = 'YXZ';
 scene.add(camera);
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7a5a, 1.5));
+const hemi = new THREE.HemisphereLight(0xffffff, 0x8a7a5a, 1.5);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.6);
 sun.position.set(20, 40, 10);
 scene.add(sun);
@@ -86,6 +92,8 @@ function box(w: number, h: number, d: number, color: THREE.ColorRepresentation, 
 
 // ======================= карта =======================
 let currentMap: GameMap = MAPS.sands;
+/** Свет фонарей канализации — включается, когда камера под землёй */
+const lampLights: THREE.PointLight[] = [];
 let loadedMap: MapId | null = null;
 const mapGroup = new THREE.Group();
 scene.add(mapGroup);
@@ -254,9 +262,20 @@ function loadMap(id: MapId): void {
 
   sky.set(currentMap.sky);
   fog.color.set(currentMap.sky);
-  const floor = box(currentMap.half.x * 2 + 2, 1, currentMap.half.z * 2 + 2, currentMap.floor);
-  floor.position.y = -0.5;
-  mapGroup.add(floor);
+  // Пол — плита из блоков с люками (она в boxes), под ней канализация
+  lampLights.length = 0;
+  for (const [x, y, z] of currentMap.lamps) {
+    // Фонарь: корпус, светящееся стекло и тёплый свет на весь коридор
+    const body = box(0.3, 0.12, 0.3, 0x222222);
+    body.position.set(x, y + 0.3, z);
+    const glass = box(0.22, 0.3, 0.22, 0xffd27a, false);
+    glass.position.set(x, y + 0.1, z);
+    const light = new THREE.PointLight(0xffd9a0, 14, 30, 1);
+    light.position.set(x, y, z);
+    light.visible = false;
+    lampLights.push(light);
+    mapGroup.add(body, glass, light);
+  }
   for (const b of currentMap.boxes) {
     const w = b.max[0] - b.min[0], h = b.max[1] - b.min[1], d = b.max[2] - b.min[2];
     const m = box(w, h, d, b.color);
@@ -544,6 +563,11 @@ const me = {
     pistol: WEAPONS.pistol.mag, shotgun: WEAPONS.shotgun.mag, rifle: WEAPONS.rifle.mag,
     sniper: WEAPONS.sniper.mag, knife: 0, rocket: 0,
   } as Record<WeaponId, number>,
+  /** Запас патронов сверх магазина; кончится — перезаряжаться нечем */
+  reserve: {
+    pistol: WEAPONS.pistol.reserve, shotgun: WEAPONS.shotgun.reserve, rifle: WEAPONS.rifle.reserve,
+    sniper: WEAPONS.sniper.reserve, knife: 0, rocket: 0,
+  } as Record<WeaponId, number>,
   reloadUntil: 0,
   /** Длительность текущей перезарядки — для анимации */
   reloadMs: 1,
@@ -589,6 +613,7 @@ let kick = 0;
 function setWeapon(w: WeaponId): void {
   if (w === 'rocket' && me.ammo.rocket <= 0) return;
   if (w === 'knife' && !hasKnife) return; // нож брошен — до смерти его нет
+  if (GUNS.includes(w) && !settings.kit.includes(w)) return; // ствол не из набора
   adsK = 0;
   me.weapon = w;
   me.reloadUntil = 0;
@@ -717,6 +742,13 @@ function removeRocket(id: number): void {
 
 function onBoom(m: BoomMsg): void {
   removeRocket(m.id);
+  // Ракета с неба (id < 0): корпус остаётся в точке падения и, как тело, уходит под землю
+  const missile = remoteMissiles.get(-m.id);
+  if (m.id < 0 && missile) {
+    remoteMissiles.delete(-m.id);
+    missile.position.set(m.p[0], m.p[1], m.p[2]);
+    sinking.push({ obj: missile, born: performance.now(), baseY: m.p[1] });
+  }
   const now = performance.now();
   // Взрыв — растущий и гаснущий куб размером с зону поражения
   for (const [color, size, life] of [[0xff8a1f, ROCKET.radius * 2, 380], [0xfff0a0, ROCKET.radius, 260]] as const) {
@@ -770,7 +802,7 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
       mode = m.mode;
       loadMap(m.map);
       joined = true;
-      setWeapon('rifle');
+      setWeapon(settings.kit[0]!);
       $('menu').classList.add('hidden');
       $('hud').classList.remove('hidden');
       $('pause').classList.remove('hidden');
@@ -788,6 +820,18 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
     case 'spray': onSpray(m); break;
     case 'medkits': onMedkits(m); break;
     case 'loadout': onLoadout(m); break;
+    case 'ammopacks': onAmmoPacks(m); break;
+    case 'ammo': {
+      // Патроны с погибшего: к своим стволам — половина полного запаса
+      for (const w of settings.kit) {
+        const full = WEAPONS[w].mag + WEAPONS[w].reserve;
+        me.reserve[w] = Math.min(WEAPONS[w].reserve, me.reserve[w] + Math.ceil(full * AMMO_PACK.share));
+      }
+      toast('🎒 Патроны +50%');
+      beep(760, 0.15, 0.1);
+      updateHud();
+      break;
+    }
     case 'throw': onThrow(m); break;
     case 'thrown': onThrown(m); break;
     case 'uav':
@@ -804,7 +848,7 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
       const had = me.ammo.rocket;
       me.ammo.rocket = m.n;
       if (m.n > 0 && had === 0) { setWeapon('rocket'); beep(990, 0.3); }
-      if (m.n === 0 && me.weapon === 'rocket') setWeapon('rifle');
+      if (m.n === 0 && me.weapon === 'rocket') setWeapon(settings.kit[0]!);
       updateHud();
       break;
     }
@@ -862,7 +906,7 @@ function onSpawn(m: SpawnMsg): void {
     me.pitch = 0;
     me.alive = true;
     me.hp = 100;
-    for (const w of WEAPON_ORDER) me.ammo[w] = WEAPONS[w].mag;
+    for (const w of WEAPON_ORDER) { me.ammo[w] = WEAPONS[w].mag; me.reserve[w] = WEAPONS[w].reserve; }
     if (me.ammo.rocket === 0 && me.weapon === 'rocket') setWeapon('pistol');
     me.reloadUntil = 0;
     low = false;
@@ -1056,7 +1100,7 @@ $('join-form').addEventListener('submit', (e) => {
   const name = nameInput.value.trim();
   localStorage.setItem('doc-name', name);
   playBtn.disabled = true;
-  sendMsg({ t: 'join', name, team: chosenTeam, mode: chosenMode, map: chosenMap, minutes: chosenMinutes, token: localStorage.getItem(TOKEN_KEY) ?? undefined });
+  sendMsg({ t: 'join', name, team: chosenTeam, mode: chosenMode, map: chosenMap, minutes: chosenMinutes, kit: settings.kit, token: localStorage.getItem(TOKEN_KEY) ?? undefined });
 });
 
 // ======================= управление =======================
@@ -1113,7 +1157,7 @@ document.addEventListener('mouseup', (e) => {
 document.addEventListener('contextmenu', (e) => { if (joined) e.preventDefault(); });
 document.addEventListener('wheel', (e) => {
   if (!locked) return;
-  const order = (['knife', 'shotgun', 'rifle', 'sniper', 'rocket', 'pistol'] as WeaponId[])
+  const order = (['knife', ...settings.kit, 'rocket'] as WeaponId[])
     .filter((w) => (w !== 'knife' || hasKnife) && (w !== 'rocket' || me.ammo.rocket > 0));
   const i = order.indexOf(me.weapon);
   const n = order.length;
@@ -1135,7 +1179,7 @@ document.addEventListener('keydown', (e) => {
   if (!playing()) return;
   keys[e.code] = true;
   // Слоты: 1 нож, 2 дробовик, 3 автомат, 4 снайперка, 5–8 — награды за серию, 0 — пистолет
-  const slot = HOTBAR.find((h) => `Digit${h.key}` === e.code);
+  const slot = hotbar().find((h) => `Digit${h.key}` === e.code);
   if (slot && !e.repeat) useSlot(slot.id);
   if (e.code === 'KeyG' && !e.repeat) throwKnife();
   if (e.code === 'KeyC' && !e.repeat) trySlide(performance.now());
@@ -1275,8 +1319,9 @@ function move(dt: number): void {
 
   p.y += me.vel.y * dt;
   me.grounded = false;
-  if (p.y <= 0) {
-    p.y = 0; me.vel.y = 0; me.grounded = true;
+  // Дно мира — страховка; обычно игрок стоит на плите земли или на полу канализации
+  if (p.y <= WORLD_BOTTOM) {
+    p.y = WORLD_BOTTOM; me.vel.y = 0; me.grounded = true;
   } else {
     const b = hitBox(p);
     if (b) {
@@ -1298,6 +1343,7 @@ function startReload(): void {
   const w = WEAPONS[me.weapon];
   if (me.weapon === 'rocket' || w.melee) return; // ракетница и нож не перезаряжаются
   if (me.reloadUntil || me.ammo[me.weapon] >= w.mag || !me.alive) return;
+  if (me.reserve[me.weapon] <= 0) { toast('Патроны кончились — подбери с погибших'); return; }
   me.reloadMs = w.reload / multiplier(profile.levels, 'reload');
   me.reloadUntil = performance.now() + me.reloadMs;
   beep(300, 0.08, 0.08);
@@ -1416,7 +1462,10 @@ function fireRocket(now: number): void {
 
 function updateShooting(now: number): void {
   if (me.reloadUntil && now >= me.reloadUntil) {
-    me.ammo[me.weapon] = WEAPONS[me.weapon].mag;
+    // В магазин идёт столько, сколько есть в запасе
+    const take = Math.min(WEAPONS[me.weapon].mag - me.ammo[me.weapon], me.reserve[me.weapon]);
+    me.ammo[me.weapon] += take;
+    me.reserve[me.weapon] -= take;
     me.reloadUntil = 0;
     updateHud();
   }
@@ -1426,7 +1475,11 @@ function updateShooting(now: number): void {
   if (!w.auto && firedThisPress) return;
   if (me.weapon === 'rocket') { fireRocket(now); return; }
   if (w.melee) { stab(now); return; }
-  if (me.ammo[me.weapon] <= 0) { startReload(); return; }
+  if (me.ammo[me.weapon] <= 0) {
+    if (me.reserve[me.weapon] <= 0 && !firedThisPress) { beep(180, 0.05, 0.06); firedThisPress = true; } // щелчок: пусто
+    startReload();
+    return;
+  }
   fire(now);
 }
 
@@ -1460,7 +1513,7 @@ function updateHud(): void {
   $('weapon-name').textContent = WEAPONS[me.weapon].name;
   const melee = !!WEAPONS[me.weapon].melee;
   $('ammo-count').textContent = melee ? '—' : me.reloadUntil ? '…' : String(me.ammo[me.weapon]);
-  $('ammo-total').textContent = melee ? '' : me.weapon === 'rocket' ? ' ракет' : ' / ∞';
+  $('ammo-total').textContent = melee ? '' : me.weapon === 'rocket' ? ' ракет' : ` / ${me.reserve[me.weapon]}`;
   renderHotbar();
   renderStreak();
 
@@ -1555,7 +1608,7 @@ function buildSettings(root: HTMLElement): void {
     return b;
   });
   choice.append(...buttons);
-  row.append(textEl('span', 'Оружие', 'name'), choice);
+  row.append(textEl('span', 'Положение оружия', 'name'), choice);
   root.append(row);
 }
 
@@ -1699,8 +1752,7 @@ function trySpray(now: number): void {
     const t = rayBox(eye, d, b.min, b.max);
     if (t < best) { best = t; wall = b; }
   }
-  const floorT = d[1] < 0 ? -eye[1] / d[1] : Infinity;
-  if (!wall || floorT < best) { toast('Наведи прицел на стену поближе'); return; }
+  if (!wall) { toast('Наведи прицел на стену поближе'); return; }
   const p: Vec3 = [eye[0] + d[0] * best, eye[1] + d[1] * best, eye[2] + d[2] * best];
   // Какой грани блока принадлежит точка: ближайшая по расстоянию
   const faces: Array<[number, number, number, number]> = [
@@ -1880,17 +1932,19 @@ let streak = 0;
 const rewards: Record<StreakKind, number> = { uav: 0, missile: 0, nuke: 0 };
 
 type SlotId = WeaponId | StreakKind;
-const HOTBAR: Array<{ key: string; id: SlotId; label: string }> = [
-  { key: '1', id: 'knife', label: 'Нож' },
-  { key: '2', id: 'shotgun', label: 'Дробовик' },
-  { key: '3', id: 'rifle', label: 'Автомат' },
-  { key: '4', id: 'sniper', label: 'Снайперка' },
-  { key: '5', id: 'uav', label: 'БПЛА' },
-  { key: '6', id: 'missile', label: 'Ракета с неба' },
-  { key: '7', id: 'rocket', label: 'Ракетница' },
-  { key: '8', id: 'nuke', label: 'Бомба' },
-  { key: '0', id: 'pistol', label: 'Пистолет' },
-];
+/** Слоты: 1 — нож, 2 и 3 — стволы из набора, 5–8 — награды за серию. */
+function hotbar(): Array<{ key: string; id: SlotId; label: string }> {
+  const kit = settings.kit.map((id, i) => ({ key: String(i + 2), id: id as SlotId, label: WEAPONS[id].name }));
+  return [
+    { key: '1', id: 'knife', label: 'Нож' },
+    ...kit,
+    { key: '5', id: 'uav', label: 'БПЛА' },
+    { key: '6', id: 'missile', label: 'Ракета с неба' },
+    { key: '7', id: 'rocket', label: 'Ракетница' },
+    { key: '8', id: 'nuke', label: 'Бомба' },
+  ];
+}
+let hotbarKey = '';
 const isStreakKind = (id: SlotId): id is StreakKind => id === 'uav' || id === 'missile' || id === 'nuke';
 
 function slotReady(id: SlotId): boolean {
@@ -1910,8 +1964,13 @@ function useSlot(id: SlotId): void {
 
 function renderHotbar(): void {
   const bar = $('hotbar');
-  if (!bar.childElementCount) {
-    for (const h of HOTBAR) {
+  const list = hotbar();
+  const key = list.map((h) => h.id).join();
+  if (key !== hotbarKey) {
+    // Набор поменялся — перестраиваем ячейки
+    hotbarKey = key;
+    bar.textContent = '';
+    for (const h of list) {
       const cell = document.createElement('div');
       cell.className = 'slot';
       cell.dataset.id = h.id;
@@ -1951,12 +2010,119 @@ function onLoadout(m: LoadoutMsg): void {
   rewards.uav = m.uav;
   rewards.missile = m.missile;
   rewards.nuke = m.nuke;
-  if (!hasKnife && me.weapon === 'knife') setWeapon('rifle');
+  if (!hasKnife && me.weapon === 'knife') setWeapon(settings.kit[0]!);
   updateHud();
 }
 
 function scaleOfRemote(r: Remote): number {
   return r.info.big ? STREAK.bigScale : 1;
+}
+
+// ======================= набор оружия (в меню Esc) =======================
+function setKit(kit: WeaponId[]): void {
+  settings.kit = kit;
+  applySettings();
+  sendMsg({ t: 'kit', guns: kit });
+  if (GUNS.includes(me.weapon) && !kit.includes(me.weapon)) setWeapon(kit[0]!);
+  renderKit();
+  updateHud();
+}
+
+/** Кнопки выбора: отмечено не больше двух; третий выбор вытесняет самый первый. */
+function renderKit(): void {
+  for (const root of document.querySelectorAll<HTMLElement>('.kit')) {
+    if (!root.childElementCount) {
+      for (const w of GUNS) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.w = w;
+        b.textContent = WEAPONS[w].name;
+        b.addEventListener('click', () => {
+          const kit = settings.kit.filter((k) => k !== w);
+          if (kit.length === settings.kit.length) kit.push(w);   // добавить
+          if (kit.length > KIT_SIZE) kit.shift();                 // вытеснить самый старый
+          if (kit.length) setKit(kit);
+        });
+        root.append(b);
+      }
+    }
+    for (const b of root.querySelectorAll<HTMLButtonElement>('button')) {
+      b.classList.toggle('active', settings.kit.includes(b.dataset.w as WeaponId));
+    }
+  }
+}
+renderKit();
+
+// ======================= патроны с погибших =======================
+interface PackFx { g: THREE.Group; at: Vec3 }
+const packFx = new Map<number, PackFx>();
+
+/** Зелёный ящик с патронами и жёлтой полосой. */
+function buildPack(): THREE.Group {
+  const g = new THREE.Group();
+  const base = box(0.5, 0.28, 0.32, 0x3d5a2a);
+  base.position.y = 0.14;
+  const stripe = box(0.52, 0.06, 0.34, 0xf1c232, false);
+  stripe.position.y = 0.2;
+  g.add(base, stripe);
+  return g;
+}
+
+function onAmmoPacks(m: AmmoPacksMsg): void {
+  const seen = new Set<number>();
+  for (const a of m.list) {
+    seen.add(a.id);
+    if (packFx.has(a.id)) continue;
+    const g = buildPack();
+    g.position.set(a.at[0], a.at[1], a.at[2]);
+    scene.add(g);
+    packFx.set(a.id, { g, at: a.at });
+  }
+  for (const [id, fx] of packFx) {
+    if (seen.has(id)) continue;
+    scene.remove(fx.g);
+    packFx.delete(id);
+  }
+}
+
+function updateAmmoPacks(now: number): void {
+  for (const fx of packFx.values()) fx.g.rotation.y = now / 600;
+}
+
+// ======================= то, что уходит под землю =======================
+const sinking: Array<{ obj: THREE.Object3D; born: number; baseY: number }> = [];
+/** Секунду лежит, потом за секунду проваливается и исчезает — как тело. */
+function updateSinking(now: number): void {
+  for (let i = sinking.length - 1; i >= 0; i--) {
+    const s = sinking[i]!;
+    const k = Math.max(0, Math.min(1, (now - s.born - 1000) / 1000));
+    s.obj.position.y = s.baseY - 1.6 * k;
+    if (k >= 1) {
+      scene.remove(s.obj);
+      sinking.splice(i, 1);
+    }
+  }
+}
+
+// ======================= канализация: темнота и фонарь =======================
+let underground = false;
+/** Под землёй выключаем «солнце» и небо, включаем фонари — светло только рядом с ними. */
+function updateUnderground(): void {
+  const now = camera.position.y < UNDERGROUND_Y - 0.2;
+  if (now === underground) return;
+  underground = now;
+  hemi.intensity = now ? 0.35 : 1.5;
+  sun.intensity = now ? 0 : 1.6;
+  for (const l of lampLights) l.visible = now;
+  if (now) {
+    sky.set(0x0b0c0e);
+    fog.color.set(0x0b0c0e);
+    fog.near = 4; fog.far = 34;
+  } else {
+    sky.set(currentMap.sky);
+    fog.color.set(currentMap.sky);
+    fog.near = 50; fog.far = 130;
+  }
 }
 
 // ======================= метательный нож =======================
@@ -1980,7 +2146,7 @@ function throwKnife(): void {
   camera.getWorldDirection(_dir);
   sendMsg({ t: 'throw', d: [+_dir.x.toFixed(4), +_dir.y.toFixed(4), +_dir.z.toFixed(4)] });
   hasKnife = false; // сервер подтвердит
-  if (me.weapon === 'knife') setWeapon('rifle');
+  if (me.weapon === 'knife') setWeapon(settings.kit[0]!);
   shotSound('knife', 1);
   updateHud();
 }
@@ -2041,6 +2207,7 @@ function updateMinimap(now: number): void {
   ctx.fillRect(0, 0, size, size);
   ctx.fillStyle = 'rgba(150, 190, 160, 0.55)';
   for (const b of currentMap.boxes) {
+    if (b.max[1] <= 0.05) continue; // земля и канализация
     if (b.max[1] - b.min[1] < 0.6 && b.min[1] > 0) continue; // тонкие крыши и полки не рисуем
     ctx.fillRect(sx(b.min[0]), sz(b.min[2]), (b.max[0] - b.min[0]) * k, (b.max[2] - b.min[2]) * k);
   }
@@ -2400,6 +2567,9 @@ function frame(now: number): void {
   updateMedkits(now);
   updateSteps(dt);
   updateKnives(dt);
+  updateSinking(now);
+  updateAmmoPacks(now);
+  updateUnderground();
   updateMinimap(now);
   updateNuke(now);
   updateVote(now);
@@ -2423,6 +2593,8 @@ declare global {
 window.game = {
   me, remotes, keys,
   steer: (yaw: number, pitch: number) => { if (missileCtl) { missileCtl.yaw = yaw; missileCtl.pitch = pitch; } },
-  dbg: () => ({ missile: missileCtl ? missileCtl.pos.toArray() : null, low, adsK, fov: camera.fov, crateState, crateAt, eyeH, recoil, corpses: corpses.length, sprays: sprays.length,
+  dbg: () => ({ underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
+    kit: settings.kit, reserve: { ...me.reserve }, hotbar: hotbar().map((h) => `${h.key}:${h.label}`).join(' '),
+    missile: missileCtl ? missileCtl.pos.toArray() : null, low, adsK, fov: camera.fov, crateState, crateAt, eyeH, recoil, corpses: corpses.length, sprays: sprays.length,
     steps: stepCount, medkits: medkitFx.size, boltUntil, menuClosed, armor: me.armor }),
 };

@@ -32,6 +32,8 @@ export interface GameMap {
   crateDrops: Vec3[];
   /** Куда могут падать аптечки (центр по X/Z и высота пола) */
   medkitDrops: Vec3[];
+  /** Фонари в канализации */
+  lamps: Vec3[];
   spawns: Record<Team | 'ffa', SpawnPoint[]>;
 }
 

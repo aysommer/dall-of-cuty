@@ -1,5 +1,6 @@
 // Карта «Пески»: две базы и три линии — открытая «длина», центр с дверями, крытый туннель.
-import { builder, type GameMap, type SpawnPoint } from './types.js';
+import { builder, type GameMap, type Ladder, type SpawnPoint } from './types.js';
+import { addGroundAndSewer } from './sewer.js';
 
 const WORLD = { half: 30, wallH: 6 };
 
@@ -71,6 +72,11 @@ const spawns: GameMap['spawns'] = {
   ],
 };
 
+// Канализация: под центральной улицей, от базы красных к базе зелёных
+const ladders: Ladder[] = [];
+const { lamps } = addGroundAndSewer(boxes, ladders, { x: WORLD.half, z: WORLD.half },
+  { axis: 'z', from: -21, to: 21, at: 0 }, '#c9a86a', '#55524c');
+
 export const SANDS: GameMap = {
   id: 'sands',
   name: 'Пески',
@@ -78,7 +84,8 @@ export const SANDS: GameMap = {
   floor: '#c9a86a',
   sky: '#9fc9ea',
   boxes,
-  ladders: [],
+  ladders,
+  lamps,
   // Ящик падает с неба — точки под открытым небом, симметричные для обеих сторон
   crateDrops: [[-22, 0, -14], [22, 0, 14]],
   medkitDrops: [[0, 0, 14], [0, 0, -14], [-20, 0, -16], [20, 0, 16]],

@@ -5,8 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  ARMOR, CRATE, HEAD, MAPS, MAP_ORDER, MATCH, MEDKIT, PLAYER, ROCKET, SLIDE, STREAK, THROW, WEAPONS,
-  bodyPoints, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
+  AMMO_PACK, ARMOR, CRATE, DEFAULT_KIT, HEAD, MAPS, MAP_ORDER, MATCH, MEDKIT, PLAYER, ROCKET, SLIDE, STREAK, THROW, WEAPONS,
+  bodyPoints, isKit, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
   type MapId, type StreakKind,
 } from '../shared/map.js';
 import { chooseSpawn } from './spawn.js';
@@ -59,6 +59,8 @@ interface Player {
   uavUntil: number;
   /** Суперброня: игрок в 1,5 раза больше */
   big: boolean;
+  /** Выбранные стволы (не больше двух), нож — всегда */
+  kit: WeaponId[];
   respawnTimer?: NodeJS.Timeout;
 }
 
@@ -188,6 +190,7 @@ function resetRound(): void {
   missiles.clear();
   clearCrate();
   clearMedkits();
+  clearAmmoPacks();
   for (const p of players.values()) spawn(p);
   broadcast({ t: 'reset' });
   broadcastPlayers();
@@ -292,8 +295,9 @@ function killPlayer(killer: Player | null, v: Player, w: KillWeapon, head = fals
     if (w !== 'nuke' && killer.alive) addStreak(killer);
   }
   broadcast({ t: 'kill', killer: killer?.id ?? null, victim: v.id, w, head });
-  // Погибший теряет ракетницу и перестаёт открывать ящик
+  // Погибший теряет ракетницу и перестаёт открывать ящик, а на месте гибели остаются патроны
   setRockets(v, 0);
+  dropAmmo(v.pos);
   if (crate.state === 'opening' && crate.by === v.id) cancelOpening();
   v.respawnTimer = setTimeout(() => {
     if (players.has(v.id) && !roundOver) {
@@ -570,6 +574,7 @@ function stopDrops(): void {
   clearInterval(medkitTimer);
   medkitTimer = undefined;
   medkits = [];
+  ammoPacks = [];
   clearInterval(dropTimer);
   dropTimer = undefined;
   clearTimeout(crate.timer);
@@ -632,6 +637,39 @@ function explodeCrate([cx, cy, cz]: Vec3): void {
     if (!covered) killPlayer(null, v, 'crate');
   }
   broadcastPlayers();
+}
+
+// ---------- патроны с трупов ----------
+interface AmmoPack { id: number; at: Vec3; until: number }
+let ammoPacks: AmmoPack[] = [];
+let nextPackId = 1;
+
+function packsMsg(): ServerMsg {
+  return { t: 'ammopacks', list: ammoPacks.map((a) => ({ id: a.id, at: a.at })) };
+}
+function dropAmmo(pos: Vec3): void {
+  if (roundOver) return;
+  ammoPacks.push({ id: nextPackId++, at: [pos[0], pos[1], pos[2]], until: Date.now() + AMMO_PACK.lifeMs });
+  broadcast(packsMsg());
+}
+function clearAmmoPacks(): void {
+  ammoPacks = [];
+  broadcast(packsMsg());
+}
+/** Подобрать патроны — подойти вплотную; сам пополняет запас клиент (половина полного запаса к своим стволам). */
+function pickAmmo(p: Player): void {
+  if (!p.alive || !ammoPacks.length) return;
+  const i = ammoPacks.findIndex((a) =>
+    Math.hypot(p.pos[0] - a.at[0], p.pos[2] - a.at[2]) <= AMMO_PACK.reach && Math.abs(p.pos[1] - a.at[1]) <= 1.2);
+  if (i < 0) return;
+  ammoPacks.splice(i, 1);
+  send(p.ws, { t: 'ammo' });
+  broadcast(packsMsg());
+}
+function expireAmmoPacks(now: number): void {
+  const before = ammoPacks.length;
+  ammoPacks = ammoPacks.filter((a) => a.until > now);
+  if (ammoPacks.length !== before) broadcast(packsMsg());
 }
 
 // ---------- аптечки ----------
@@ -787,6 +825,8 @@ function hurt(attacker: Player, v: Player, dmg: number, w: KillWeapon, head: boo
 
 function handleShoot(p: Player, msg: Incoming): void {
   if (!isWeapon(msg.w) || msg.w === 'rocket' || !p.alive) return;
+  // Стрелять можно только из своего набора; нож есть всегда
+  if (msg.w !== 'knife' && !p.kit.includes(msg.w)) return;
   const weaponId = msg.w;
   const w = WEAPONS[weaponId];
   const now = Date.now();
@@ -863,6 +903,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
     profile: decodeProfile(msg.token),
     rockets: 0,
     hasKnife: true, streak: 0, uav: 0, missile: 0, nuke: 0, uavUntil: 0, big: false,
+    kit: isKit(msg.kit) ? msg.kit : [...DEFAULT_KIT],
   };
   players.set(p.id, p);
   send(ws, { t: 'welcome', id: p.id, mode, map: mapId });
@@ -870,6 +911,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
   sendProfile(p);
   send(ws, crateMsg());
   send(ws, medkitsMsg());
+  send(ws, packsMsg());
   broadcastPlayers();
   spawn(p);
   broadcastPlayers();
@@ -902,6 +944,7 @@ wss.on('connection', (ws) => {
       if (me.alive && isVec3(msg.p)) me.pos = msg.p;
       me.slide = me.alive && msg.sl === true;
       pickMedkit(me);
+      pickAmmo(me);
       // Во время открытия ящика двигаться нельзя: сдвинулся — открытие сорвано
       if (crate.state === 'opening' && crate.by === me.id &&
           Math.hypot(me.pos[0] - crate.start[0], me.pos[1] - crate.start[1], me.pos[2] - crate.start[2]) > 0.5) {
@@ -926,6 +969,8 @@ wss.on('connection', (ws) => {
       missilePos(me, msg);
     } else if (msg.t === 'mhit') {
       missileHit(me, msg);
+    } else if (msg.t === 'kit') {
+      if (isKit(msg.guns)) me.kit = msg.guns;
     } else if (msg.t === 'vote') {
       handleVote(me, msg.map);
     } else if (msg.t === 'upgrade') {
@@ -966,6 +1011,7 @@ setInterval(() => {
   const now = Date.now();
   if (players.size) {
     sendPings(now);
+    expireAmmoPacks(now);
     // Ракета с неба, которую не довели до цели, взрывается сама
     for (const m of missiles.values()) if (now - m.born > STREAK.missileMaxMs) detonateMissile(m, m.last);
     // Время матча вышло

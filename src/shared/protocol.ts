@@ -73,6 +73,8 @@ export type PingMsg = { t: 'ping'; list: Array<[number, number, number]> };
 export type MissileMsg = { t: 'missile'; id: number; by: number; p: Vec3 };
 /** Бомба: через ms упадёт и убьёт всех */
 export type NukeMsg = { t: 'nuke'; by: number; ms: number };
+/** Патроны, выпавшие из погибших */
+export type AmmoPacksMsg = { t: 'ammopacks'; list: Array<{ id: number; at: Vec3 }> };
 
 export type ServerMsg =
   | InfoMsg
@@ -95,6 +97,8 @@ export type ServerMsg =
   | PingMsg
   | MissileMsg
   | NukeMsg
+  | AmmoPacksMsg
+  | { t: 'ammo' }
   | { t: 'uav'; ms: number }
   | { t: 'missile-go'; id: number; p: Vec3 }
   | { t: 'newmap'; map: MapId }
@@ -104,8 +108,9 @@ export type ServerMsg =
   | { t: 'reset' };
 
 export type ClientMsg =
-  | { t: 'join'; name: string; team: Team; mode: Mode; map: MapId; minutes: number; token?: string }
+  | { t: 'join'; name: string; team: Team; mode: Mode; map: MapId; minutes: number; kit: WeaponId[]; token?: string }
   | { t: 'vote'; map: MapId }
+  | { t: 'kit'; guns: WeaponId[] }
   | { t: 'throw'; d: Vec3 }
   | { t: 'use'; kind: StreakKind }
   | { t: 'mpos'; id: number; p: Vec3 }

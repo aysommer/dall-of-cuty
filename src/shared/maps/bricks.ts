@@ -3,6 +3,7 @@
 // и башня в центре, на которую ведут две лестницы.
 // Цвета блоков нарочно не зелёные и не красные, чтобы игроки с ними не сливались.
 import { builder, type GameMap, type Ladder, type SpawnPoint } from './types.js';
+import { addGroundAndSewer } from './sewer.js';
 
 const HALF = { x: 16, z: 28 };
 const WALL_H = 7;
@@ -73,6 +74,9 @@ const spawns: GameMap['spawns'] = {
   ],
 };
 
+// Канализация: под серединой, от одной базы к другой
+const { lamps } = addGroundAndSewer(boxes, ladders, HALF, { axis: 'z', from: -18, to: 18, at: 0 }, '#c4c9d1', '#4a5160');
+
 export const BRICKS: GameMap = {
   id: 'bricks',
   name: 'Кубики',
@@ -81,6 +85,7 @@ export const BRICKS: GameMap = {
   sky: '#bfe3ff',
   boxes,
   ladders,
+  lamps,
   // Ящик падает с неба: на башню или в одну из двух симметричных точек середины
   crateDrops: [[0, TOWER_H, 0], [-12, 0, 6.5], [12, 0, -6.5]],
   medkitDrops: [[0, 0, 10], [0, 0, -10], [13, 0, 12], [-13, 0, -12]],
