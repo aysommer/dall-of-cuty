@@ -5,8 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  AMMO_PACK, ARMOR, CRATE, DEFAULT_KIT, HEAD, MAPS, MAP_ORDER, MATCH, MEDKIT, PLAYER, ROCKET, SLIDE, STREAK, THROW, WEAPONS,
-  WEATHER, bodyPoints, isKit, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
+  AMMO_PACK, ARMOR, CRATE, DEFAULT_KIT, GUNSHIP, HEAD, MAPS, MAP_ORDER, MATCH, MEDKIT, PLAYER, ROCKET, SLIDE, STREAK, THROW, WEAPONS,
+  WEATHER, bodyPoints, gunshipPos, isKit, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
   type LimitKind, type MapId, type StreakKind, type WeatherKind,
 } from '../shared/map.js';
 import { chooseSpawn } from './spawn.js';
@@ -53,6 +53,8 @@ interface Player {
   streak: number;
   /** Запас наград за серию: их можно применить и после смерти */
   uav: number;
+  /** Самолёт в запасе */
+  gunship: number;
   missile: number;
   nuke: number;
   /** До какого момента работает БПЛА этого игрока */
@@ -185,6 +187,7 @@ function spawn(p: Player): void {
 
 function resetRound(): void {
   roundOver = false;
+  endGunship(null);
   for (const p of players.values()) {
     p.kills = 0;
     p.deaths = 0;
@@ -243,6 +246,7 @@ function broadcastVotes(): void {
 
 function endMatch(winner: Winner): void {
   roundOver = true;
+  endGunship(null);
   votes.clear();
   rockets = [];
   knives = [];
@@ -322,7 +326,9 @@ function killPlayer(killer: Player | null, v: Player, w: KillWeapon, head = fals
 
 // ---------- серия убийств ----------
 function sendLoadout(p: Player): void {
-  send(p.ws, { t: 'loadout', knife: p.hasKnife, streak: p.streak, uav: p.uav, missile: p.missile, nuke: p.nuke });
+  send(p.ws, {
+    t: 'loadout', knife: p.hasKnife, streak: p.streak, uav: p.uav, missile: p.missile, nuke: p.nuke, gunship: p.gunship,
+  });
 }
 
 /** Награды выдаются ровно на пороге серии: 3 — БПЛА, 4 — ракета с неба, 5 — ракетница, 7 — суперброня, 15 — бомба. */
@@ -337,17 +343,19 @@ function addStreak(p: Player): void {
     p.big = true;
     p.helmet = STREAK.helmetHits;
   }
+  if (p.streak === GUNSHIP.streak) p.gunship++;
   if (p.streak === STREAK.nuke) p.nuke++;
   sendLoadout(p);
 }
 
 /** Применить награду из запаса. */
 function useStreak(p: Player, kind: unknown): void {
-  if (roundOver || (kind !== 'uav' && kind !== 'missile' && kind !== 'nuke')) return;
+  if (roundOver || (kind !== 'uav' && kind !== 'missile' && kind !== 'nuke' && kind !== 'gunship')) return;
   const k = kind as StreakKind;
   if (p[k] <= 0) return;
   if (k === 'missile' && [...missiles.values()].some((m) => m.owner === p.id)) return;
   if (k === 'nuke' && nukeTimer) return;
+  if (k === 'gunship' && gunship) return; // в небе одновременно только один самолёт
   p[k]--;
   sendLoadout(p);
   if (k === 'uav') {
@@ -355,6 +363,8 @@ function useStreak(p: Player, kind: unknown): void {
     for (const r of uavViewers(p)) send(r.ws, { t: 'uav', ms: p.uavUntil - Date.now() });
   } else if (k === 'missile') {
     launchMissile(p);
+  } else if (k === 'gunship') {
+    launchGunship(p);
   } else {
     callNuke(p);
   }
@@ -439,6 +449,73 @@ function blast(owner: Player, at: Vec3, radius: number, w: KillWeapon, from: Vec
     broadcastPlayers();
     checkWin();
   }
+}
+
+// ---------- самолёт ----------
+// Летит сам по кругу над картой (gunshipPos), хозяин только стреляет. Сбивают двумя попаданиями из ракетницы.
+interface Gunship { id: number; owner: number; phase: number; start: number; hits: number; lastGun: number; lastRocket: number }
+let gunship: Gunship | null = null;
+let nextGunshipId = 1;
+
+function gunshipNow(g: Gunship, now = Date.now()): Vec3 {
+  return gunshipPos(MAPS[mapId].half, g.phase, (now - g.start) / 1000);
+}
+function gunshipMsg(g: Gunship): ServerMsg {
+  const elapsed = Date.now() - g.start;
+  return { t: 'gunship', id: g.id, by: g.owner, phase: g.phase, ms: Math.max(0, GUNSHIP.ms - elapsed), elapsed };
+}
+function launchGunship(p: Player): void {
+  gunship = {
+    id: nextGunshipId++, owner: p.id, phase: Math.random() * Math.PI * 2, start: Date.now(),
+    hits: 0, lastGun: 0, lastRocket: 0,
+  };
+  broadcast(gunshipMsg(gunship));
+}
+/** Самолёт улетел (by = null) или сбит (by — кто сбил). */
+function endGunship(by: Player | null): void {
+  if (!gunship) return;
+  const at = gunshipNow(gunship);
+  broadcast({ t: 'gunship-end', id: gunship.id, by: by?.id ?? null, p: at });
+  if (by) broadcast({ t: 'boom', id: -1000 - gunship.id, p: at });
+  gunship = null;
+}
+
+/** Очередь пулемёта: попадания проверяем от самолёта, а не от тела стрелка. */
+function gunshipFire(p: Player, msg: Incoming): void {
+  const g = gunship;
+  const now = Date.now();
+  if (!g || g.owner !== p.id || roundOver || now - g.lastGun < GUNSHIP.gunRateMs * 0.7) return;
+  g.lastGun = now;
+  const from = gunshipNow(g, now);
+  const ends = Array.isArray(msg.ends) ? msg.ends.slice(0, 1).filter(isVec3) : [];
+  broadcast({ t: 'gsshot', id: g.id, ends }, p.id);
+  if (typeof msg.hits !== 'object' || msg.hits === null) return;
+  const walls = MAPS[mapId].boxes;
+  let budget = 1;
+  for (const idStr of Object.keys(msg.hits)) {
+    const v = players.get(Number(idStr));
+    if (!v || !v.alive || budget <= 0 || !isEnemy(p, v)) continue;
+    if (bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt))) continue;
+    budget--;
+    hurt(p, v, GUNSHIP.gunDmg, 'gunship', false);
+  }
+  broadcastPlayers();
+  checkWin();
+}
+
+/** Ракета самолёта: раз в GUNSHIP.rocketCdMs, вылетает из самолёта. */
+function gunshipRocket(p: Player, msg: Incoming): void {
+  const g = gunship;
+  const now = Date.now();
+  if (!g || g.owner !== p.id || roundOver || !isVec3(msg.d) || now - g.lastRocket < GUNSHIP.rocketCdMs * 0.9) return;
+  const len = Math.hypot(msg.d[0], msg.d[1], msg.d[2]);
+  if (len < 0.5) return;
+  g.lastRocket = now;
+  const dir: Vec3 = [msg.d[0] / len, msg.d[1] / len, msg.d[2] / len];
+  const pos = gunshipNow(g, now);
+  const r: Rocket = { id: nextRocketId++, owner: p.id, pos, dir, born: now, fromGunship: true };
+  rockets.push(r);
+  broadcast({ t: 'rocket', id: r.id, by: p.id, o: pos, d: dir });
 }
 
 // ---------- бомба ----------
@@ -758,7 +835,7 @@ function pickMedkit(p: Player): void {
 }
 
 // ---------- ракеты ----------
-interface Rocket { id: number; owner: number; pos: Vec3; dir: Vec3; born: number }
+interface Rocket { id: number; owner: number; pos: Vec3; dir: Vec3; born: number; fromGunship?: boolean }
 let rockets: Rocket[] = [];
 let nextRocketId = 1;
 
@@ -789,13 +866,14 @@ function explode(r: Rocket, at: Vec3): void {
   const from: Vec3 = [at[0] - r.dir[0] * 0.2, at[1] - r.dir[1] * 0.2, at[2] - r.dir[2] * 0.2];
   let killed = false;
   for (const v of players.values()) {
-    // Взрыв задевает противников и самого стрелка, если он слишком близко; союзников — нет
-    if (!v.alive || (v !== owner && !isEnemy(owner, v))) continue;
+    // Взрыв задевает противников и самого стрелка, если он слишком близко; союзников — нет.
+    // Ракета самолёта хозяина не задевает: он в небе
+    if (!v.alive || (v !== owner && !isEnemy(owner, v)) || (r.fromGunship && v === owner)) continue;
     // Расстояние от взрыва до ближайшей точки игрока
-    if (distToPlayer(v, at) > ROCKET.radius) continue;
+    if (distToPlayer(v, at) > (r.fromGunship ? GUNSHIP.rocketRadius : ROCKET.radius)) continue;
     const covered = bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt));
     if (covered) continue; // за стеной взрыв не достаёт
-    killPlayer(owner, v, 'rocket');
+    killPlayer(owner, v, r.fromGunship ? 'gunship' : 'rocket');
     killed = true;
   }
   if (killed) {
@@ -819,9 +897,22 @@ function stepRockets(dt: number): void {
       const [min, max] = playerBox(v.pos, v.yaw, v.slide, scaleOf(v));
       t = Math.min(t, rayBox(r.pos, r.dir, min, max));
     }
+    // Ракета из ракетницы может попасть в чужой самолёт
+    let hitPlane = false;
+    if (gunship && !r.fromGunship && isEnemy(owner, players.get(gunship.owner) ?? owner)) {
+      const c = gunshipNow(gunship, now), h = GUNSHIP.half;
+      const tp = rayBox(r.pos, r.dir, [c[0] - h[0], c[1] - h[1], c[2] - h[2]], [c[0] + h[0], c[1] + h[1], c[2] + h[2]]);
+      if (tp < t) { t = tp; hitPlane = true; }
+    }
     const at: Vec3 = [r.pos[0] + r.dir[0] * t, r.pos[1] + r.dir[1] * t, r.pos[2] + r.dir[2] * t];
-    if (t < step || now - r.born > ROCKET.lifeMs) explode(r, at);
-    else { r.pos = at; flying.push(r); }
+    if (t < step || now - r.born > ROCKET.lifeMs) {
+      explode(r, at);
+      if (hitPlane && gunship) {
+        gunship.hits++;
+        broadcast({ t: 'gunship-hit', id: gunship.id, left: GUNSHIP.hitsToDown - gunship.hits });
+        if (gunship.hits >= GUNSHIP.hitsToDown) endGunship(owner);
+      }
+    } else { r.pos = at; flying.push(r); }
   }
   rockets = flying;
 }
@@ -956,7 +1047,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
     hp: 100, armor: 0, alive: false, kills: 0, deaths: 0, lastShot: 0, lastSpray: 0,
     profile: decodeProfile(msg.token),
     rockets: 0,
-    hasKnife: true, streak: 0, uav: 0, missile: 0, nuke: 0, uavUntil: 0, big: false, helmet: 0,
+    hasKnife: true, streak: 0, uav: 0, missile: 0, nuke: 0, gunship: 0, uavUntil: 0, big: false, helmet: 0,
     kit: isKit(msg.kit) ? msg.kit : [...DEFAULT_KIT],
   };
   players.set(p.id, p);
@@ -967,6 +1058,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
   send(ws, medkitsMsg());
   send(ws, packsMsg());
   send(ws, weatherMsg());
+  if (gunship) send(ws, gunshipMsg(gunship));
   broadcastPlayers();
   spawn(p);
   broadcastPlayers();
@@ -1022,6 +1114,10 @@ wss.on('connection', (ws) => {
       useStreak(me, msg.kind);
     } else if (msg.t === 'mpos') {
       missilePos(me, msg);
+    } else if (msg.t === 'gsfire') {
+      gunshipFire(me, msg);
+    } else if (msg.t === 'gsrocket') {
+      gunshipRocket(me, msg);
     } else if (msg.t === 'mhit') {
       missileHit(me, msg);
     } else if (msg.t === 'kit') {
@@ -1042,6 +1138,7 @@ wss.on('connection', (ws) => {
     players.delete(me.id);
     votes.delete(me.id);
     for (const [id, m] of missiles) if (m.owner === me.id) missiles.delete(id);
+    if (gunship?.owner === me.id) endGunship(null);
     if (crate.state === 'opening' && crate.by === me.id) cancelOpening();
     console.log(`- ${me.name}, игроков: ${players.size}`);
     if (players.size === 0) {
@@ -1069,6 +1166,7 @@ setInterval(() => {
   if (players.size) {
     sendPings(now);
     expireAmmoPacks(now);
+    if (gunship && now - gunship.start >= GUNSHIP.ms) endGunship(null); // облетел карту — улетает
     stepWeather(now);
     // Ракета с неба, которую не довели до цели, взрывается сама
     for (const m of missiles.values()) if (now - m.born > STREAK.missileMaxMs) detonateMissile(m, m.last);
