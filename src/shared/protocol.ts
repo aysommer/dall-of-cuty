@@ -15,6 +15,8 @@ export interface PlayerInfo {
   name: string;
   team: Team;
   hp: number;
+  /** Броня из ящика: тратится раньше здоровья */
+  armor: number;
   alive: boolean;
   kills: number;
   deaths: number;
@@ -35,7 +37,9 @@ export type SpawnMsg = { t: 'spawn'; id: number; p: Vec3; yaw: number };
 export type SnapMsg = { t: 'snap'; ps: SnapRow[] };
 export type ShotMsg = { t: 'shot'; id: number; w: WeaponId; ends: Vec3[] };
 /** killer = null и w = 'crate' — игрока убил взорвавшийся ящик. */
-export type KillMsg = { t: 'kill'; killer: number | null; victim: number; w: WeaponId | 'crate' };
+export type KillMsg = { t: 'kill'; killer: number | null; victim: number; w: WeaponId | 'crate'; head?: boolean };
+/** Аптечки на карте: ms — сколько ещё падать. */
+export type MedkitsMsg = { t: 'medkits'; list: Array<{ id: number; at: Vec3; ms: number }> };
 export type ProfileMsg = { t: 'profile'; token: string; kills: number; levels: Levels };
 /**
  * Состояние ящика. at — куда он падает или где лежит; by — кто открывает;
@@ -55,6 +59,7 @@ export type ServerMsg =
   | SnapMsg
   | ShotMsg
   | KillMsg
+  | MedkitsMsg
   | OverMsg
   | ProfileMsg
   | CrateMsg
@@ -73,4 +78,5 @@ export type ClientMsg =
   | { t: 'rocket'; d: Vec3 }
   | { t: 'spray'; p: Vec3; n: [number, number]; e: number }
   | { t: 'state'; p: Vec3; yaw: number; pitch: number; w: WeaponId; sl: boolean }
-  | { t: 'shoot'; w: WeaponId; ends: Vec3[]; hits: Record<number, number> };
+  /** hits: id игрока → [попаданий в тело, попаданий в голову] */
+  | { t: 'shoot'; w: WeaponId; ends: Vec3[]; hits: Record<number, [number, number]> };

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  CRATE, HIP_SPREAD, MAPS, MAP_ORDER, ROCKET, SLIDE, WEAPONS, WEAPON_ORDER, PLAYER, playerBox, rayBox, rayWorld,
+  CRATE, HEAD, HIP_SPREAD, MAPS, MAP_ORDER, MEDKIT, ROCKET, SLIDE, WEAPONS, WEAPON_ORDER, PLAYER, playerBox, rayBox, rayWorld,
   type Box, type GameMap, type Ladder, type MapId,
 } from '../shared/map.js';
 import { EMOJIS, SPRAY } from '../shared/emoji.js';
@@ -8,7 +8,7 @@ import {
   KILLS_PER_POINT, STATS, UPGRADES, maxLevel, multiplier, newProfile, pointsLeft, type Profile,
 } from '../shared/progress.js';
 import type {
-  BoomMsg, CrateMsg, CrateState, RocketMsg, SprayMsg,
+  BoomMsg, CrateMsg, CrateState, MedkitsMsg, RocketMsg, SprayMsg,
   ClientMsg, InfoMsg, KillMsg, Mode, OverMsg, PlayerInfo, PlayersMsg, ProfileMsg, ServerMsg,
   ShotMsg, SnapMsg, SpawnMsg, Team, Vec3, WeaponId,
 } from '../shared/protocol.js';
@@ -281,6 +281,43 @@ interface Gun {
   group: THREE.Group;
   flash: THREE.Mesh;
   muzzleZ: number;
+  /** Магазин — вынимается при перезарядке */
+  mag?: THREE.Object3D;
+  magY: number;
+  /** Рукоять затвора снайперки */
+  bolt?: THREE.Object3D;
+  boltZ: number;
+  /** Патрон дробовика, который вставляют при перезарядке */
+  shell?: THREE.Object3D;
+  /** Центр коллиматорного прицела (красная точка) в координатах оружия */
+  sight?: { y: number; z: number };
+  /**
+   * Куда смотрит глаз при прицеливании: центр прицела (y, z в координатах оружия)
+   * и на каком расстоянии от него глаз (relief, метры). Приклад при этом уходит к щеке, за пределы обзора.
+   */
+  aim?: { y: number; z: number; relief: number };
+}
+
+/** Коллиматорный прицел: рамка со стеклом и красная точка в центре. */
+function buildRedDot(group: THREE.Group, y: number, z: number): void {
+  const FRAME = 0x1a1a1a, W = 0.09, H = 0.07;
+  const part = (w: number, h: number, d: number, px: number, py: number, color: number, lit = true) => {
+    const m = box(w, h, d, color, lit);
+    m.position.set(px, py, z);
+    group.add(m);
+    return m;
+  };
+  part(W * 0.7, 0.02, 0.07, 0, y - H / 2 - 0.012, FRAME);       // основание
+  part(0.01, H, 0.012, -W / 2, y, FRAME);                       // стойки
+  part(0.01, H, 0.012, W / 2, y, FRAME);
+  part(W + 0.01, 0.01, 0.012, 0, y + H / 2, FRAME);             // верх
+  const glass = new THREE.Mesh(
+    new THREE.PlaneGeometry(W, H),
+    new THREE.MeshBasicMaterial({ color: 0x9fd3ff, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  glass.position.set(0, y, z);
+  group.add(glass);
+  part(0.006, 0.006, 0.002, 0, y, 0xff2020, false).position.z = z - 0.004; // красная точка
 }
 
 // Оружие смотрит стволом вдоль -Z.
@@ -291,22 +328,50 @@ function buildGun(type: WeaponId): Gun {
     m.position.set(x, y, z);
     group.add(m);
   };
+  const part = (w: number, h: number, d: number, color: number, x: number, y: number, z: number): THREE.Mesh => {
+    const m = box(w, h, d, color);
+    m.position.set(x, y, z);
+    group.add(m);
+    return m;
+  };
   let muzzleZ: number;
+  let mag: THREE.Object3D | undefined, bolt: THREE.Object3D | undefined, shell: THREE.Object3D | undefined;
+  let sight: Gun['sight'];
+  let aim: Gun['aim'];
   if (type === 'pistol') {
     add(0.05, 0.07, 0.24, 0x2b2b2b, 0, 0, -0.12);
     add(0.045, 0.13, 0.06, 0x3a2a1a, 0, -0.09, -0.03);
+    mag = part(0.032, 0.05, 0.045, 0x111111, 0, -0.165, -0.03); // низ магазина торчит из рукояти
+    sight = { y: 0.085, z: -0.1 };
+    aim = { ...sight, relief: 0.35 }; // пистолет держат на вытянутых руках
     muzzleZ = -0.26;
   } else if (type === 'shotgun') {
     add(0.06, 0.06, 0.7, 0x252525, 0, 0, -0.35);
     add(0.075, 0.06, 0.2, 0x7a4a22, 0, -0.055, -0.42);
     add(0.06, 0.1, 0.28, 0x7a4a22, 0, -0.03, 0.12);
+    shell = part(0.03, 0.03, 0.07, 0xc0262b, 0, -0.12, -0.08);
+    shell.visible = false;
+    sight = { y: 0.08, z: -0.15 };
+    aim = { ...sight, relief: 0.16 };
     muzzleZ = -0.72;
   } else if (type === 'sniper') {
     add(0.06, 0.08, 0.75, 0x2f3a2c, 0, 0, -0.25);
     add(0.03, 0.03, 0.42, 0x1c1c1c, 0, 0.01, -0.83);
-    add(0.065, 0.065, 0.32, 0x111111, 0, 0.085, -0.26); // прицел
+    add(0.065, 0.065, 0.32, 0x111111, 0, 0.085, -0.26); // оптика
     add(0.06, 0.11, 0.26, 0x4a3a28, 0, -0.02, 0.24);
     add(0.045, 0.15, 0.06, 0x1c1c1c, 0, -0.1, -0.05);
+    mag = part(0.04, 0.07, 0.09, 0x111111, 0, -0.07, -0.2);
+    // Затвор: рычаг справа, его двигают после каждого выстрела
+    const b = new THREE.Group();
+    const lever = box(0.07, 0.018, 0.018, 0x777777);
+    lever.position.x = 0.05;
+    const knob = box(0.03, 0.03, 0.03, 0x555555);
+    knob.position.x = 0.09;
+    b.add(lever, knob);
+    b.position.set(0, 0.035, 0.02);
+    group.add(b);
+    bolt = b;
+    aim = { y: 0.085, z: -0.1, relief: 0.08 }; // глаз у окуляра оптики
     muzzleZ = -1.05;
   } else if (type === 'knife') {
     add(0.035, 0.05, 0.12, 0x1c1c1c, 0, 0, 0);
@@ -322,16 +387,18 @@ function buildGun(type: WeaponId): Gun {
   } else {
     add(0.06, 0.09, 0.5, 0x30343a, 0, 0, -0.2);
     add(0.035, 0.035, 0.3, 0x1c1c1c, 0, 0.01, -0.58);
-    add(0.045, 0.18, 0.07, 0x1c1c1c, 0, -0.12, -0.22);
+    mag = part(0.045, 0.18, 0.07, 0x1c1c1c, 0, -0.12, -0.22);
     add(0.055, 0.1, 0.24, 0x4a3a28, 0, -0.02, 0.16);
-    add(0.02, 0.04, 0.12, 0x1c1c1c, 0, 0.065, -0.2);
+    sight = { y: 0.1, z: -0.12 };
+    aim = { ...sight, relief: 0.14 };
     muzzleZ = -0.75;
   }
+  if (sight) buildRedDot(group, sight.y, sight.z);
   const flash = box(0.12, 0.12, 0.12, 0xffd34d, false);
   flash.position.set(0, 0, muzzleZ - 0.05);
   flash.visible = false;
   group.add(flash);
-  return { group, flash, muzzleZ };
+  return { group, flash, muzzleZ, mag, magY: mag?.position.y ?? 0, bolt, boltZ: bolt?.position.z ?? 0, shell, sight, aim };
 }
 
 function muzzleWorld(gun: Gun): THREE.Vector3 {
@@ -393,7 +460,12 @@ interface Remote {
   poseK: number;
   labelY: number;
   crown: THREE.Group;
+  /** Бронежилет: закрывает корпус, голова и ноги видны */
+  armor: THREE.Mesh;
   label: THREE.Sprite;
+  /** Для звука шагов: пройденный путь с прошлого шага */
+  stepAcc: number;
+  lastPos: THREE.Vector3;
   hand: THREE.Group;
   gun: Gun;
   w: WeaponId;
@@ -430,11 +502,16 @@ function buildPlayer(info: PlayerInfo): Remote {
   g.add(label);
   const crown = buildCrown();
   pose.add(crown);
+  const armor = box(PLAYER.w + 0.14, 0.8, PLAYER.w + 0.14, 0x4b5320);
+  armor.position.y = 0.55 + 0.4; // от бёдер (0.55) до плеч (1.35)
+  armor.visible = false;
+  pose.add(armor);
   scene.add(g);
   const gun = remoteGun('pistol');
   hand.add(gun.group);
   return {
-    info, g, pose, slide: false, poseK: 0, labelY: PLAYER.h + 0.35, crown, label, hand, gun, w: 'pistol',
+    info, g, pose, slide: false, poseK: 0, labelY: PLAYER.h + 0.35, crown, armor, label, hand, gun, w: 'pistol',
+    stepAcc: 0, lastPos: new THREE.Vector3(),
     pos: new THREE.Vector3(), target: new THREE.Vector3(),
     yaw: 0, targetYaw: 0, pitch: 0, flashUntil: 0,
   };
@@ -453,6 +530,7 @@ const me = {
   team: 'green' as Team,
   alive: false,
   hp: 100,
+  armor: 0,
   pos: new THREE.Vector3(0, 0, 26),
   vel: new THREE.Vector3(),
   yaw: 0,
@@ -464,6 +542,8 @@ const me = {
     sniper: WEAPONS.sniper.mag, knife: 0, rocket: 0,
   } as Record<WeaponId, number>,
   reloadUntil: 0,
+  /** Длительность текущей перезарядки — для анимации */
+  reloadMs: 1,
   nextShot: 0,
 };
 
@@ -701,6 +781,7 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
     case 'rocket': onRocket(m); break;
     case 'boom': onBoom(m); break;
     case 'spray': onSpray(m); break;
+    case 'medkits': onMedkits(m); break;
     case 'rockets': {
       const had = me.ammo.rocket;
       me.ammo.rocket = m.n;
@@ -721,8 +802,13 @@ function onPlayers(m: PlayersMsg): void {
   const seen = new Set<number>();
   for (const p of roster) {
     if (p.id === me.id) {
-      if (p.hp < me.hp && p.alive) flashDamage();
+      if ((p.hp < me.hp || p.armor < me.armor) && p.alive) flashDamage();
+      if (p.alive && me.alive) {
+        if (p.armor > me.armor) { toast('🛡 Броня +100'); beep(880, 0.2, 0.1); }
+        if (p.hp > me.hp) { toast(`❤ Аптечка +${p.hp - me.hp} HP`); beep(660, 0.2, 0.1); }
+      }
       me.hp = p.hp;
+      me.armor = p.armor;
       me.team = p.team;
       if (me.alive && !p.alive) respawnAt = performance.now() + 3000;
       me.alive = p.alive;
@@ -733,6 +819,7 @@ function onPlayers(m: PlayersMsg): void {
     if (!r) { r = buildPlayer(p); remotes.set(p.id, r); }
     r.info = p;
     r.g.visible = p.alive;
+    r.armor.visible = p.armor > 0;
   }
   for (const [id, r] of remotes) {
     if (!seen.has(id)) { scene.remove(r.g); remotes.delete(id); }
@@ -824,7 +911,7 @@ function onKill(m: KillMsg): void {
     s.textContent = p.name;
     return s;
   };
-  row.append(span(k), ` ▸ ${WEAPONS[m.w].name} ▸ `, span(v));
+  row.append(span(k), ` ▸ ${WEAPONS[m.w].name}${m.head ? ' 🎯' : ''} ▸ `, span(v));
   $('feed').prepend(row);
   setTimeout(() => row.remove(), 5000);
   const self = m.killer === m.victim;
@@ -932,10 +1019,17 @@ function lock(): void {
 }
 $('resume').addEventListener('click', lock);
 canvas.addEventListener('click', () => { if (joined && !locked) lock(); });
+/**
+ * Меню закрыли по Esc: клавиатура сразу работает (бег, оружие, прыжки),
+ * а мышь вернётся с первым кликом — браузеры не дают захватить её по Esc.
+ */
+let menuClosed = false;
+const playing = (): boolean => locked || (joined && menuClosed);
 let unlockedAt = 0;
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
   if (!locked) unlockedAt = performance.now();
+  menuClosed = false;
   $('pause').classList.toggle('hidden', locked || !joined);
   if (!locked) { mouseDown = false; aimHeld = false; for (const k in keys) keys[k] = false; }
 });
@@ -949,7 +1043,8 @@ document.addEventListener('mousemove', (e) => {
   me.pitch = Math.max(-1.5, Math.min(1.5, me.pitch - e.movementY * sens));
 });
 document.addEventListener('mousedown', (e) => {
-  if (!locked) return;
+  // После Esc первый клик только возвращает мышь в игру, а не стреляет
+  if (!locked) { if (joined && menuClosed) lock(); return; }
   if (e.button === 0) { mouseDown = true; firedThisPress = false; }
   if (e.button === 2) aimHeld = true;
 });
@@ -967,16 +1062,18 @@ document.addEventListener('wheel', (e) => {
 });
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Escape') {
-    // Esc закрывает открытое меню. Вернуть захват мыши по Esc браузер не даёт,
-    // поэтому после закрытия меню игра продолжается по клику.
     for (const d of document.querySelectorAll<HTMLDetailsElement>('details[open]')) d.open = false;
-    // То же нажатие, что сняло захват мыши, меню не закрывает
-    if (joined && !locked && performance.now() - unlockedAt > 300) $('pause').classList.add('hidden');
+    // Esc при открытом меню — сразу обратно в игру (то же нажатие, что открыло меню, не считается)
+    if (joined && !locked && !menuClosed && performance.now() - unlockedAt > 300) {
+      $('pause').classList.add('hidden');
+      menuClosed = true;
+      lock(); // где браузер разрешает — мышь захватится сразу
+    }
     return;
   }
   if (!joined || e.target instanceof HTMLInputElement) return;
   if (e.code === 'Tab') { e.preventDefault(); $('scoreboard').classList.remove('hidden'); renderScoreboard(); }
-  if (!locked) return;
+  if (!playing()) return;
   keys[e.code] = true;
   if (e.code === 'Digit1') setWeapon('pistol');
   if (e.code === 'Digit2') setWeapon('shotgun');
@@ -1144,7 +1241,8 @@ function startReload(): void {
   const w = WEAPONS[me.weapon];
   if (me.weapon === 'rocket' || w.melee) return; // ракетница и нож не перезаряжаются
   if (me.reloadUntil || me.ammo[me.weapon] >= w.mag || !me.alive) return;
-  me.reloadUntil = performance.now() + w.reload / multiplier(profile.levels, 'reload');
+  me.reloadMs = w.reload / multiplier(profile.levels, 'reload');
+  me.reloadUntil = performance.now() + me.reloadMs;
   beep(300, 0.08, 0.08);
   updateHud();
 }
@@ -1162,8 +1260,9 @@ function fire(now: number): void {
   _right.setFromMatrixColumn(camera.matrixWorld, 0);
   _up.setFromMatrixColumn(camera.matrixWorld, 1);
 
-  const hits: Record<number, number> = {};
+  const hits: Record<number, [number, number]> = {};
   const ends: Vec3[] = [];
+  let anyHead = false;
   let anyHit = false;
   // В прицеле — малый разброс (вес пули), от бедра — в HIP_SPREAD раз больше
   const spread = w.spread * (HIP_SPREAD - (HIP_SPREAD - 1) * adsK);
@@ -1173,23 +1272,32 @@ function fire(now: number): void {
     const dv: Vec3 = [d.x, d.y, d.z];
     let t = rayWorld(currentMap.boxes, eye, dv);
     let victim: number | null = null;
+    let victimR: Remote | null = null;
     for (const [id, r] of remotes) {
       if (!r.info.alive) continue;
       if (mode === 'tdm' && r.info.team === me.team) continue;
       const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, r.slide);
       const tp = rayBox(eye, dv, min, max);
-      if (tp < t) { t = tp; victim = id; }
+      if (tp < t) { t = tp; victim = id; victimR = r; }
     }
-    if (victim !== null) { hits[victim] = (hits[victim] ?? 0) + 1; anyHit = true; }
+    if (victim !== null && victimR) {
+      // Голова — верх стоящего прямоугольника; в подкате головы как зоны нет
+      const head = !victimR.slide && eye[1] + dv[1] * t - victimR.pos.y >= HEAD.from;
+      const h = (hits[victim] ??= [0, 0]);
+      h[head ? 1 : 0]++;
+      anyHit = true;
+      anyHead ||= head;
+    }
     const end = new THREE.Vector3(eye[0] + dv[0] * t, eye[1] + dv[1] * t, eye[2] + dv[2] * t);
     ends.push([+end.x.toFixed(2), +end.y.toFixed(2), +end.z.toFixed(2)]);
     // Свой трассер идёт по линии прицела, а не из ствола сбоку — так видно, куда летит пуля
     addTracer(new THREE.Vector3(eye[0] + dv[0] * 1.2, eye[1] + dv[1] * 1.2 - 0.04, eye[2] + dv[2] * 1.2), end);
   }
   sendMsg({ t: 'shoot', w: me.weapon, ends, hits });
-  if (anyHit) { showHit(false); beep(1400, 0.05, 0.08); }
+  if (anyHit) { showHit(false); beep(anyHead ? 1900 : 1400, 0.05, 0.08); }
 
   shotSound(me.weapon);
+  if (me.weapon === 'sniper' && me.ammo.sniper > 0) boltUntil = now + BOLT_MS;
   const RECOIL: Partial<Record<WeaponId, [number, number]>> = {
     shotgun: [0.12, 0.035], rifle: [0.05, 0.012], sniper: [0.14, 0.05],
   };
@@ -1231,8 +1339,8 @@ function stab(now: number): void {
     victim = id;
     best = dist;
   }
-  const hits: Record<number, number> = {};
-  if (victim !== null) { hits[victim] = 1; showHit(false); beep(1400, 0.05, 0.08); }
+  const hits: Record<number, [number, number]> = {};
+  if (victim !== null) { hits[victim] = [1, 0]; showHit(false); beep(1400, 0.05, 0.08); }
   sendMsg({ t: 'shoot', w: me.weapon, ends: [], hits });
   shotSound('knife');
 }
@@ -1255,7 +1363,7 @@ function updateShooting(now: number): void {
     me.reloadUntil = 0;
     updateHud();
   }
-  if (!mouseDown || !me.alive || !locked || me.reloadUntil || now < me.nextShot || openingUntil) return;
+  if (!mouseDown || !me.alive || !locked || me.reloadUntil || now < me.nextShot || openingUntil || now < boltUntil) return;
   const w = WEAPONS[me.weapon];
   if (!w.auto && firedThisPress) return;
   if (me.weapon === 'rocket') { fireRocket(now); return; }
@@ -1288,6 +1396,8 @@ function textEl(tag: 'span' | 'small', text: string, cls = ''): HTMLElement {
 
 function updateHud(): void {
   $('hp').textContent = String(me.alive ? me.hp : 0);
+  $('armor').classList.toggle('hidden', !(me.alive && me.armor > 0));
+  $('armor-val').textContent = String(me.armor);
   $('health').classList.toggle('low', me.hp <= 30);
   $('weapon-name').textContent = WEAPONS[me.weapon].name;
   const melee = !!WEAPONS[me.weapon].melee;
@@ -1590,6 +1700,121 @@ function updateSprays(now: number): void {
   }
 }
 
+// ======================= аптечки =======================
+interface MedkitFx { g: THREE.Group; at: Vec3; landAt: number }
+const medkitFx = new Map<number, MedkitFx>();
+
+/** Белый кубик с красным крестом сверху и по бокам. */
+function buildMedkit(): THREE.Group {
+  const g = new THREE.Group();
+  const base = box(MEDKIT.size, MEDKIT.height, MEDKIT.size, 0xf2f2f2);
+  base.position.y = MEDKIT.height / 2;
+  g.add(base);
+  for (const [w, d] of [[0.42, 0.12], [0.12, 0.42]] as const) {
+    const cross = box(w, 0.02, d, 0xe02424, false);
+    cross.position.y = MEDKIT.height + 0.01;
+    g.add(cross);
+  }
+  for (const side of [-1, 1]) {
+    const v = box(0.12, 0.24, 0.02, 0xe02424, false);
+    v.position.set(0, MEDKIT.height / 2, side * (MEDKIT.size / 2 + 0.01));
+    const h = box(0.24, 0.12, 0.02, 0xe02424, false);
+    h.position.copy(v.position);
+    g.add(v, h);
+  }
+  return g;
+}
+
+function onMedkits(m: MedkitsMsg): void {
+  const now = performance.now();
+  const seen = new Set<number>();
+  for (const k of m.list) {
+    seen.add(k.id);
+    if (medkitFx.has(k.id)) continue;
+    const g = buildMedkit();
+    scene.add(g);
+    medkitFx.set(k.id, { g, at: k.at, landAt: now + k.ms });
+    if (joined && k.ms > 0) feedNote('❤ С неба падает аптечка');
+  }
+  for (const [id, fx] of medkitFx) {
+    if (seen.has(id)) continue;
+    scene.remove(fx.g);
+    fx.g.traverse((o) => {
+      if (o instanceof THREE.Mesh) { o.geometry.dispose(); (o.material as THREE.Material).dispose(); }
+    });
+    medkitFx.delete(id);
+  }
+}
+
+function updateMedkits(now: number): void {
+  for (const fx of medkitFx.values()) {
+    const left = Math.max(0, Math.min(1, (fx.landAt - now) / MEDKIT.fallMs));
+    const lift = MEDKIT.fallHeight * (1 - (1 - left) ** 2);
+    fx.g.position.set(fx.at[0], fx.at[1] + lift, fx.at[2]);
+    fx.g.rotation.y = now / 700; // медленно вращается, чтобы бросалась в глаза
+    // Последние 3 секунды перед исчезновением мигает
+    const left2 = fx.landAt + MEDKIT.lifeMs - now;
+    fx.g.visible = left2 > 3000 || Math.floor(now / 200) % 2 === 0;
+  }
+}
+
+// ======================= шаги =======================
+const STRIDE = 1.8;
+/** Сколько шагов было слышно (для проверки в тестах) */
+let stepCount = 0;
+let myStepAcc = 0;
+const myLastPos = new THREE.Vector3();
+
+/** Глухой шаг; громкость падает с расстоянием, звук слышен с той стороны, где идёт игрок. */
+function stepSound(volume: number, pan: number): void {
+  if (volume <= 0.02) return;
+  stepCount++;
+  if (!audio || !master) return;
+  const dur = 0.09;
+  const buf = audio.createBuffer(1, Math.floor(audio.sampleRate * dur), audio.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 4);
+  const src = audio.createBufferSource();
+  src.buffer = buf;
+  src.playbackRate.value = 0.85 + Math.random() * 0.3;
+  const filter = audio.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.value = 650;
+  const gain = audio.createGain();
+  gain.gain.value = 0.5 * volume;
+  const panner = audio.createStereoPanner();
+  panner.pan.value = Math.max(-1, Math.min(1, pan));
+  src.connect(filter).connect(gain).connect(panner).connect(master);
+  src.start();
+}
+
+/** Шаги считаются по пройденному по земле пути: каждые STRIDE метров — один шаг. */
+function updateSteps(dt: number): void {
+  if (!joined || dt <= 0) return;
+  const right = new THREE.Vector3(Math.cos(me.yaw), 0, -Math.sin(me.yaw));
+  for (const r of remotes.values()) {
+    const dx = r.pos.x - r.lastPos.x, dy = r.pos.y - r.lastPos.y, dz = r.pos.z - r.lastPos.z;
+    r.lastPos.copy(r.pos);
+    const moved = Math.hypot(dx, dz);
+    // В прыжке, на лестнице, в подкате и при телепорте (возрождение) шагов нет
+    if (!r.info.alive || r.slide || Math.abs(dy) > 0.02 || moved > 2) { r.stepAcc = 0; continue; }
+    r.stepAcc += moved;
+    if (r.stepAcc < STRIDE) continue;
+    r.stepAcc -= STRIDE;
+    const to = r.pos.clone().sub(me.pos);
+    const dist = to.length();
+    // Чем ближе игрок, тем громче: тишина дальше 30 м, у самого уха — в полную силу
+    const vol = Math.max(0, 1 - dist / 30) ** 2;
+    stepSound(vol, dist > 0.1 ? to.dot(right) / dist : 0);
+  }
+  if (!me.alive) { myLastPos.copy(me.pos); return; }
+  const moved = Math.hypot(me.pos.x - myLastPos.x, me.pos.z - myLastPos.z);
+  myLastPos.copy(me.pos);
+  if (!me.grounded || low || moved > 2) { myStepAcc = 0; return; }
+  myStepAcc += moved;
+  if (myStepAcc >= STRIDE) { myStepAcc -= STRIDE; stepSound(0.25, 0); }
+}
+
 // ======================= прицеливание =======================
 /** ПКМ: камера приближается, оружие уходит в центр, разброс уменьшается. */
 function updateAim(dt: number): void {
@@ -1604,7 +1829,56 @@ function updateAim(dt: number): void {
   }
   const handX = settings.hand === 'left' ? -0.22 : 0.22;
   viewModel.position.x = handX * (1 - adsK);
-  viewModel.position.y = -0.2 + 0.07 * adsK;
+  // В прицеле центр прицела встаёт ровно на линию взгляда (красная точка — в центр экрана)
+  const aimY = viewGun.aim ? -viewGun.aim.y * viewModel.scale.y : -0.13;
+  viewModel.position.y = -0.2 + (aimY + 0.2) * adsK;
+}
+
+// ======================= анимации оружия =======================
+const BOLT_MS = 900;
+/** Когда закончится передёргивание затвора снайперки */
+let boltUntil = 0;
+const ease = (x: number): number => x * x * (3 - 2 * x);
+/** 0 → 1 на отрезке [a, b] */
+const ramp = (p: number, a: number, b: number): number => ease(Math.max(0, Math.min(1, (p - a) / (b - a))));
+
+/** Перезарядка всех стволов и затвор снайперки. */
+function animateGun(now: number): void {
+  const g = viewGun;
+  if (g.mag) g.mag.position.y = g.magY;
+  if (g.shell) g.shell.visible = false;
+  if (g.bolt) { g.bolt.position.z = g.boltZ; g.bolt.rotation.z = 0; }
+
+  if (me.reloadUntil) {
+    const p = 1 - Math.max(0, me.reloadUntil - now) / me.reloadMs;
+    // Оружие наклоняется и опускается, в конце возвращается
+    const tilt = ramp(p, 0, 0.15) * (1 - ramp(p, 0.85, 1));
+    viewModel.rotation.x += -0.45 * tilt;
+    viewModel.rotation.z += 0.5 * tilt;
+    viewModel.position.y -= 0.06 * tilt;
+    if (g.shell) {
+      // Дробовик: три патрона по очереди вставляются снизу
+      const q = (p - 0.2) / 0.65;
+      if (q >= 0 && q < 1) {
+        const k = (q * 3) % 1;
+        g.shell.visible = true;
+        g.shell.position.y = -0.14 + 0.1 * ease(Math.min(1, k * 1.4));
+      }
+    } else if (g.mag) {
+      // Старый магазин вниз, новый — снизу обратно
+      const out = ramp(p, 0.15, 0.4) * (1 - ramp(p, 0.55, 0.85));
+      g.mag.position.y = g.magY - 0.3 * out;
+    }
+  } else if (g.bolt && now < boltUntil) {
+    // Снайперка: рычаг вверх, назад, вперёд и вниз; ствол слегка покачивается
+    const p = 1 - (boltUntil - now) / BOLT_MS;
+    const up = ramp(p, 0.05, 0.2) * (1 - ramp(p, 0.75, 0.9));
+    const back = ramp(p, 0.2, 0.45) * (1 - ramp(p, 0.5, 0.75));
+    g.bolt.rotation.z = 1.2 * up;
+    g.bolt.position.z = g.boltZ + 0.1 * back;
+    viewModel.rotation.z += 0.25 * up;
+    viewModel.rotation.x -= 0.1 * up;
+  }
 }
 
 // ======================= главный цикл =======================
@@ -1637,11 +1911,16 @@ function frame(now: number): void {
     // Взмах ножом — горизонтальный: справа налево, с выносом вперёд в середине
     const sw = now < swingUntil ? 1 - (swingUntil - now) / SWING_MS : -1;
     const swing = sw >= 0 ? Math.sin(Math.PI * sw) : 0;
-    viewModel.position.z = -0.45 + kick - swing * 0.12;
+    // В прицеле глаз подводится к прицелу: прицел оказывается в aim.relief метрах перед глазом,
+    // а приклад уходит назад к щеке, за пределы обзора. Отдача в прицеле мягче.
+    const aim = viewGun.aim;
+    const aimZ = aim ? -aim.relief - aim.z * viewModel.scale.z : -0.25;
+    viewModel.position.z = -0.45 + (aimZ + 0.45) * adsK + kick * (1 - 0.7 * adsK) - swing * 0.12;
     viewModel.position.x += sw >= 0 ? 0.2 - 0.4 * sw : 0;
     viewModel.rotation.y = sw >= 0 ? -1.1 + 2.2 * sw : 0;
     viewModel.rotation.z = sw >= 0 ? -Math.PI / 2 * swing * 0.6 : 0;
-    viewModel.rotation.x = kick * 1.5 + (me.reloadUntil ? -0.5 : 0);
+    viewModel.rotation.x = kick * 1.5;
+    animateGun(now);
 
     sendAcc += dt;
     if (sendAcc >= 0.05) {
@@ -1663,6 +1942,8 @@ function frame(now: number): void {
   viewModel.visible = joined && me.alive && !scoped;
   $('scope').classList.toggle('hidden', !(joined && me.alive && scoped));
   $('crosshair').classList.toggle('ads', adsK > 0.5);
+  // С коллиматором своя красная точка, крест в прицеле не нужен
+  $('crosshair').classList.toggle('sight', adsK > 0.5 && !!viewGun.sight);
   // У снайперки креста нет: от бедра — без прицела, в прицеле — оптика
   $('crosshair').classList.toggle('hidden', me.weapon === 'sniper');
 
@@ -1688,7 +1969,8 @@ function frame(now: number): void {
   updateCratePrompt(now);
   updateCorpses(now);
   updateSprays(now);
-  $('resume-hint').classList.toggle('hidden', !(joined && !locked && $('pause').classList.contains('hidden')));
+  updateMedkits(now);
+  updateSteps(dt);
   renderer.render(scene, camera);
 }
 
@@ -1703,5 +1985,6 @@ declare global {
 }
 window.game = {
   me, remotes, keys,
-  dbg: () => ({ low, adsK, fov: camera.fov, crateState, crateAt, eyeH, recoil, corpses: corpses.length, sprays: sprays.length }),
+  dbg: () => ({ low, adsK, fov: camera.fov, crateState, crateAt, eyeH, recoil, corpses: corpses.length, sprays: sprays.length,
+    steps: stepCount, medkits: medkitFx.size, boltUntil, menuClosed, armor: me.armor }),
 };
