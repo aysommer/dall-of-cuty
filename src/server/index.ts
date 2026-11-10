@@ -5,7 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  CRATE, MAPS, PLAYER, ROCKET, WEAPONS, isMapId, isWeapon, lineOfSight, rayBox, rayWorld, type MapId,
+  CRATE, MAPS, PLAYER, ROCKET, SLIDE, WEAPONS, bodyPoints, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
+  type MapId,
 } from '../shared/map.js';
 import { chooseSpawn } from './spawn.js';
 import { isStat, maxLevel, pointsLeft, type Profile } from '../shared/progress.js';
@@ -30,6 +31,8 @@ interface Player {
   yaw: number;
   pitch: number;
   w: WeaponId;
+  /** Лежит ли в подкате (меняет хитбокс) */
+  slide: boolean;
   hp: number;
   alive: boolean;
   kills: number;
@@ -136,6 +139,7 @@ function spawn(p: Player): void {
   p.pos = [s[0], s[3] ?? 0, s[1]];
   p.yaw = s[2];
   p.hp = 100;
+  p.slide = false;
   p.alive = true;
   broadcast({ t: 'spawn', id: p.id, p: p.pos, yaw: p.yaw });
 }
@@ -150,9 +154,9 @@ function resetRound(): void {
     p.alive = false;
     setRockets(p, 0);
   }
-  // Новый раунд — заново решаем, будет ли в нём ящик
+  // Новый раунд начинается без ящика; следующий упадёт по расписанию
   rockets = [];
-  setCrate(rollCrate());
+  clearCrate();
   for (const p of players.values()) spawn(p);
   broadcast({ t: 'reset' });
   broadcastPlayers();
@@ -195,7 +199,7 @@ function killPlayer(killer: Player | null, v: Player, w: WeaponId | 'crate'): vo
   broadcast({ t: 'kill', killer: killer?.id ?? null, victim: v.id, w });
   // Погибший теряет ракетницу и перестаёт открывать ящик
   setRockets(v, 0);
-  if (crate.state === 'opening' && crate.by === v.id) setCrate('idle');
+  if (crate.state === 'opening' && crate.by === v.id) cancelOpening();
   v.respawnTimer = setTimeout(() => {
     if (players.has(v.id) && !roundOver) {
       spawn(v);
@@ -205,13 +209,35 @@ function killPlayer(killer: Player | null, v: Player, w: WeaponId | 'crate'): vo
 }
 
 // ---------- ящик с ракетницей ----------
+// Раз в CRATE.dropEveryMs с вероятностью CRATE.dropChance ящик падает с неба в одну из точек карты.
+// Упав, он лежит CRATE.lifeMs; если за это время его не открыли — исчезает.
 const ROCKETS_IN_CRATE = 6;
-const crate: { state: CrateState; by: number | null; start: Vec3; timer?: NodeJS.Timeout } = {
-  state: 'idle', by: null, start: [0, 0, 0],
-};
+const crate: {
+  state: CrateState;
+  at: Vec3 | null;
+  by: number | null;
+  /** Где стоял открывающий: сдвинулся — открытие сорвано */
+  start: Vec3;
+  /** Когда закончится падение или открытие */
+  until: number;
+  /** Когда ящик исчезнет, если его не открыть */
+  expiresAt: number;
+  /** Срок вышел, пока ящик открывали: при отмене открытия он исчезнет */
+  expired: boolean;
+  timer?: NodeJS.Timeout;
+  expireTimer?: NodeJS.Timeout;
+} = { state: 'gone', at: null, by: null, start: [0, 0, 0], until: 0, expiresAt: 0, expired: false };
+let dropTimer: NodeJS.Timeout | undefined;
 
 function crateMsg(): ServerMsg {
-  return { t: 'crate', state: crate.state, by: crate.by, ms: crate.state === 'opening' ? CRATE.openMs : 0 };
+  const now = Date.now();
+  const busy = crate.state === 'falling' || crate.state === 'opening';
+  const lying = crate.state === 'idle' || crate.state === 'opening';
+  return {
+    t: 'crate', state: crate.state, at: crate.at, by: crate.by,
+    ms: busy ? Math.max(0, crate.until - now) : 0,
+    left: lying ? Math.max(0, crate.expiresAt - now) : 0,
+  };
 }
 function setCrate(state: CrateState, by: number | null = null): void {
   clearTimeout(crate.timer);
@@ -219,10 +245,53 @@ function setCrate(state: CrateState, by: number | null = null): void {
   crate.by = by;
   broadcast(crateMsg());
 }
-/** Ящик есть не в каждом раунде: в начале раунда бросаем жребий. */
-function rollCrate(): CrateState {
-  return Math.random() < CRATE.spawnChance ? 'idle' : 'gone';
+function clearCrate(): void {
+  clearTimeout(crate.expireTimer);
+  crate.at = null;
+  setCrate('gone');
 }
+
+function dropCrate(): void {
+  const drops = MAPS[mapId].crateDrops;
+  crate.at = [...drops[Math.floor(Math.random() * drops.length)]!];
+  crate.until = Date.now() + CRATE.fallMs;
+  setCrate('falling');
+  crate.timer = setTimeout(() => {
+    crate.expiresAt = Date.now() + CRATE.lifeMs;
+    crate.expired = false;
+    setCrate('idle');
+    clearTimeout(crate.expireTimer);
+    crate.expireTimer = setTimeout(() => {
+      // Пока ящик открывают, не убираем его: решит исход открытия
+      if (crate.state === 'idle') clearCrate();
+      else crate.expired = true;
+    }, CRATE.lifeMs);
+  }, CRATE.fallMs);
+}
+
+/** Расписание сбросов: идёт, пока на сервере есть игроки. */
+function startDrops(): void {
+  clearInterval(dropTimer);
+  dropTimer = setInterval(() => {
+    if (crate.state === 'gone' && !roundOver && Math.random() < CRATE.dropChance) dropCrate();
+  }, CRATE.dropEveryMs);
+}
+function stopDrops(): void {
+  clearInterval(dropTimer);
+  dropTimer = undefined;
+  clearTimeout(crate.timer);
+  clearTimeout(crate.expireTimer);
+  crate.state = 'gone';
+  crate.at = null;
+  crate.by = null;
+}
+
+/** Отмена открытия сбрасывает прогресс; если срок ящика уже вышел — он исчезает. */
+function cancelOpening(): void {
+  if (crate.expired) clearCrate();
+  else setCrate('idle');
+}
+
 function setRockets(p: Player, n: number): void {
   if (p.rockets === n) return;
   p.rockets = n;
@@ -231,38 +300,37 @@ function setRockets(p: Player, n: number): void {
 
 function handleOpen(p: Player, on: boolean): void {
   if (!on) {
-    // Отмена сбрасывает прогресс: открывать придётся заново
-    if (crate.state === 'opening' && crate.by === p.id) setCrate('idle');
+    if (crate.state === 'opening' && crate.by === p.id) cancelOpening();
     return;
   }
-  if (crate.state !== 'idle' || !p.alive || roundOver) return;
-  const c = MAPS[mapId].crate;
+  const c = crate.at;
+  if (crate.state !== 'idle' || !c || !p.alive || roundOver) return;
   if (Math.hypot(p.pos[0] - c[0], p.pos[2] - c[2]) > CRATE.reach || Math.abs(p.pos[1] - c[1]) > 1.5) return;
   crate.start = [...p.pos];
+  crate.until = Date.now() + CRATE.openMs;
   setCrate('opening', p.id);
   crate.timer = setTimeout(() => {
     const opener = players.get(p.id);
-    if (!opener || !opener.alive) { setCrate('idle'); return; }
-    setCrate('gone');
+    if (!opener || !opener.alive) { cancelOpening(); return; }
+    const at = c;
+    clearCrate();
     // Сюрприз: иногда вместо ракетницы ящик взрывается
-    if (Math.random() < CRATE.trapChance) explodeCrate();
+    if (Math.random() < CRATE.trapChance) explodeCrate(at);
     else setRockets(opener, ROCKETS_IN_CRATE);
   }, CRATE.openMs);
 }
 
 /** Ящик-ловушка: убивает всех рядом, включая открывшего и его союзников. Стена закрывает. */
-function explodeCrate(): void {
+function explodeCrate([cx, cy, cz]: Vec3): void {
   const map = MAPS[mapId];
-  const [cx, cy, cz] = map.crate;
   const at: Vec3 = [cx, cy + CRATE.height + 0.2, cz];
   broadcast({ t: 'boom', id: 0, p: at });
   for (const v of players.values()) {
     if (!v.alive) continue;
-    const [min, max] = playerBox(v);
+    const [min, max] = playerBox(v.pos, v.yaw, v.slide);
     const d = Math.hypot(...([0, 1, 2] as const).map((i) => Math.max(min[i] - at[i], 0, at[i] - max[i])));
     if (d > CRATE.trapRadius) continue;
-    const covered = [0.2, PLAYER.h / 2, PLAYER.h - 0.1]
-      .every((h) => !lineOfSight(map.boxes, at, [v.pos[0], v.pos[1] + h, v.pos[2]]));
+    const covered = bodyPoints(v.pos, v.slide).every((pt) => !lineOfSight(map.boxes, at, pt));
     if (!covered) killPlayer(null, v, 'crate');
   }
   broadcastPlayers();
@@ -276,10 +344,6 @@ let nextRocketId = 1;
 function isEnemy(a: Player, b: Player): boolean {
   return a.id !== b.id && (mode === 'ffa' || a.team !== b.team);
 }
-function playerBox(p: Player): [Vec3, Vec3] {
-  const r = PLAYER.w / 2;
-  return [[p.pos[0] - r, p.pos[1], p.pos[2] - r], [p.pos[0] + r, p.pos[1] + PLAYER.h, p.pos[2] + r]];
-}
 
 function handleRocket(p: Player, msg: Incoming): void {
   if (!p.alive || p.rockets <= 0 || !isVec3(msg.d)) return;
@@ -289,7 +353,7 @@ function handleRocket(p: Player, msg: Incoming): void {
   p.lastShot = now;
   setRockets(p, p.rockets - 1);
   const dir: Vec3 = [msg.d[0] / len, msg.d[1] / len, msg.d[2] / len];
-  const pos: Vec3 = [p.pos[0], p.pos[1] + PLAYER.eye, p.pos[2]];
+  const pos = eyeOf(p);
   const r: Rocket = { id: nextRocketId++, owner: p.id, pos, dir, born: now };
   rockets.push(r);
   broadcast({ t: 'rocket', id: r.id, by: p.id, o: pos, d: dir });
@@ -306,12 +370,9 @@ function explode(r: Rocket, at: Vec3): void {
   for (const v of players.values()) {
     // Взрыв задевает противников и самого стрелка, если он слишком близко; союзников — нет
     if (!v.alive || (v !== owner && !isEnemy(owner, v))) continue;
-    const [min, max] = playerBox(v);
     // Расстояние от взрыва до ближайшей точки игрока
-    const d = Math.hypot(...([0, 1, 2] as const).map((i) => Math.max(min[i] - at[i], 0, at[i] - max[i])));
-    if (d > ROCKET.radius) continue;
-    const covered = [0.2, PLAYER.h / 2, PLAYER.h - 0.1]
-      .every((h) => !lineOfSight(walls, from, [v.pos[0], v.pos[1] + h, v.pos[2]]));
+    if (distToPlayer(v, at) > ROCKET.radius) continue;
+    const covered = bodyPoints(v.pos, v.slide).every((pt) => !lineOfSight(walls, from, pt));
     if (covered) continue; // за стеной взрыв не достаёт
     killPlayer(owner, v, 'rocket');
     killed = true;
@@ -334,7 +395,7 @@ function stepRockets(dt: number): void {
     let t = rayWorld(walls, r.pos, r.dir, step);
     for (const v of players.values()) {
       if (!v.alive || !isEnemy(owner, v)) continue;
-      const [min, max] = playerBox(v);
+      const [min, max] = playerBox(v.pos, v.yaw, v.slide);
       t = Math.min(t, rayBox(r.pos, r.dir, min, max));
     }
     const at: Vec3 = [r.pos[0] + r.dir[0] * t, r.pos[1] + r.dir[1] * t, r.pos[2] + r.dir[2] * t];
@@ -342,6 +403,15 @@ function stepRockets(dt: number): void {
     else { r.pos = at; flying.push(r); }
   }
   rockets = flying;
+}
+
+function eyeOf(p: Player): Vec3 {
+  return [p.pos[0], p.pos[1] + (p.slide ? SLIDE.eye : PLAYER.eye), p.pos[2]];
+}
+/** Расстояние от точки до ближайшей точки хитбокса игрока. */
+function distToPlayer(v: Player, at: Vec3): number {
+  const [min, max] = playerBox(v.pos, v.yaw, v.slide);
+  return Math.hypot(...([0, 1, 2] as const).map((i) => Math.max(min[i] - at[i], 0, at[i] - max[i])));
 }
 
 function handleShoot(p: Player, msg: Incoming): void {
@@ -357,18 +427,17 @@ function handleShoot(p: Player, msg: Incoming): void {
 
   if (roundOver || typeof msg.hits !== 'object' || msg.hits === null) return;
   let budget = w.pellets;
-  const eye: Vec3 = [p.pos[0], p.pos[1] + PLAYER.eye, p.pos[2]];
+  const eye = eyeOf(p);
   for (const [idStr, nRaw] of Object.entries(msg.hits)) {
     const v = players.get(Number(idStr));
     const n = Math.min(budget, Math.floor(Number(nRaw)) || 0);
     if (!v || n <= 0 || !v.alive || v.id === p.id) continue;
     if (mode === 'tdm' && v.team === p.team) continue;
+    // Нож бьёт только вплотную (с запасом на задержку сети)
+    if (w.melee && distToPlayer(v, eye) > w.melee + 0.75) continue;
     // Проверка, что между стрелком и целью нет стены
-    const chest: Vec3 = [v.pos[0], v.pos[1] + PLAYER.h / 2, v.pos[2]];
-    const head: Vec3 = [v.pos[0], v.pos[1] + PLAYER.h - 0.1, v.pos[2]];
-    const feet: Vec3 = [v.pos[0], v.pos[1] + 0.2, v.pos[2]];
     const walls = MAPS[mapId].boxes;
-    if (!lineOfSight(walls, eye, chest) && !lineOfSight(walls, eye, head) && !lineOfSight(walls, eye, feet)) continue;
+    if (bodyPoints(v.pos, v.slide).every((pt) => !lineOfSight(walls, eye, pt))) continue;
     budget -= n;
 
     let dmg = w.dmg;
@@ -393,9 +462,8 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
     mapId = isMapId(msg.map) ? msg.map : 'sands';
     roundOver = false;
     clearTimeout(roundTimer);
-    clearTimeout(crate.timer);
-    crate.state = rollCrate();
-    crate.by = null;
+    stopDrops();
+    startDrops();
     rockets = [];
   }
   let team: Team = msg.team === 'red' ? 'red' : 'green';
@@ -405,7 +473,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
   const name = rawName.replace(/[<>&]/g, '').trim().slice(0, 14) || 'Игрок';
   const p: Player = {
     id: nextId++, ws, name, team,
-    pos: [0, 0, 0], yaw: 0, pitch: 0, w: 'pistol',
+    pos: [0, 0, 0], yaw: 0, pitch: 0, w: 'pistol', slide: false,
     hp: 100, alive: false, kills: 0, deaths: 0, lastShot: 0,
     profile: decodeProfile(msg.token),
     rockets: 0,
@@ -444,10 +512,11 @@ wss.on('connection', (ws) => {
 
     if (msg.t === 'state') {
       if (me.alive && isVec3(msg.p)) me.pos = msg.p;
+      me.slide = me.alive && msg.sl === true;
       // Во время открытия ящика двигаться нельзя: сдвинулся — открытие сорвано
       if (crate.state === 'opening' && crate.by === me.id &&
           Math.hypot(me.pos[0] - crate.start[0], me.pos[1] - crate.start[1], me.pos[2] - crate.start[2]) > 0.5) {
-        setCrate('idle');
+        cancelOpening();
       }
       if (isNum(msg.yaw)) me.yaw = msg.yaw;
       if (isNum(msg.pitch)) me.pitch = msg.pitch;
@@ -470,12 +539,13 @@ wss.on('connection', (ws) => {
     if (!me) return;
     clearTimeout(me.respawnTimer);
     players.delete(me.id);
-    if (crate.state === 'opening' && crate.by === me.id) setCrate('idle');
+    if (crate.state === 'opening' && crate.by === me.id) cancelOpening();
     console.log(`- ${me.name}, игроков: ${players.size}`);
     if (players.size === 0) {
       clearTimeout(roundTimer);
       roundTimer = undefined;
       roundOver = false;
+      stopDrops();
     }
     broadcastPlayers();
     broadcastInfo();
@@ -489,7 +559,7 @@ setInterval(() => {
   if (players.size < 2) return;
   const ps: SnapRow[] = [];
   for (const p of players.values()) {
-    ps.push([p.id, p.pos[0], p.pos[1], p.pos[2], p.yaw, p.pitch, p.w]);
+    ps.push([p.id, p.pos[0], p.pos[1], p.pos[2], p.yaw, p.pitch, p.w, p.slide ? 1 : 0]);
   }
   broadcast({ t: 'snap', ps });
 }, 50);

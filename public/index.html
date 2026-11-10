@@ -11,6 +11,7 @@
 
   <!-- Интерфейс во время игры -->
   <div id="hud" class="hidden">
+    <div id="scope" class="hidden"></div>
     <div id="crosshair"><i></i><i></i><i></i><i></i></div>
     <div id="hitmarker"></div>
     <div id="damage"></div>
@@ -23,8 +24,10 @@
       <div id="slots">
         <span data-w="pistol">1 Пистолет</span>
         <span data-w="shotgun">2 Дробовик</span>
-        <span data-w="rifle">3 Винтовка</span>
-        <span data-w="rocket" class="hidden">4 Ракетница</span>
+        <span data-w="rifle">3 Автомат</span>
+        <span data-w="sniper">4 Снайперка</span>
+        <span data-w="knife">5 Нож</span>
+        <span data-w="rocket" class="hidden">6 Ракетница</span>
       </div>
     </div>
     <div id="center-msg"></div>
@@ -40,8 +43,9 @@
   <div id="pause" class="overlay hidden">
     <div class="panel wide">
       <button id="resume" class="primary" type="button">ИГРАТЬ</button>
-      <p>WASD — движение · Shift — спринт · Пробел — прыжок · ЛКМ — огонь<br>
-         1 / 2 / 3 или колесо — оружие · R — перезарядка · F — открыть ящик · Tab — счёт · Esc — это меню</p>
+      <p>WASD — движение · Shift — спринт · C в спринте — подкат · Пробел — прыжок<br>
+         ЛКМ — огонь · ПКМ — прицел · 1–5 или колесо — оружие · 6 — ракетница<br>
+         R — перезарядка · F — открыть ящик · Tab — счёт · Esc — это меню</p>
 
       <h3>Настройки</h3>
       <div class="settings"></div>
