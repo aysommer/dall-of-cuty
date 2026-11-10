@@ -140,6 +140,12 @@ details.field .settings { margin-top: 10px; }
 }
 #crate-bar { margin-top: 8px; height: 8px; width: 260px; background: rgba(255, 255, 255, 0.2); }
 #crate-fill { height: 100%; width: 0; background: #ffc928; }
+#toast, #resume-hint {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.55); padding: 6px 14px; font-size: 15px; white-space: nowrap;
+}
+#toast { top: 70%; }
+#resume-hint { top: 44%; font-size: 18px; }
 #crown-note {
   position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
   background: rgba(0, 0, 0, 0.45); padding: 4px 12px; font-size: 14px; color: #ffc928; white-space: nowrap;

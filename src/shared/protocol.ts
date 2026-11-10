@@ -44,6 +44,8 @@ export type ProfileMsg = { t: 'profile'; token: string; kills: number; levels: L
 export type CrateMsg = { t: 'crate'; state: CrateState; at: Vec3 | null; by: number | null; ms: number; left: number };
 export type RocketMsg = { t: 'rocket'; id: number; by: number; o: Vec3; d: Vec3 };
 export type BoomMsg = { t: 'boom'; id: number; p: Vec3 };
+/** Рисунок на стене: точка, нормаль стены по X/Z и номер эмодзи из EMOJIS. */
+export type SprayMsg = { t: 'spray'; by: number; p: Vec3; n: [number, number]; e: number };
 export type OverMsg = { t: 'over'; winner: Winner; pause: number };
 
 export type ServerMsg =
@@ -58,6 +60,7 @@ export type ServerMsg =
   | CrateMsg
   | RocketMsg
   | BoomMsg
+  | SprayMsg
   | { t: 'rockets'; n: number }
   | { t: 'error'; text: string }
   | { t: 'welcome'; id: number; mode: Mode; map: MapId }
@@ -68,5 +71,6 @@ export type ClientMsg =
   | { t: 'upgrade'; stat: Stat }
   | { t: 'open'; on: boolean }
   | { t: 'rocket'; d: Vec3 }
+  | { t: 'spray'; p: Vec3; n: [number, number]; e: number }
   | { t: 'state'; p: Vec3; yaw: number; pitch: number; w: WeaponId; sl: boolean }
   | { t: 'shoot'; w: WeaponId; ends: Vec3[]; hits: Record<number, number> };
