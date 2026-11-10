@@ -115,7 +115,7 @@ function buildLadder(l: Ladder): THREE.Group {
 }
 
 // ---------- ящик с ракетницей ----------
-let crateState: CrateState = 'idle';
+let crateState: CrateState = 'gone'; // до ответа сервера считаем, что ящика нет
 let crateBy: number | null = null;
 let crateMesh: THREE.Mesh | null = null;
 let crateBox: Box | null = null;
@@ -176,11 +176,12 @@ function nearCrate(): boolean {
 }
 
 function onCrate(m: CrateMsg): void {
+  const taken = crateState === 'opening' && m.state === 'gone';
   crateState = m.state;
   crateBy = m.by;
   if (crateMesh) crateMesh.visible = m.state !== 'gone';
   openingUntil = m.state === 'opening' && m.by === me.id ? performance.now() + m.ms : 0;
-  if (m.state === 'gone' && m.by === null) beep(520, 0.3, 0.1);
+  if (taken) beep(520, 0.3, 0.1);
 }
 
 function loadMap(id: MapId): void {

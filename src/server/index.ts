@@ -150,9 +150,9 @@ function resetRound(): void {
     p.alive = false;
     setRockets(p, 0);
   }
-  // Новый раунд — ящик снова на месте
+  // Новый раунд — заново решаем, будет ли в нём ящик
   rockets = [];
-  setCrate('idle');
+  setCrate(rollCrate());
   for (const p of players.values()) spawn(p);
   broadcast({ t: 'reset' });
   broadcastPlayers();
@@ -218,6 +218,10 @@ function setCrate(state: CrateState, by: number | null = null): void {
   crate.state = state;
   crate.by = by;
   broadcast(crateMsg());
+}
+/** Ящик есть не в каждом раунде: в начале раунда бросаем жребий. */
+function rollCrate(): CrateState {
+  return Math.random() < CRATE.spawnChance ? 'idle' : 'gone';
 }
 function setRockets(p: Player, n: number): void {
   if (p.rockets === n) return;
@@ -390,7 +394,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
     roundOver = false;
     clearTimeout(roundTimer);
     clearTimeout(crate.timer);
-    crate.state = 'idle';
+    crate.state = rollCrate();
     crate.by = null;
     rockets = [];
   }
