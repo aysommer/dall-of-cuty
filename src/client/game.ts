@@ -710,9 +710,12 @@ function onKill(m: KillMsg): void {
   row.append(span(k), ` ▸ ${WEAPONS[m.w].name} ▸ `, span(v));
   $('feed').prepend(row);
   setTimeout(() => row.remove(), 5000);
-  if (m.killer === me.id) { showHit(true); beep(880, 0.15); }
+  const self = m.killer === m.victim;
+  if (m.killer === me.id && !self) { showHit(true); beep(880, 0.15); }
   if (m.victim === me.id) {
-    $('center-msg').textContent = `Тебя убил ${k.name}\nВозрождение через 3 сек.`;
+    $('center-msg').textContent = self
+      ? 'Ты подорвался на своей ракете\nВозрождение через 3 сек.'
+      : `Тебя убил ${k.name}\nВозрождение через 3 сек.`;
   }
 }
 

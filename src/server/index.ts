@@ -186,7 +186,8 @@ function killPlayer(killer: Player | null, v: Player, w: WeaponId | 'crate'): vo
   v.hp = 0;
   v.alive = false;
   v.deaths++;
-  if (killer) {
+  // Подорвавшемуся на своей ракете убийство не засчитывается
+  if (killer && killer !== v) {
     killer.kills++;
     killer.profile.kills++;
     sendProfile(killer);
@@ -299,7 +300,8 @@ function explode(r: Rocket, at: Vec3): void {
   const from: Vec3 = [at[0] - r.dir[0] * 0.2, at[1] - r.dir[1] * 0.2, at[2] - r.dir[2] * 0.2];
   let killed = false;
   for (const v of players.values()) {
-    if (!v.alive || !isEnemy(owner, v)) continue;
+    // Взрыв задевает противников и самого стрелка, если он слишком близко; союзников — нет
+    if (!v.alive || (v !== owner && !isEnemy(owner, v))) continue;
     const [min, max] = playerBox(v);
     // Расстояние от взрыва до ближайшей точки игрока
     const d = Math.hypot(...([0, 1, 2] as const).map((i) => Math.max(min[i] - at[i], 0, at[i] - max[i])));
