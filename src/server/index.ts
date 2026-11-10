@@ -59,6 +59,8 @@ interface Player {
   uavUntil: number;
   /** Суперброня: игрок в 1,5 раза больше */
   big: boolean;
+  /** Шлем Джаггернаута: сколько попаданий в голову ещё выдержит */
+  helmet: number;
   /** Выбранные стволы (не больше двух), нож — всегда */
   kit: WeaponId[];
   respawnTimer?: NodeJS.Timeout;
@@ -161,7 +163,7 @@ function broadcastPlayers(): void {
     scores: teamScores(),
     list: [...players.values()].map((p) => ({
       id: p.id, name: p.name, team: p.team, hp: p.hp, armor: p.armor, alive: p.alive, kills: p.kills, deaths: p.deaths,
-      big: p.big, rank: rankOf(p.profile.kills),
+      big: p.big, rank: rankOf(p.profile.kills), helmet: p.helmet,
     })),
   });
 }
@@ -173,6 +175,7 @@ function spawn(p: Player): void {
   p.hp = 100;
   p.armor = 0;
   p.big = false;
+  p.helmet = 0;
   p.slide = false;
   p.hasKnife = true; // нож возвращается после смерти
   p.alive = true;
@@ -287,6 +290,7 @@ function killPlayer(killer: Player | null, v: Player, w: KillWeapon, head = fals
   v.hp = 0;
   v.armor = 0;
   v.big = false;
+  v.helmet = 0;
   v.alive = false;
   v.deaths++;
   // Смерть обрывает серию; награды в запасе остаются
@@ -328,8 +332,10 @@ function addStreak(p: Player): void {
   if (p.streak === STREAK.missile) p.missile++;
   if (p.streak === STREAK.launcher) setRockets(p, Math.max(p.rockets, 6));
   if (p.streak === STREAK.superArmor) {
+    // Джаггернаут: суперброня, полтора размера и шлем, который держит выстрелы в голову
     p.armor = STREAK.superArmorHp;
     p.big = true;
+    p.helmet = STREAK.helmetHits;
   }
   if (p.streak === STREAK.nuke) p.nuke++;
   sendLoadout(p);
@@ -852,7 +858,8 @@ function handleSpray(p: Player, msg: Incoming): void {
 function hurt(attacker: Player, v: Player, dmg: number, w: KillWeapon, head: boolean): void {
   const absorbed = Math.min(v.armor, dmg);
   v.armor = Math.round(v.armor - absorbed);
-  if (v.armor <= 0) v.big = false; // суперброня кончилась — игрок снова обычного размера
+  // Суперброня кончилась — игрок снова обычного размера и без шлема
+  if (v.armor <= 0) { v.big = false; v.helmet = 0; }
   v.hp = Math.max(0, Math.round(v.hp - (dmg - absorbed)));
   if (v.hp <= 0) killPlayer(attacker, v, w, head);
 }
@@ -893,6 +900,13 @@ function handleShoot(p: Player, msg: Incoming): void {
     // Голову засчитываем, только если её видно и игрок стоит (в подкате головы как зоны нет)
     const headPt: Vec3 = [v.pos[0], v.pos[1] + (PLAYER.h - 0.1) * scaleOf(v), v.pos[2]];
     if (head && (v.slide || !lineOfSight(walls, eye, headPt))) { body += head; head = 0; }
+    // Шлем Джаггернаута: выстрел в голову урона не наносит, а только сбивает шлем (одно попадание за выстрел)
+    if (head && v.helmet > 0) {
+      v.helmet--;
+      head = 0;
+      broadcast({ t: 'helmet', id: v.id, by: p.id, left: v.helmet });
+      if (body === 0) { broadcastPlayers(); continue; }
+    }
 
     if (w.melee) { killPlayer(p, v, weaponId); continue; }
     if (head && w.headKill) { killPlayer(p, v, weaponId, true); continue; }
@@ -942,7 +956,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
     hp: 100, armor: 0, alive: false, kills: 0, deaths: 0, lastShot: 0, lastSpray: 0,
     profile: decodeProfile(msg.token),
     rockets: 0,
-    hasKnife: true, streak: 0, uav: 0, missile: 0, nuke: 0, uavUntil: 0, big: false,
+    hasKnife: true, streak: 0, uav: 0, missile: 0, nuke: 0, uavUntil: 0, big: false, helmet: 0,
     kit: isKit(msg.kit) ? msg.kit : [...DEFAULT_KIT],
   };
   players.set(p.id, p);

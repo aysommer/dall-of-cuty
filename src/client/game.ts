@@ -526,6 +526,57 @@ function faceTexture(level: number): THREE.CanvasTexture {
   return faceCache[level];
 }
 
+/**
+ * Шлем Джаггернаута: тёмный металлический колпак на голову с наушниками по бокам
+ * и козырьком; лицо под ним остаётся видно.
+ */
+function buildHelmet(): THREE.Group {
+  const g = new THREE.Group();
+  const METAL = 0x3a3f45, EDGE = 0x22262b;
+  const top = box(PLAYER.w + 0.1, 0.16, PLAYER.w + 0.1, METAL);
+  top.position.y = PLAYER.h + 0.03;
+  const back = box(PLAYER.w + 0.1, 0.34, 0.08, METAL);
+  back.position.set(0, PLAYER.h - 0.13, PLAYER.w / 2 + 0.01);
+  const brim = box(PLAYER.w + 0.14, 0.05, 0.14, EDGE);
+  brim.position.set(0, PLAYER.h - 0.06, -PLAYER.w / 2 - 0.05);
+  g.add(top, back, brim);
+  for (const side of [-1, 1]) {
+    const ear = box(0.08, 0.34, PLAYER.w + 0.06, METAL);
+    ear.position.set(side * (PLAYER.w / 2 + 0.01), PLAYER.h - 0.13, 0);
+    g.add(ear);
+  }
+  g.visible = false;
+  return g;
+}
+
+/** Сбитый шлем: копия слетает с головы, кувыркаясь, и уходит под землю. */
+function dropHelmet(r: Remote): void {
+  r.helmet.updateWorldMatrix(true, true);
+  const flying = buildHelmet();
+  flying.visible = true;
+  r.helmet.getWorldPosition(flying.position);
+  flying.scale.copy(r.g.scale);
+  flying.rotation.y = r.yaw;
+  scene.add(flying);
+  const vel = new THREE.Vector3((Math.random() - 0.5) * 3, 4, (Math.random() - 0.5) * 3);
+  const born = performance.now();
+  const floorY = r.pos.y;
+  const tick = (): void => {
+    const age = (performance.now() - born) / 1000;
+    if (age > 3) { scene.remove(flying); return; }
+    if (age < 1.2) {
+      vel.y -= 14 * (1 / 60);
+      flying.position.addScaledVector(vel, 1 / 60);
+      flying.rotation.x += 0.2;
+      if (flying.position.y < floorY - PLAYER.h) { flying.position.y = floorY - PLAYER.h; vel.set(0, 0, 0); }
+    } else {
+      flying.position.y -= 0.02; // лежит и уходит под землю
+    }
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+
 function buildCrown(): THREE.Group {
   const GOLD = 0xffc928;
   const g = new THREE.Group();
@@ -566,6 +617,8 @@ interface Remote {
   faceLevel: number;
   /** Бронежилет: закрывает корпус, голова и ноги видны */
   armor: THREE.Mesh;
+  /** Шлем Джаггернаута */
+  helmet: THREE.Group;
   label: THREE.Sprite;
   /** Для звука шагов: пройденный путь с прошлого шага */
   stepAcc: number;
@@ -615,11 +668,13 @@ function buildPlayer(info: PlayerInfo): Remote {
   armor.position.y = 0.55 + 0.4; // от бёдер (0.55) до плеч (1.35)
   armor.visible = false;
   pose.add(armor);
+  const helmet = buildHelmet();
+  pose.add(helmet);
   scene.add(g);
   const gun = remoteGun('pistol');
   hand.add(gun.group);
   return {
-    info, g, pose, slide: false, poseK: 0, labelY: PLAYER.h + 0.35, crown, face, faceLevel: 0, armor, label, hand, gun, w: 'pistol',
+    info, g, pose, slide: false, poseK: 0, labelY: PLAYER.h + 0.35, crown, face, faceLevel: 0, armor, helmet, label, hand, gun, w: 'pistol',
     stepAcc: 0, lastPos: new THREE.Vector3(),
     pos: new THREE.Vector3(), target: new THREE.Vector3(),
     yaw: 0, targetYaw: 0, pitch: 0, flashUntil: 0,
@@ -913,6 +968,16 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
     case 'loadout': onLoadout(m); break;
     case 'ammopacks': onAmmoPacks(m); break;
     case 'weather': onWeather(m); break;
+    case 'helmet': {
+      // Попадание в шлем: стрелку — «звон» металла и маркер, всем — сообщение, когда шлем слетел
+      if (m.by === me.id) { showHit(false); beep(2400, 0.08, 0.1); beep(3100, 0.06, 0.06); }
+      if (m.id === me.id) beep(1800, 0.1, 0.12);
+      if (m.left === 0) {
+        const who = m.id === me.id ? 'С тебя' : `С ${roster.find((p) => p.id === m.id)?.name ?? 'Джаггернаута'}`;
+        feedNote(`🪖 ${who} сбит шлем`);
+      } else if (m.by === me.id) toast(`🪖 Шлем держит: ещё ${m.left} попад.`);
+      break;
+    }
     case 'promoted': {
       const r = RANKS[m.rank]!;
       toast(`🎖 Новое звание: ${r.name} (${r.abbr})`);
@@ -983,6 +1048,10 @@ function onPlayers(m: PlayersMsg): void {
     r.info = p;
     r.g.visible = p.alive;
     r.armor.visible = p.armor > 0;
+    // Шлем сбили — он слетает с головы
+    if (r.helmet.visible && p.helmet === 0 && p.alive) dropHelmet(r);
+    r.helmet.visible = p.helmet > 0;
+    r.crown.position.y = PLAYER.h + (p.helmet > 0 ? 0.14 : 0); // корона — поверх шлема
     r.g.scale.setScalar(p.big ? STREAK.bigScale : 1); // суперброня — в полтора раза больше
   }
   for (const [id, r] of remotes) {
@@ -1637,6 +1706,9 @@ function updateHud(): void {
   $<HTMLImageElement>('my-face').src = faceUrl[faceLevel(myKills)]!;
   $('armor').classList.toggle('hidden', !(me.alive && me.armor > 0));
   $('armor-val').textContent = String(me.armor);
+  const myHelmet = roster.find((p) => p.id === me.id)?.helmet ?? 0;
+  $('helmet').classList.toggle('hidden', !(me.alive && myHelmet > 0));
+  $('helmet-val').textContent = String(myHelmet);
   $('health').classList.toggle('low', me.hp <= 30);
   $('weapon-name').textContent = WEAPONS[me.weapon].name;
   const melee = !!WEAPONS[me.weapon].melee;
@@ -2136,7 +2208,7 @@ function onLoadout(m: LoadoutMsg): void {
   if (got('uav')) toast('🎁 БПЛА готов — нажми 5');
   if (got('missile')) toast('🎁 Ракета с неба готова — нажми 6');
   if (got('nuke')) toast('🎁 Бомба готова — нажми 8');
-  if (m.streak === STREAK.superArmor && streak < m.streak) toast('🛡 Суперброня: +500, ты стал больше');
+  if (m.streak === STREAK.superArmor && streak < m.streak) toast('🛡 Ты Джаггернаут: +500 брони, шлем держит 3 выстрела в голову');
   if (got('uav') || got('missile') || got('nuke')) beep(1200, 0.3, 0.12);
   hasKnife = m.knife;
   streak = m.streak;

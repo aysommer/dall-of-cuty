@@ -25,6 +25,8 @@ export interface PlayerInfo {
   big: boolean;
   /** Звание: номер в RANKS (по убийствам за всё время) */
   rank: number;
+  /** Шлем Джаггернаута: сколько попаданий в голову он ещё выдержит (0 — шлема нет) */
+  helmet: number;
 }
 
 /** [id, x, y, z, yaw, pitch, оружие, подкат 0/1] */
@@ -106,6 +108,8 @@ export type ServerMsg =
   | NukeMsg
   | AmmoPacksMsg
   | WeatherMsg
+  /** Попадание в шлем Джаггернаута: by — кто стрелял, left — сколько попаданий шлем ещё выдержит */
+  | { t: 'helmet'; id: number; by: number; left: number }
   | { t: 'promoted'; rank: number }
   | { t: 'ammo' }
   | { t: 'uav'; ms: number }
