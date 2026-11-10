@@ -96,6 +96,10 @@ function box(w: number, h: number, d: number, color: THREE.ColorRepresentation, 
 
 // ======================= карта =======================
 let currentMap: GameMap = MAPS.sands;
+/** Блоки, которые мешают движению и выстрелам: карта плюс целые стёкла и двери */
+let solids: Box[] = MAPS.sands.boxes;
+const brokenIds = new Set<number>();
+const breakMeshes = new Map<number, THREE.Mesh>();
 /** Невидимые стены по краю текущей карты */
 let clips: Box[] = clipWalls(MAPS.sands.half);
 /** Свет фонарей канализации — включается, когда камера под землёй */
@@ -241,7 +245,7 @@ function updateCrate(now: number): void {
   let lift = 0;
   if (crateState === 'falling') {
     const left = Math.max(0, Math.min(1, (crateLandAt - now) / CRATE.fallMs));
-    lift = CRATE.fallHeight * (1 - (1 - left) ** 2);
+    lift = currentMap.indoor ? 0 : CRATE.fallHeight * (1 - (1 - left) ** 2);
   }
   crateMesh.position.set(x, y + CRATE.height / 2 + lift, z);
   crateBeam.position.set(x, y + CRATE.height + 15, z);
@@ -255,6 +259,7 @@ function loadMap(id: MapId): void {
   loadedMap = id;
   currentMap = MAPS[id];
   clips = clipWalls(currentMap.half);
+  brokenIds.clear();
   mapGroup.traverse((o) => {
     if (o instanceof THREE.Mesh) {
       o.geometry.dispose();
@@ -295,6 +300,28 @@ function loadMap(id: MapId): void {
     mapGroup.add(m);
   }
   for (const l of currentMap.ladders) mapGroup.add(buildLadder(l));
+  breakMeshes.clear();
+  for (const x of currentMap.breakables ?? []) {
+    const { min, max } = x.box;
+    const w = max[0] - min[0], h = max[1] - min[1], d = max[2] - min[2];
+    const m = box(w, h, d, x.box.color);
+    if (x.kind === 'glass') {
+      const mat = m.material as THREE.MeshLambertMaterial;
+      mat.transparent = true;
+      mat.opacity = 0.45;
+    } else {
+      // Дверь: филёнки и ручка
+      const knob = box(0.08, 0.08, 0.08, 0xd4b04a);
+      knob.position.set(w > d ? w * 0.35 : 0, -0.1, w > d ? 0 : d * 0.35);
+      knob.scale.set(w > d ? 1 : 3.5, 1, w > d ? 3.5 : 1);
+      m.add(knob);
+    }
+    m.position.set(min[0] + w / 2, min[1] + h / 2, min[2] + d / 2);
+    m.visible = !brokenIds.has(x.id);
+    breakMeshes.set(x.id, m);
+    mapGroup.add(m);
+  }
+  rebuildSolids();
   for (const pad of currentMap.pads ?? []) {
     const cx = (pad.min[0] + pad.max[0]) / 2, cz = (pad.min[2] + pad.max[2]) / 2;
     const glow = box(pad.max[0] - pad.min[0] - 0.4, 0.04, pad.max[2] - pad.min[2] - 0.4, 0xffb3d9, false);
@@ -962,7 +989,7 @@ function updateRockets(now: number, dt: number): void {
     const p = r.mesh.position;
     const step = ROCKET.speed * dt;
     const d: Vec3 = [r.dir.x, r.dir.y, r.dir.z];
-    if (rayWorld(currentMap.boxes, [p.x, p.y, p.z], d, step) >= step) p.addScaledVector(r.dir, step);
+    if (rayWorld(solids, [p.x, p.y, p.z], d, step) >= step) p.addScaledVector(r.dir, step);
     if (now - r.born > ROCKET.lifeMs + 1000) removeRocket(id);
   }
 }
@@ -1017,6 +1044,7 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
     case 'loadout': onLoadout(m); break;
     case 'ammopacks': onAmmoPacks(m); break;
     case 'grenades': onGrenades(m); break;
+    case 'breaks': onBreaks(m.broken); break;
     case 'weather': onWeather(m); break;
     case 'helmet': {
       // Попадание в шлем: стрелку — «звон» металла и маркер, всем — сообщение, когда шлем слетел
@@ -1477,7 +1505,7 @@ function overlaps(p: THREE.Vector3, h: number, b: Box): boolean {
 }
 
 function hitBox(p: THREE.Vector3, h: number = low ? SLIDE.height : PLAYER.h): Box | null {
-  for (const b of currentMap.boxes) if (overlaps(p, h, b)) return b;
+  for (const b of solids) if (overlaps(p, h, b)) return b;
   // Невидимые стены по краю карты — только для движения игрока
   for (const b of clips) if (overlaps(p, h, b)) return b;
   // Лежащий ящик тоже твёрдый
@@ -1664,6 +1692,7 @@ function fire(now: number): void {
   _up.setFromMatrixColumn(camera.matrixWorld, 1);
 
   const hits: Record<number, [number, number]> = {};
+  const brk: Record<number, number> = {};
   const ends: Vec3[] = [];
   let anyHead = false;
   let anyHit = false;
@@ -1673,7 +1702,7 @@ function fire(now: number): void {
     const a = Math.random() * Math.PI * 2, rad = Math.sqrt(Math.random()) * spread;
     const d = _dir.clone().addScaledVector(_right, Math.cos(a) * rad).addScaledVector(_up, Math.sin(a) * rad).normalize();
     const dv: Vec3 = [d.x, d.y, d.z];
-    let t = rayWorld(currentMap.boxes, eye, dv);
+    let t = rayWorld(solids, eye, dv);
     let victim: number | null = null;
     let victimR: Remote | null = null;
     for (const [id, r] of remotes) {
@@ -1682,6 +1711,13 @@ function fire(now: number): void {
       const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, r.slide, scaleOfRemote(r));
       const tp = rayBox(eye, dv, min, max);
       if (tp < t) { t = tp; victim = id; victimR = r; }
+    }
+    if (victim === null) {
+      // Пуля упёрлась в целое стекло или дверь — засчитываем по ним
+      for (const x of currentMap.breakables ?? []) {
+        if (brokenIds.has(x.id)) continue;
+        if (Math.abs(rayBox(eye, dv, x.box.min, x.box.max) - t) < 1e-4) { brk[x.id] = (brk[x.id] ?? 0) + 1; break; }
+      }
     }
     if (victim !== null && victimR) {
       // Голова — верх стоящего прямоугольника; в подкате головы как зоны нет
@@ -1696,7 +1732,7 @@ function fire(now: number): void {
     // Свой трассер идёт по линии прицела, а не из ствола сбоку — так видно, куда летит пуля
     addTracer(new THREE.Vector3(eye[0] + dv[0] * 1.2, eye[1] + dv[1] * 1.2 - 0.04, eye[2] + dv[2] * 1.2), end);
   }
-  sendMsg({ t: 'shoot', w: me.weapon, ends, hits });
+  sendMsg({ t: 'shoot', w: me.weapon, ends, hits, brk });
   if (anyHit) { showHit(false); beep(anyHead ? 1900 : 1400, 0.05, 0.08); }
 
   shotSound(me.weapon);
@@ -1739,7 +1775,7 @@ function stab(now: number): void {
     const ang = Math.acos(Math.max(-1, Math.min(1, (to.x * _dir.x + to.z * _dir.z) / ((flat || 1) * (Math.hypot(_dir.x, _dir.z) || 1)))));
     if (ang > 0.6) continue;
     const toV: Vec3 = [to.x / to.length(), to.y / to.length(), to.z / to.length()];
-    if (rayWorld(currentMap.boxes, eye, toV, to.length()) < to.length() - 0.5) continue;
+    if (rayWorld(solids, eye, toV, to.length()) < to.length() - 0.5) continue;
     victim = id;
     best = dist;
   }
@@ -2173,7 +2209,7 @@ function onMedkits(m: MedkitsMsg): void {
 function updateMedkits(now: number): void {
   for (const fx of medkitFx.values()) {
     const left = Math.max(0, Math.min(1, (fx.landAt - now) / MEDKIT.fallMs));
-    const lift = MEDKIT.fallHeight * (1 - (1 - left) ** 2);
+    const lift = currentMap.indoor ? 0 : MEDKIT.fallHeight * (1 - (1 - left) ** 2);
     fx.g.position.set(fx.at[0], fx.at[1] + lift, fx.at[2]);
     fx.g.rotation.y = now / 700; // медленно вращается, чтобы бросалась в глаза
     // Последние 3 секунды перед исчезновением мигает
@@ -2439,7 +2475,7 @@ const FIRE_COLORS = [0xff2a12, 0xff6a14, 0xffa31a, 0xffd23a, 0xfff3c4, 0xffffff]
  * Взрыв как салют: искры разлетаются шаром, падают под тяжестью, мерцают и гаснут.
  * scale — размер: 1 для ракеты, больше — для ракеты с неба и бомбы.
  */
-function fireworks(x: number, y: number, z: number, scale = 1): void {
+function fireworks(x: number, y: number, z: number, scale = 1, colors: number[] = FIRE_COLORS): void {
   const n = Math.round(140 * scale);
   const pos = new Float32Array(n * 3);
   const col = new Float32Array(n * 3);
@@ -2453,7 +2489,7 @@ function fireworks(x: number, y: number, z: number, scale = 1): void {
     // Горячие (белые, жёлтые) искры летят быстрее, остывшие (оранжевые, красные) — медленнее
     const speed = (4 + heat * 9) * Math.sqrt(scale);
     vel.set([r * Math.cos(a) * speed, u * speed + 3, r * Math.sin(a) * speed], i * 3);
-    c.set(FIRE_COLORS[Math.min(FIRE_COLORS.length - 1, Math.floor(heat * FIRE_COLORS.length))]!);
+    c.set(colors[Math.min(colors.length - 1, Math.floor(heat * colors.length))]!);
     col.set([c.r, c.g, c.b], i * 3);
   }
   const geo = new THREE.BufferGeometry();
@@ -2583,6 +2619,39 @@ function updateGrenades(now: number): void {
   }
 }
 
+// ======================= стёкла и двери =======================
+let lastWeather: WeatherMsg | null = null;
+
+function rebuildSolids(): void {
+  const intact = (currentMap.breakables ?? []).filter((x) => !brokenIds.has(x.id)).map((x) => x.box);
+  solids = intact.length ? [...currentMap.boxes, ...intact] : currentMap.boxes;
+}
+
+/** Что-то разбили: исчезает, а на его месте разлетаются щепки (дверь) или осколки (стекло). */
+function onBreaks(broken: number[]): void {
+  const now = new Set(broken);
+  for (const x of currentMap.breakables ?? []) {
+    const was = brokenIds.has(x.id), is = now.has(x.id);
+    const mesh = breakMeshes.get(x.id);
+    if (mesh) mesh.visible = !is;
+    if (is && !was && joined) {
+      const { min, max } = x.box;
+      const c: Vec3 = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+      if (x.kind === 'glass') {
+        fireworks(c[0], c[1], c[2], 1.3, [0xbfe6ff, 0xe8f6ff, 0x9fd3ff, 0xffffff]);
+        shotSound('knife', 1);
+        beep(2600, 0.15, 0.08);
+      } else {
+        fireworks(c[0], c[1], c[2], 1, [0x5a3416, 0x7a4a22, 0x8f5a2c, 0xa8743a]);
+        shotSound('shotgun', 0.6);
+      }
+    }
+  }
+  brokenIds.clear();
+  for (const id of broken) brokenIds.add(id);
+  rebuildSolids();
+}
+
 // ======================= то, что уходит под землю =======================
 const sinking: Array<{ obj: THREE.Object3D; born: number; baseY: number }> = [];
 /** Секунду лежит, потом за секунду проваливается и исчезает — как тело. */
@@ -2641,6 +2710,8 @@ function applyFog(): void {
 }
 
 function onWeather(m: WeatherMsg): void {
+  lastWeather = m;
+  if (currentMap.indoor) m = { t: 'weather', kind: null, ms: 0 }; // под крышей дождя и снега нет
   if (m.kind === weatherKind) return;
   if (weatherFx) { scene.remove(weatherFx); weatherFx.geometry.dispose(); weatherFx = null; }
   const was = weatherKind;
@@ -2828,7 +2899,7 @@ function updateMissile(now: number, dt: number): void {
   const step = speed * dt;
   const from: Vec3 = [m.pos.x, m.pos.y, m.pos.z];
   const d: Vec3 = [dir.x, dir.y, dir.z];
-  let t = rayWorld(currentMap.boxes, from, d, step);
+  let t = rayWorld(solids, from, d, step);
   for (const r of remotes.values()) {
     if (!r.info.alive) continue;
     const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, r.slide, scaleOfRemote(r));
@@ -2955,7 +3026,7 @@ function gunnerFire(now: number): void {
   const d = _dir.clone().add(new THREE.Vector3((Math.random() - 0.5) * sp, (Math.random() - 0.5) * sp, (Math.random() - 0.5) * sp)).normalize();
   const eye: Vec3 = [camera.position.x, camera.position.y, camera.position.z];
   const dv: Vec3 = [d.x, d.y, d.z];
-  let t = rayWorld(currentMap.boxes, eye, dv, 200);
+  let t = rayWorld(solids, eye, dv, 200);
   let victim: number | null = null;
   for (const [id, r] of remotes) {
     if (!r.info.alive || (mode === 'tdm' && r.info.team === me.team)) continue;
@@ -3126,6 +3197,7 @@ function onNewMap(id: MapId): void {
   roundOver = false;
   $('vote').classList.add('hidden');
   loadMap(id);
+  if (lastWeather) onWeather(lastWeather);
   applyFog(); // туман и небо — под текущую погоду
   feedNote(`🗺 Новый матч: ${MAPS[id].name}`);
   // Мышь отпущена на время голосования — вернуть её можно кликом по «ИГРАТЬ»
@@ -3404,7 +3476,7 @@ window.game = {
     if (gunner) { gunner.yaw = yaw; gunner.pitch = pitch; }
   },
   faces: () => FACE_STEPS.map((_, l) => { faceTexture(l); return faceUrl[l]!; }),
-  dbg: () => ({ grenades: [...grenadeFx.values()].map((g) => g.mesh.position.toArray().map((v) => +v.toFixed(2))), myGrenades, cooking: cookStart > 0, scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
+  dbg: () => ({ broken: [...brokenIds], grenades: [...grenadeFx.values()].map((g) => g.mesh.position.toArray().map((v) => +v.toFixed(2))), myGrenades, cooking: cookStart > 0, scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
     kit: settings.kit, reserve: { ...me.reserve }, hotbar: hotbar().map((h) => `${h.key}:${h.label}`).join(' '),
     missile: missileCtl ? missileCtl.pos.toArray() : null, low, adsK, fov: camera.fov, crateState, crateAt, eyeH, recoil, corpses: corpses.length, sprays: sprays.length,
     steps: stepCount, medkits: medkitFx.size, boltUntil, menuClosed, armor: me.armor }),

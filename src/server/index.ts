@@ -7,7 +7,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import {
   AMMO_PACK, ARMOR, CRATE, DEFAULT_KIT, GRENADE, GUNSHIP, HEAD, MAPS, MAP_ORDER, MATCH, MEDKIT, PLAYER, ROCKET, SLIDE, STREAK, THROW, WEAPONS,
   WEATHER, bodyPoints, clipWalls, gunshipPos, isKit, stepGrenade, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
-  type LimitKind, type MapId, type StreakKind, type WeatherKind,
+  type Box, type LimitKind, type MapId, type StreakKind, type WeatherKind,
 } from '../shared/map.js';
 import { chooseSpawn } from './spawn.js';
 import { isStat, maxLevel, pointsLeft, type Profile } from '../shared/progress.js';
@@ -196,6 +196,7 @@ function spawn(p: Player): void {
 
 function resetRound(): void {
   roundOver = false;
+  resetBreakables();
   endGunship(null);
   for (const p of players.values()) {
     p.kills = 0;
@@ -439,6 +440,7 @@ function missileHit(p: Player, msg: Incoming): void {
 function detonateMissile(m: Missile, at: Vec3): void {
   missiles.delete(m.id);
   broadcast({ t: 'boom', id: -m.id, p: at });
+  blastBreakables(at, STREAK.missileRadius);
   const owner = players.get(m.owner);
   if (owner) blast(owner, at, STREAK.missileRadius, 'missile');
 }
@@ -449,7 +451,7 @@ function detonateMissile(m: Missile, at: Vec3): void {
  */
 function blast(owner: Player, at: Vec3, radius: number, w: KillWeapon, from: Vec3 = [at[0], at[1] + 0.3, at[2]]): void {
   if (roundOver) return;
-  const walls = MAPS[mapId].boxes;
+  const walls = worldBoxes();
   let killed = false;
   for (const v of players.values()) {
     if (!v.alive || (v !== owner && !isEnemy(owner, v))) continue;
@@ -503,7 +505,7 @@ function gunshipFire(p: Player, msg: Incoming): void {
   const ends = Array.isArray(msg.ends) ? msg.ends.slice(0, 1).filter(isVec3) : [];
   broadcast({ t: 'gsshot', id: g.id, ends }, p.id);
   if (typeof msg.hits !== 'object' || msg.hits === null) return;
-  const walls = MAPS[mapId].boxes;
+  const walls = worldBoxes();
   let budget = 1;
   for (const idStr of Object.keys(msg.hits)) {
     const v = players.get(Number(idStr));
@@ -590,9 +592,10 @@ function dropCookedGrenade(p: Player): void {
  */
 function explodeGrenade(ownerId: number, at: Vec3, id: number): void {
   broadcast({ t: 'boom', id: -5000 - id, p: at });
+  blastBreakables(at, GRENADE.maxR * 0.6);
   const owner = players.get(ownerId);
   if (!owner || roundOver) return;
-  const walls = MAPS[mapId].boxes;
+  const walls = worldBoxes();
   const from: Vec3 = [at[0], at[1] + 0.2, at[2]];
   for (const v of players.values()) {
     if (!v.alive || (v !== owner && !isEnemy(owner, v))) continue;
@@ -616,7 +619,7 @@ function stepGrenades(dt: number, now: number): void {
   }
   if (!grenades.length) return;
   // Отскакивает от всех блоков карты и от невидимых стен по краю
-  const solids = [...MAPS[mapId].boxes, ...clipWalls(MAPS[mapId].half)];
+  const solids = [...worldBoxes(), ...clipWalls(MAPS[mapId].half)];
   const left: Grenade[] = [];
   for (const g of grenades) {
     for (let i = 0; i < 5; i++) stepGrenade(solids, g, dt / 5);
@@ -647,7 +650,7 @@ function handleThrow(p: Player, msg: Incoming): void {
 
 function stepKnives(dt: number): void {
   if (!knives.length) return;
-  const walls = MAPS[mapId].boxes;
+  const walls = worldBoxes();
   const now = Date.now();
   const flying: Knife[] = [];
   for (const k of knives) {
@@ -728,6 +731,7 @@ function clearCrate(): void {
 
 function dropCrate(): void {
   const drops = MAPS[mapId].crateDrops;
+  if (!drops.length) return;
   crate.at = [...drops[Math.floor(Math.random() * drops.length)]!];
   crate.until = Date.now() + CRATE.fallMs;
   setCrate('falling');
@@ -808,18 +812,56 @@ function handleOpen(p: Player, on: boolean): void {
 
 /** Ящик-ловушка: убивает всех рядом, включая открывшего и его союзников. Стена закрывает. */
 function explodeCrate([cx, cy, cz]: Vec3): void {
-  const map = MAPS[mapId];
   const at: Vec3 = [cx, cy + CRATE.height + 0.2, cz];
   broadcast({ t: 'boom', id: 0, p: at });
+  blastBreakables(at, CRATE.trapRadius);
   for (const v of players.values()) {
     if (!v.alive) continue;
     const [min, max] = playerBox(v.pos, v.yaw, v.slide, scaleOf(v));
     const d = Math.hypot(...([0, 1, 2] as const).map((i) => Math.max(min[i] - at[i], 0, at[i] - max[i])));
     if (d > CRATE.trapRadius) continue;
-    const covered = bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(map.boxes, at, pt));
+    const covered = bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(worldBoxes(), at, pt));
     if (!covered) killPlayer(null, v, 'crate');
   }
   broadcastPlayers();
+}
+
+// ---------- стёкла и двери ----------
+// Целые разрушаемые блоки твёрдые: закрывают видимость, останавливают пули, ракеты и гранаты.
+const brokenIds = new Set<number>();
+const breakHp = new Map<number, number>();
+let solidCache: { map: MapId; broken: number; boxes: Box[] } | null = null;
+
+/** Неподвижная геометрия карты плюс ещё не разбитые стёкла и двери. */
+function worldBoxes(): Box[] {
+  if (solidCache && solidCache.map === mapId && solidCache.broken === brokenIds.size) return solidCache.boxes;
+  const map = MAPS[mapId];
+  const intact = (map.breakables ?? []).filter((x) => !brokenIds.has(x.id)).map((x) => x.box);
+  solidCache = { map: mapId, broken: brokenIds.size, boxes: [...map.boxes, ...intact] };
+  return solidCache.boxes;
+}
+function resetBreakables(): void {
+  brokenIds.clear();
+  breakHp.clear();
+  for (const x of MAPS[mapId].breakables ?? []) breakHp.set(x.id, x.hp);
+  solidCache = null;
+  broadcast({ t: 'breaks', broken: [] });
+}
+function damageBreakable(id: number, dmg: number): void {
+  if (brokenIds.has(id) || !breakHp.has(id)) return;
+  const hp = (breakHp.get(id) ?? 0) - dmg;
+  breakHp.set(id, hp);
+  if (hp > 0) return;
+  brokenIds.add(id);
+  broadcast({ t: 'breaks', broken: [...brokenIds] });
+}
+/** Взрыв рядом — стекло бьётся сразу, двери получают большой урон. */
+function blastBreakables(at: Vec3, radius: number): void {
+  for (const x of MAPS[mapId].breakables ?? []) {
+    const { min, max } = x.box;
+    const d = Math.hypot(...([0, 1, 2] as const).map((i) => Math.max(min[i] - at[i], 0, at[i] - max[i])));
+    if (d <= radius) damageBreakable(x.id, 200);
+  }
 }
 
 // ---------- погода ----------
@@ -948,9 +990,10 @@ function handleRocket(p: Player, msg: Incoming): void {
 
 function explode(r: Rocket, at: Vec3): void {
   broadcast({ t: 'boom', id: r.id, p: at });
+  blastBreakables(at, r.fromGunship ? GUNSHIP.rocketRadius : ROCKET.radius);
   const owner = players.get(r.owner);
   if (!owner || roundOver) return;
-  const walls = MAPS[mapId].boxes;
+  const walls = worldBoxes();
   // Точку взрыва чуть отодвигаем от поверхности, иначе она сама закроет обзор
   const from: Vec3 = [at[0] - r.dir[0] * 0.2, at[1] - r.dir[1] * 0.2, at[2] - r.dir[2] * 0.2];
   let killed = false;
@@ -973,7 +1016,7 @@ function explode(r: Rocket, at: Vec3): void {
 
 function stepRockets(dt: number): void {
   if (!rockets.length) return;
-  const walls = MAPS[mapId].boxes;
+  const walls = worldBoxes();
   const now = Date.now();
   const flying: Rocket[] = [];
   for (const r of rockets) {
@@ -1057,10 +1100,19 @@ function handleShoot(p: Player, msg: Incoming): void {
   const ends = Array.isArray(msg.ends) ? msg.ends.slice(0, w.pellets).filter(isVec3) : [];
   broadcast({ t: 'shot', id: p.id, w: weaponId, ends }, p.id);
 
+  // Пули по стёклам и дверям
+  if (!roundOver && typeof msg.brk === 'object' && msg.brk !== null) {
+    let left = w.pellets;
+    for (const [idStr, nRaw] of Object.entries(msg.brk)) {
+      const n = Math.min(left, Math.max(0, Math.floor(Number(nRaw)) || 0));
+      left -= n;
+      if (n > 0) damageBreakable(Number(idStr), w.dmg * n);
+    }
+  }
   if (roundOver || typeof msg.hits !== 'object' || msg.hits === null) return;
   let budget = w.pellets;
   const eye = eyeOf(p);
-  const walls = MAPS[mapId].boxes;
+  const walls = worldBoxes();
   const count = (v: unknown) => Math.max(0, Math.floor(Number(v)) || 0);
   for (const [idStr, raw] of Object.entries(msg.hits)) {
     const v = players.get(Number(idStr));
@@ -1119,6 +1171,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
     }
     startMatchClock();
     roundOver = false;
+    resetBreakables();
     clearTimeout(voteTimer);
     votes.clear();
     stopDrops();
@@ -1148,6 +1201,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
   send(ws, medkitsMsg());
   send(ws, packsMsg());
   send(ws, weatherMsg());
+  send(ws, { t: 'breaks', broken: [...brokenIds] });
   if (gunship) send(ws, gunshipMsg(gunship));
   broadcastPlayers();
   spawn(p);
