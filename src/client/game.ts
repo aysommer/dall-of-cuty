@@ -902,6 +902,8 @@ function removeRocket(id: number): void {
 
 function onBoom(m: BoomMsg): void {
   removeRocket(m.id);
+  // Салют: разноцветные искры во все стороны (у ракеты с неба — крупнее)
+  fireworks(m.p[0], m.p[1] + 0.3, m.p[2], m.id < 0 ? 1.4 : 1);
   // Ракета с неба (id < 0): после взрыва корпус сразу исчезает
   const missile = remoteMissiles.get(-m.id);
   if (m.id < 0 && missile) {
@@ -2340,6 +2342,72 @@ function updateAmmoPacks(now: number): void {
   for (const fx of packFx.values()) fx.g.rotation.y = now / 600;
 }
 
+// ======================= салют после взрывов =======================
+interface Burst { points: THREE.Points; vel: Float32Array; born: number; life: number }
+const bursts: Burst[] = [];
+const FIREWORK_COLORS = [0xff3b3b, 0xffd23f, 0x3bd16f, 0x3b9bff, 0xc04bff, 0xff8a1f, 0xffffff];
+
+/**
+ * Взрыв как салют: искры разлетаются шаром, падают под тяжестью, мерцают и гаснут.
+ * scale — размер: 1 для ракеты, больше — для ракеты с неба и бомбы.
+ */
+function fireworks(x: number, y: number, z: number, scale = 1): void {
+  const n = Math.round(140 * scale);
+  const pos = new Float32Array(n * 3);
+  const col = new Float32Array(n * 3);
+  const vel = new Float32Array(n * 3);
+  const c = new THREE.Color();
+  // Каждая вспышка — из двух-трёх цветов, как у настоящего салюта
+  const palette = [0, 1, 2].map(() => FIREWORK_COLORS[Math.floor(Math.random() * FIREWORK_COLORS.length)]!);
+  for (let i = 0; i < n; i++) {
+    pos.set([x, y, z], i * 3);
+    // Направление — равномерно по сфере, скорость — с разбросом, чтобы получился «шар» искр
+    const u = Math.random() * 2 - 1, a = Math.random() * Math.PI * 2, r = Math.sqrt(1 - u * u);
+    const speed = (6 + Math.random() * 7) * Math.sqrt(scale);
+    vel.set([r * Math.cos(a) * speed, u * speed + 3, r * Math.sin(a) * speed], i * 3);
+    c.set(palette[i % palette.length]!);
+    col.set([c.r, c.g, c.b], i * 3);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const mat = new THREE.PointsMaterial({
+    size: 0.22 * Math.sqrt(scale), vertexColors: true, transparent: true, opacity: 1,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  bursts.push({ points, vel, born: performance.now(), life: 1400 + 600 * (scale - 1) });
+}
+
+function updateFireworks(dt: number): void {
+  const now = performance.now();
+  for (let i = bursts.length - 1; i >= 0; i--) {
+    const bu = bursts[i]!;
+    const age = now - bu.born;
+    const mat = bu.points.material as THREE.PointsMaterial;
+    if (age > bu.life) {
+      scene.remove(bu.points);
+      bu.points.geometry.dispose();
+      mat.dispose();
+      bursts.splice(i, 1);
+      continue;
+    }
+    const pos = bu.points.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const arr = pos.array as Float32Array, v = bu.vel;
+    const drag = Math.exp(-1.6 * dt);
+    for (let k = 0; k < arr.length; k += 3) {
+      v[k]! *= drag; v[k + 2]! *= drag;
+      v[k + 1] = v[k + 1]! * drag - 9 * dt;           // искры тормозят и падают
+      arr[k] += v[k]! * dt; arr[k + 1] += v[k + 1]! * dt; arr[k + 2] += v[k + 2]! * dt;
+    }
+    pos.needsUpdate = true;
+    // Гаснут к концу и слегка мерцают
+    const t = age / bu.life;
+    mat.opacity = (1 - t * t) * (0.75 + 0.25 * Math.sin(age / 35));
+  }
+}
+
 // ======================= то, что уходит под землю =======================
 const sinking: Array<{ obj: THREE.Object3D; born: number; baseY: number }> = [];
 /** Секунду лежит, потом за секунду проваливается и исчезает — как тело. */
@@ -2663,6 +2731,9 @@ function updateNuke(now: number): void {
   flash.classList.add('fade');
   shotSound('boom', 1);
   setTimeout(() => shotSound('boom', 0.8), 120);
+  // Бомба — огромный салют над центром карты
+  fireworks(0, 6, 0, 3);
+  setTimeout(() => fireworks(0, 14, 0, 2.5), 250);
 }
 
 // ======================= время матча и голосование =======================
@@ -2878,6 +2949,7 @@ function frame(now: number): void {
   updateSteps(dt);
   updateKnives(dt);
   updateSinking(now);
+  updateFireworks(dt);
   updateAmmoPacks(now);
   updateUnderground();
   updateWeather(dt);
@@ -2905,7 +2977,7 @@ window.game = {
   me, remotes, keys,
   steer: (yaw: number, pitch: number) => { if (missileCtl) { missileCtl.yaw = yaw; missileCtl.pitch = pitch; } },
   faces: () => FACE_STEPS.map((_, l) => { faceTexture(l); return faceUrl[l]!; }),
-  dbg: () => ({ weather: weatherKind, fogFar: fog.far, underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
+  dbg: () => ({ bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
     kit: settings.kit, reserve: { ...me.reserve }, hotbar: hotbar().map((h) => `${h.key}:${h.label}`).join(' '),
     missile: missileCtl ? missileCtl.pos.toArray() : null, low, adsK, fov: camera.fov, crateState, crateAt, eyeH, recoil, corpses: corpses.length, sprays: sprays.length,
     steps: stepCount, medkits: medkitFx.size, boltUntil, menuClosed, armor: me.armor }),
