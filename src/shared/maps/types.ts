@@ -30,6 +30,8 @@ export interface GameMap {
   ladders: Ladder[];
   /** Куда может упасть ящик с ракетницей: центр по X/Z и высота пола под ним */
   crateDrops: Vec3[];
+  /** Куда могут падать аптечки (центр по X/Z и высота пола) */
+  medkitDrops: Vec3[];
   spawns: Record<Team | 'ffa', SpawnPoint[]>;
 }
 

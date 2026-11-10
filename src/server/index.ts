@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import {
-  CRATE, MAPS, PLAYER, ROCKET, SLIDE, WEAPONS, bodyPoints, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
+  ARMOR, CRATE, HEAD, MAPS, MEDKIT, PLAYER, ROCKET, SLIDE, WEAPONS, bodyPoints, isMapId, isWeapon, lineOfSight, playerBox, rayBox, rayWorld,
   type MapId,
 } from '../shared/map.js';
 import { chooseSpawn } from './spawn.js';
@@ -35,6 +35,7 @@ interface Player {
   /** Лежит ли в подкате (меняет хитбокс) */
   slide: boolean;
   hp: number;
+  armor: number;
   alive: boolean;
   kills: number;
   deaths: number;
@@ -132,7 +133,7 @@ function broadcastPlayers(): void {
     limit: LIMIT[mode],
     scores: teamScores(),
     list: [...players.values()].map((p) => ({
-      id: p.id, name: p.name, team: p.team, hp: p.hp, alive: p.alive, kills: p.kills, deaths: p.deaths,
+      id: p.id, name: p.name, team: p.team, hp: p.hp, armor: p.armor, alive: p.alive, kills: p.kills, deaths: p.deaths,
     })),
   });
 }
@@ -142,6 +143,7 @@ function spawn(p: Player): void {
   p.pos = [s[0], s[3] ?? 0, s[1]];
   p.yaw = s[2];
   p.hp = 100;
+  p.armor = 0;
   p.slide = false;
   p.alive = true;
   broadcast({ t: 'spawn', id: p.id, p: p.pos, yaw: p.yaw });
@@ -160,6 +162,7 @@ function resetRound(): void {
   // Новый раунд начинается без ящика; следующий упадёт по расписанию
   rockets = [];
   clearCrate();
+  clearMedkits();
   for (const p of players.values()) spawn(p);
   broadcast({ t: 'reset' });
   broadcastPlayers();
@@ -189,8 +192,9 @@ function isNum(v: unknown): v is number {
 }
 
 /** killer = null — игрока убил взорвавшийся ящик: убийство никому не засчитывается. */
-function killPlayer(killer: Player | null, v: Player, w: WeaponId | 'crate'): void {
+function killPlayer(killer: Player | null, v: Player, w: WeaponId | 'crate', head = false): void {
   v.hp = 0;
+  v.armor = 0;
   v.alive = false;
   v.deaths++;
   // Подорвавшемуся на своей ракете убийство не засчитывается
@@ -199,7 +203,7 @@ function killPlayer(killer: Player | null, v: Player, w: WeaponId | 'crate'): vo
     killer.profile.kills++;
     sendProfile(killer);
   }
-  broadcast({ t: 'kill', killer: killer?.id ?? null, victim: v.id, w });
+  broadcast({ t: 'kill', killer: killer?.id ?? null, victim: v.id, w, head });
   // Погибший теряет ракетницу и перестаёт открывать ящик
   setRockets(v, 0);
   if (crate.state === 'opening' && crate.by === v.id) cancelOpening();
@@ -274,12 +278,17 @@ function dropCrate(): void {
 
 /** Расписание сбросов: идёт, пока на сервере есть игроки. */
 function startDrops(): void {
+  clearInterval(medkitTimer);
+  medkitTimer = setInterval(dropMedkit, MEDKIT.everyMs);
   clearInterval(dropTimer);
   dropTimer = setInterval(() => {
     if (crate.state === 'gone' && !roundOver && Math.random() < CRATE.dropChance) dropCrate();
   }, CRATE.dropEveryMs);
 }
 function stopDrops(): void {
+  clearInterval(medkitTimer);
+  medkitTimer = undefined;
+  medkits = [];
   clearInterval(dropTimer);
   dropTimer = undefined;
   clearTimeout(crate.timer);
@@ -317,9 +326,14 @@ function handleOpen(p: Player, on: boolean): void {
     if (!opener || !opener.alive) { cancelOpening(); return; }
     const at = c;
     clearCrate();
-    // Сюрприз: иногда вместо ракетницы ящик взрывается
-    if (Math.random() < CRATE.trapChance) explodeCrate(at);
-    else setRockets(opener, ROCKETS_IN_CRATE);
+    // Что внутри: взрыв, ракетница или броня
+    const roll = Math.random();
+    if (roll < CRATE.trapChance) explodeCrate(at);
+    else if (roll < CRATE.trapChance + CRATE.rocketChance) setRockets(opener, ROCKETS_IN_CRATE);
+    else {
+      opener.armor = ARMOR.amount;
+      broadcastPlayers();
+    }
   }, CRATE.openMs);
 }
 
@@ -336,6 +350,43 @@ function explodeCrate([cx, cy, cz]: Vec3): void {
     const covered = bodyPoints(v.pos, v.slide).every((pt) => !lineOfSight(map.boxes, at, pt));
     if (!covered) killPlayer(null, v, 'crate');
   }
+  broadcastPlayers();
+}
+
+// ---------- аптечки ----------
+// Каждые MEDKIT.everyMs аптечка падает с неба в свободную точку карты (не больше MEDKIT.max сразу).
+// Подобрать — подойти вплотную, если здоровье не полное.
+interface Medkit { id: number; at: Vec3; landAt: number }
+let medkits: Medkit[] = [];
+let nextMedkitId = 1;
+let medkitTimer: NodeJS.Timeout | undefined;
+
+function medkitsMsg(): ServerMsg {
+  const now = Date.now();
+  return { t: 'medkits', list: medkits.map((m) => ({ id: m.id, at: m.at, ms: Math.max(0, m.landAt - now) })) };
+}
+function dropMedkit(): void {
+  if (roundOver || medkits.length >= MEDKIT.max) return;
+  const taken = (pt: Vec3) => medkits.some((m) => m.at[0] === pt[0] && m.at[2] === pt[2]);
+  const free = MAPS[mapId].medkitDrops.filter((pt) => !taken(pt));
+  if (!free.length) return;
+  const at = free[Math.floor(Math.random() * free.length)]!;
+  medkits.push({ id: nextMedkitId++, at: [...at], landAt: Date.now() + MEDKIT.fallMs });
+  broadcast(medkitsMsg());
+}
+function clearMedkits(): void {
+  medkits = [];
+  broadcast(medkitsMsg());
+}
+function pickMedkit(p: Player): void {
+  if (!p.alive || p.hp >= 100 || !medkits.length) return;
+  const now = Date.now();
+  const i = medkits.findIndex((m) => now >= m.landAt &&
+    Math.hypot(p.pos[0] - m.at[0], p.pos[2] - m.at[2]) <= MEDKIT.reach && Math.abs(p.pos[1] - m.at[1]) <= 1.2);
+  if (i < 0) return;
+  medkits.splice(i, 1);
+  p.hp = Math.min(100, p.hp + MEDKIT.heal);
+  broadcast(medkitsMsg());
   broadcastPlayers();
 }
 
@@ -433,6 +484,14 @@ function handleSpray(p: Player, msg: Incoming): void {
   broadcast({ t: 'spray', by: p.id, p: msg.p, n: [nx as number, nz as number], e: msg.e as number });
 }
 
+/** Урон сначала снимает броню, потом здоровье. */
+function hurt(attacker: Player, v: Player, dmg: number, w: WeaponId, head: boolean): void {
+  const absorbed = Math.min(v.armor, dmg);
+  v.armor = Math.round(v.armor - absorbed);
+  v.hp = Math.max(0, Math.round(v.hp - (dmg - absorbed)));
+  if (v.hp <= 0) killPlayer(attacker, v, w, head);
+}
+
 function handleShoot(p: Player, msg: Incoming): void {
   if (!isWeapon(msg.w) || msg.w === 'rocket' || !p.alive) return;
   const weaponId = msg.w;
@@ -447,25 +506,35 @@ function handleShoot(p: Player, msg: Incoming): void {
   if (roundOver || typeof msg.hits !== 'object' || msg.hits === null) return;
   let budget = w.pellets;
   const eye = eyeOf(p);
-  for (const [idStr, nRaw] of Object.entries(msg.hits)) {
+  const walls = MAPS[mapId].boxes;
+  const count = (v: unknown) => Math.max(0, Math.floor(Number(v)) || 0);
+  for (const [idStr, raw] of Object.entries(msg.hits)) {
     const v = players.get(Number(idStr));
-    const n = Math.min(budget, Math.floor(Number(nRaw)) || 0);
-    if (!v || n <= 0 || !v.alive || v.id === p.id) continue;
+    if (!v || !v.alive || v.id === p.id) continue;
     if (mode === 'tdm' && v.team === p.team) continue;
     // Нож бьёт только вплотную (с запасом на задержку сети)
     if (w.melee && distToPlayer(v, eye) > w.melee + 0.75) continue;
     // Проверка, что между стрелком и целью нет стены
-    const walls = MAPS[mapId].boxes;
     if (bodyPoints(v.pos, v.slide).every((pt) => !lineOfSight(walls, eye, pt))) continue;
-    budget -= n;
 
+    const [rawBody, rawHead] = Array.isArray(raw) ? raw : [raw, 0];
+    let head = Math.min(count(rawHead), budget);
+    budget -= head;
+    let body = Math.min(count(rawBody), budget);
+    budget -= body;
+    if (head + body === 0) continue;
+    // Голову засчитываем, только если её видно и игрок стоит (в подкате головы как зоны нет)
+    const headPt: Vec3 = [v.pos[0], v.pos[1] + PLAYER.h - 0.1, v.pos[2]];
+    if (head && (v.slide || !lineOfSight(walls, eye, headPt))) { body += head; head = 0; }
+
+    if (w.melee) { killPlayer(p, v, weaponId); continue; }
+    if (head && w.headKill) { killPlayer(p, v, weaponId, true); continue; }
     let dmg = w.dmg;
     if (weaponId === 'shotgun') {
       const dist = Math.hypot(v.pos[0] - p.pos[0], v.pos[2] - p.pos[2]);
       dmg *= Math.max(0.3, Math.min(1, 1 - (dist - 8) / 30));
     }
-    v.hp = Math.max(0, Math.round(v.hp - dmg * n));
-    if (v.hp <= 0) killPlayer(p, v, weaponId);
+    hurt(p, v, dmg * body + dmg * HEAD.mul * head, weaponId, head > 0);
   }
   broadcastPlayers();
   checkWin();
@@ -493,7 +562,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
   const p: Player = {
     id: nextId++, ws, name, team,
     pos: [0, 0, 0], yaw: 0, pitch: 0, w: 'pistol', slide: false,
-    hp: 100, alive: false, kills: 0, deaths: 0, lastShot: 0, lastSpray: 0,
+    hp: 100, armor: 0, alive: false, kills: 0, deaths: 0, lastShot: 0, lastSpray: 0,
     profile: decodeProfile(msg.token),
     rockets: 0,
   };
@@ -501,6 +570,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
   send(ws, { t: 'welcome', id: p.id, mode, map: mapId });
   sendProfile(p);
   send(ws, crateMsg());
+  send(ws, medkitsMsg());
   broadcastPlayers();
   spawn(p);
   broadcastPlayers();
@@ -532,6 +602,7 @@ wss.on('connection', (ws) => {
     if (msg.t === 'state') {
       if (me.alive && isVec3(msg.p)) me.pos = msg.p;
       me.slide = me.alive && msg.sl === true;
+      pickMedkit(me);
       // Во время открытия ящика двигаться нельзя: сдвинулся — открытие сорвано
       if (crate.state === 'opening' && crate.by === me.id &&
           Math.hypot(me.pos[0] - crate.start[0], me.pos[1] - crate.start[1], me.pos[2] - crate.start[2]) > 0.5) {

@@ -21,8 +21,10 @@ export interface Weapon {
   auto: boolean;
   /** Угол обзора камеры при прицеливании; null — прицелиться нельзя */
   zoom: number | null;
-  /** Ближний бой: дальность удара в метрах */
+  /** Ближний бой: дальность удара в метрах, удар убивает сразу */
   melee?: number;
+  /** Попадание в голову убивает сразу, даже сквозь броню */
+  headKill?: boolean;
 }
 
 export const PLAYER = { w: 0.8, h: 1.8, eye: 1.6 };
@@ -30,11 +32,26 @@ export const PLAYER = { w: 0.8, h: 1.8, eye: 1.6 };
 /** Стрельба от бедра в два раза менее точная, чем прицельная. */
 export const HIP_SPREAD = 2;
 
+/**
+ * Распределение урона: голова — верхняя часть стоящего прямоугольника (от HEAD.from метров над ногами).
+ * В голову урон умножается на HEAD.mul; у снайперки попадание в голову убивает сразу.
+ */
+export const HEAD = { from: 1.45, mul: 1.5 };
+
+/** Броня из ящика: ещё 100 единиц «здоровья», которые тратятся первыми. */
+export const ARMOR = { amount: 100 };
+
+/** Аптечки: падают с неба каждые everyMs, лечат на heal (не выше 100). */
+export const MEDKIT = {
+  everyMs: 60_000, fallMs: 2500, fallHeight: 40, heal: 50, max: 3,
+  size: 0.6, height: 0.35, reach: 1.1,
+};
+
 export const WEAPONS: Record<WeaponId, Weapon> = {
   pistol:  { name: 'Пистолет', dmg: 25, pellets: 1, rate: 280, mag: 12, reload: 1200, spread: 0.006, auto: false, zoom: 60 },
   shotgun: { name: 'Дробовик', dmg: 13, pellets: 8, rate: 900, mag: 6, reload: 2200, spread: 0.045, auto: false, zoom: 62 },
   rifle:   { name: 'Автомат', dmg: 21, pellets: 1, rate: 110, mag: 30, reload: 2000, spread: 0.009, auto: true, zoom: 55 },
-  sniper:  { name: 'Снайперка', dmg: 100, pellets: 1, rate: 1300, mag: 5, reload: 2800, spread: 0.0015, auto: false, zoom: 20 },
+  sniper:  { name: 'Снайперка', dmg: 80, pellets: 1, rate: 1300, mag: 5, reload: 2800, spread: 0.0015, auto: false, zoom: 20, headKill: true },
   knife:   { name: 'Нож', dmg: 100, pellets: 1, rate: 650, mag: 0, reload: 0, spread: 0, auto: false, zoom: null, melee: 2 },
   // Ракетница достаётся только из ящика: 6 ракет, без перезарядки
   rocket:  { name: 'Ракетница', dmg: 999, pellets: 1, rate: 900, mag: 6, reload: 0, spread: 0, auto: false, zoom: 60 },
@@ -47,7 +64,8 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
 export const CRATE = {
   size: 1.2, height: 0.9, reach: 2.4, openMs: 1000,
   dropEveryMs: 60_000, dropChance: 0.5, fallMs: 4000, fallHeight: 40, lifeMs: 120_000,
-  trapChance: 0.1, trapRadius: 5,
+  // Что внутри: 10% — взрыв, 40% — ракетница, остальные 50% — броня
+  trapChance: 0.1, rocketChance: 0.4, trapRadius: 5,
 };
 export const ROCKET = { speed: 35, radius: 4, lifeMs: 4000 };
 export const WEAPON_ORDER: WeaponId[] = ['pistol', 'shotgun', 'rifle', 'sniper', 'knife'];

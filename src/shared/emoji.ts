@@ -13,4 +13,4 @@ export const EMOJIS: string[] = [
 ];
 
 /** Рисунок на стене: дальность, сколько живёт и как часто можно рисовать. */
-export const SPRAY = { reach: 10, size: 1, lifeMs: 10_000, cooldownMs: 60_000 };
+export const SPRAY = { reach: 10, size: 1, lifeMs: 60_000, cooldownMs: 60_000 };
