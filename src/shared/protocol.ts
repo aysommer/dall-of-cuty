@@ -6,7 +6,9 @@ import type { LimitKind, StreakKind, WeatherKind } from './map.js';
 
 export type Team = 'green' | 'red';
 export type Mode = 'tdm' | 'ffa';
-export type WeaponId = 'pistol' | 'shotgun' | 'rifle' | 'lmg' | 'sniper' | 'knife' | 'rocket';
+export type WeaponId = 'pistol' | 'shotgun' | 'rifle' | 'lmg' | 'sniper' | 'knife' | 'grenade' | 'rocket';
+/** Что в слоте 1 вместо огнестрела: нож или граната */
+export type MeleeKind = 'knife' | 'grenade';
 /** falling — летит с неба, idle — лежит, opening — его открывают, gone — ящика нет */
 export type CrateState = 'falling' | 'idle' | 'opening' | 'gone';
 export type Vec3 = [number, number, number];
@@ -70,7 +72,9 @@ export type OverMsg = { t: 'over'; winner: Winner; pause: number };
 /** Голосование за карту после матча: голоса по картам и сколько осталось. */
 export type VoteMsg = { t: 'vote'; counts: Record<MapId, number>; ms: number; mine: MapId | null };
 /** Своё снаряжение: есть ли нож, текущая серия и запас наград. */
-export type LoadoutMsg = { t: 'loadout'; knife: boolean; streak: number; uav: number; missile: number; nuke: number; gunship: number };
+export type LoadoutMsg = {
+  t: 'loadout'; knife: boolean; grenades: number; streak: number; uav: number; missile: number; nuke: number; gunship: number;
+};
 /** Брошенный нож летит (o — откуда, d — направление) и где он остановился. */
 export type ThrowMsg = { t: 'throw'; id: number; by: number; o: Vec3; d: Vec3 };
 export type ThrowEndMsg = { t: 'thrown'; id: number; p: Vec3; hit: boolean };
@@ -86,6 +90,8 @@ export type GunshipMsg = { t: 'gunship'; id: number; by: number; phase: number; 
 export type GunshipEndMsg = { t: 'gunship-end'; id: number; by: number | null; p: Vec3 };
 /** Очередь пулемёта самолёта — для трассеров у остальных */
 export type GunshipShotMsg = { t: 'gsshot'; id: number; ends: Vec3[] };
+/** Гранаты в полёте и на земле: [id, x, y, z, мс до взрыва] */
+export type GrenadesMsg = { t: 'grenades'; list: Array<[number, number, number, number, number]> };
 /** Патроны, выпавшие из погибших */
 /** Погода: дождь или снег на ms миллисекунд; kind = null — ясно. */
 export type WeatherMsg = { t: 'weather'; kind: WeatherKind | null; ms: number };
@@ -115,6 +121,7 @@ export type ServerMsg =
   | GunshipMsg
   | GunshipEndMsg
   | GunshipShotMsg
+  | GrenadesMsg
   | { t: 'gunship-hit'; id: number; left: number }
   | AmmoPacksMsg
   | WeatherMsg
@@ -133,7 +140,7 @@ export type ServerMsg =
 export type ClientMsg =
   | {
     t: 'join'; name: string; team: Team; mode: Mode; map: MapId;
-    limitKind: LimitKind; limitValue: number; kit: WeaponId[]; token?: string;
+    limitKind: LimitKind; limitValue: number; kit: WeaponId[]; melee: MeleeKind; token?: string;
   }
   | { t: 'vote'; map: MapId }
   | { t: 'kit'; guns: WeaponId[] }
@@ -143,6 +150,10 @@ export type ClientMsg =
   | { t: 'mhit'; id: number; p: Vec3 }
   | { t: 'gsfire'; ends: Vec3[]; hits: Record<number, number> }
   | { t: 'gsrocket'; d: Vec3 }
+  /** Сорвать чеку, бросить гранату, сменить нож на гранату (со следующей жизни) */
+  | { t: 'pin' }
+  | { t: 'gthrow'; d: Vec3 }
+  | { t: 'melee'; kind: MeleeKind }
   | { t: 'upgrade'; stat: Stat }
   | { t: 'open'; on: boolean }
   | { t: 'rocket'; d: Vec3 }

@@ -28,6 +28,7 @@
       <div id="crate-bar"><div id="crate-fill"></div></div>
     </div>
     <div id="toast" class="hidden"></div>
+    <div id="cook" class="hidden"></div>
     <div id="streak" title="Убийств подряд без смерти"><span class="label">🔥 Серия</span> <b id="streak-count">0</b> <small id="streak-next"></small></div>
     <div id="hotbar"></div>
     <canvas id="minimap" class="hidden" width="180" height="180"></canvas>
@@ -65,6 +66,11 @@
       <h3>Оружие</h3>
       <small>Выбери до двух стволов — нож всегда с тобой. Клавиши: 1 — нож, 2 и 3 — стволы.</small>
       <div class="choice kit"></div>
+      <small>Слот 1: нож или граната (одна на жизнь; зажми ЛКМ — сорвёшь чеку, отпусти — бросишь, через 3 с взрыв). Выбор — со следующей жизни.</small>
+      <div class="choice melee">
+        <button type="button" data-melee="knife">🔪 Нож</button>
+        <button type="button" data-melee="grenade">💣 Граната</button>
+      </div>
 
       <h3>Настройки</h3>
       <div class="settings"></div>

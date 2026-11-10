@@ -145,6 +145,8 @@ details.field .settings { margin-top: 10px; }
   background: rgba(0, 0, 0, 0.55); padding: 6px 14px; font-size: 15px; white-space: nowrap;
 }
 #toast { top: 70%; }
+#cook { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); background: rgba(160, 0, 0, 0.7); padding: 6px 14px; font-weight: 700; white-space: nowrap; }
+.choice.melee { margin: 6px 0 4px; }
 #armor { margin-left: 14px; color: #c9d48a; }
 #helmet { margin-left: 10px; color: #b8c2cc; }
 /* Своё пиксельное лицо рядом с HP */
