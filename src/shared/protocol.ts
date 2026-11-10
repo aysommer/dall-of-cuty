@@ -41,7 +41,7 @@ export interface Winner {
 }
 
 /** Чем убили: оружие, ящик-ловушка, метательный нож, ракета с неба или бомба. */
-export type KillWeapon = WeaponId | 'crate' | 'throw' | 'missile' | 'nuke';
+export type KillWeapon = WeaponId | 'crate' | 'throw' | 'missile' | 'nuke' | 'gunship';
 
 export type InfoMsg = {
   t: 'info'; mode: Mode; map: MapId; limitKind: LimitKind; limitValue: number;
@@ -70,7 +70,7 @@ export type OverMsg = { t: 'over'; winner: Winner; pause: number };
 /** Голосование за карту после матча: голоса по картам и сколько осталось. */
 export type VoteMsg = { t: 'vote'; counts: Record<MapId, number>; ms: number; mine: MapId | null };
 /** Своё снаряжение: есть ли нож, текущая серия и запас наград. */
-export type LoadoutMsg = { t: 'loadout'; knife: boolean; streak: number; uav: number; missile: number; nuke: number };
+export type LoadoutMsg = { t: 'loadout'; knife: boolean; streak: number; uav: number; missile: number; nuke: number; gunship: number };
 /** Брошенный нож летит (o — откуда, d — направление) и где он остановился. */
 export type ThrowMsg = { t: 'throw'; id: number; by: number; o: Vec3; d: Vec3 };
 export type ThrowEndMsg = { t: 'thrown'; id: number; p: Vec3; hit: boolean };
@@ -80,6 +80,12 @@ export type PingMsg = { t: 'ping'; list: Array<[number, number, number]> };
 export type MissileMsg = { t: 'missile'; id: number; by: number; p: Vec3 };
 /** Бомба: через ms упадёт и убьёт всех */
 export type NukeMsg = { t: 'nuke'; by: number; ms: number };
+/** Самолёт в воздухе: phase — начальный угол на круге, ms — сколько ещё летать (траектория — gunshipPos) */
+export type GunshipMsg = { t: 'gunship'; id: number; by: number; phase: number; ms: number; elapsed: number };
+/** Самолёт сбит (by — кто сбил) или улетел (by = null) */
+export type GunshipEndMsg = { t: 'gunship-end'; id: number; by: number | null; p: Vec3 };
+/** Очередь пулемёта самолёта — для трассеров у остальных */
+export type GunshipShotMsg = { t: 'gsshot'; id: number; ends: Vec3[] };
 /** Патроны, выпавшие из погибших */
 /** Погода: дождь или снег на ms миллисекунд; kind = null — ясно. */
 export type WeatherMsg = { t: 'weather'; kind: WeatherKind | null; ms: number };
@@ -106,6 +112,10 @@ export type ServerMsg =
   | PingMsg
   | MissileMsg
   | NukeMsg
+  | GunshipMsg
+  | GunshipEndMsg
+  | GunshipShotMsg
+  | { t: 'gunship-hit'; id: number; left: number }
   | AmmoPacksMsg
   | WeatherMsg
   /** Попадание в шлем Джаггернаута: by — кто стрелял, left — сколько попаданий шлем ещё выдержит */
@@ -131,6 +141,8 @@ export type ClientMsg =
   | { t: 'use'; kind: StreakKind }
   | { t: 'mpos'; id: number; p: Vec3 }
   | { t: 'mhit'; id: number; p: Vec3 }
+  | { t: 'gsfire'; ends: Vec3[]; hits: Record<number, number> }
+  | { t: 'gsrocket'; d: Vec3 }
   | { t: 'upgrade'; stat: Stat }
   | { t: 'open'; on: boolean }
   | { t: 'rocket'; d: Vec3 }

@@ -104,7 +104,26 @@ export const STREAK = {
   helmetHits: 3,
   nukeMs: 4000,
 };
-export type StreakKind = 'uav' | 'missile' | 'nuke';
+export type StreakKind = 'uav' | 'missile' | 'nuke' | 'gunship';
+
+/**
+ * Самолёт (серия 10): 15 секунд кружит высоко над картой сам, игрок только стреляет —
+ * пулемёт (перегрев за 5 с непрерывной стрельбы, остывание 1 с) и ракеты (раз в 3 с).
+ * Сбить можно двумя попаданиями из ракетницы.
+ */
+export const GUNSHIP = {
+  streak: 10, ms: 15_000, height: 40, orbitShare: 0.65,
+  gunDmg: 28, gunRateMs: 80, heatMs: 5000, coolMs: 1000, spread: 0.012,
+  rocketCdMs: 3000, rocketRadius: 5,
+  hitsToDown: 2, half: [3.6, 1.1, 3.6] as const,
+};
+
+/** Где самолёт через elapsed секунд полёта: круг радиуса R вокруг центра карты, один оборот за полёт. */
+export function gunshipPos(half: { x: number; z: number }, phase: number, elapsed: number): Vec3 {
+  const r = Math.min(half.x, half.z) * GUNSHIP.orbitShare;
+  const a = phase + (elapsed / (GUNSHIP.ms / 1000)) * Math.PI * 2;
+  return [Math.cos(a) * r, GUNSHIP.height, Math.sin(a) * r];
+}
 export const WEAPON_ORDER: WeaponId[] = ['pistol', 'shotgun', 'rifle', 'lmg', 'sniper', 'knife'];
 
 /** Огнестрел, из которого собирают набор: не больше двух стволов, нож есть всегда. */

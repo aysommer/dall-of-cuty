@@ -216,6 +216,25 @@ details.field .settings { margin-top: 10px; }
   font: 700 15px ui-monospace, monospace; letter-spacing: 1px;
 }
 
+/* ---------- самолёт: вид стрелка и маркеры врагов ---------- */
+#markers { position: absolute; inset: 0; overflow: hidden; }
+.marker {
+  position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; transform: rotate(45deg);
+  border: 2px solid #ff3b3b; background: rgba(255, 59, 59, 0.25); box-shadow: 0 0 6px #ff3b3b;
+}
+#gunship-view { position: absolute; inset: 0; }
+#gunship-view .reticle {
+  position: absolute; left: 50%; top: 50%; width: 70px; height: 70px; margin: -35px 0 0 -35px;
+  border: 2px solid rgba(255, 255, 255, 0.85); border-radius: 50%;
+}
+#gs-info {
+  position: absolute; left: 50%; top: calc(50% + 60px); transform: translateX(-50%);
+  font: 700 14px ui-monospace, monospace; white-space: nowrap; text-shadow: 0 1px 2px #000;
+}
+#gs-heatbar { position: absolute; left: 50%; top: calc(50% + 84px); width: 220px; height: 8px; margin-left: -110px; background: rgba(255, 255, 255, 0.2); }
+#gs-heat { height: 100%; width: 0; background: #ffb347; }
+#gs-heat.over { background: #ff3b3b; }
+
 /* ---------- бомба: вспышка на весь экран ---------- */
 #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 20; }
 #flash.on { opacity: 1; }
