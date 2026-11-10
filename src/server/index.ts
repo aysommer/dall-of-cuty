@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { WEAPONS, PLAYER, SPAWNS, lineOfSight, isWeapon, type SpawnPoint } from '../shared/map.js';
+import { MAPS, WEAPONS, PLAYER, isMapId, isWeapon, lineOfSight, type MapId, type SpawnPoint } from '../shared/map.js';
 import { isStat, maxLevel, pointsLeft, type Profile } from '../shared/progress.js';
 import { decodeProfile, encodeProfile } from './progress.js';
 import type { InfoMsg, Mode, ServerMsg, SnapRow, Team, Vec3, WeaponId, Winner } from '../shared/protocol.js';
@@ -81,6 +81,7 @@ const wss = new WebSocketServer({ server, maxPayload: 16 * 1024 });
 const players = new Map<number, Player>();
 let nextId = 1;
 let mode: Mode = 'tdm';
+let mapId: MapId = 'sands';
 let roundOver = false;
 let roundTimer: NodeJS.Timeout | undefined;
 
@@ -102,7 +103,7 @@ function teamCount(team: Team): number {
   return n;
 }
 function lobbyInfo(): InfoMsg {
-  return { t: 'info', mode, count: players.size, green: teamCount('green'), red: teamCount('red'), max: MAX_PLAYERS };
+  return { t: 'info', mode, map: mapId, count: players.size, green: teamCount('green'), red: teamCount('red'), max: MAX_PLAYERS };
 }
 function broadcastInfo(): void {
   const data = JSON.stringify(lobbyInfo());
@@ -126,7 +127,8 @@ function broadcastPlayers(): void {
 }
 
 function pickSpawn(p: Player): SpawnPoint {
-  const list = mode === 'tdm' ? SPAWNS[p.team] : SPAWNS.ffa;
+  const spawns = MAPS[mapId].spawns;
+  const list = mode === 'tdm' ? spawns[p.team] : spawns.ffa;
   // Выбираем точку, максимально удалённую от остальных живых игроков
   let best = list[0]!;
   let bestDist = -1;
@@ -144,7 +146,7 @@ function pickSpawn(p: Player): SpawnPoint {
 
 function spawn(p: Player): void {
   const s = pickSpawn(p);
-  p.pos = [s[0], 0, s[1]];
+  p.pos = [s[0], s[3] ?? 0, s[1]];
   p.yaw = s[2];
   p.hp = 100;
   p.alive = true;
@@ -211,7 +213,8 @@ function handleShoot(p: Player, msg: Incoming): void {
     const chest: Vec3 = [v.pos[0], v.pos[1] + PLAYER.h / 2, v.pos[2]];
     const head: Vec3 = [v.pos[0], v.pos[1] + PLAYER.h - 0.1, v.pos[2]];
     const feet: Vec3 = [v.pos[0], v.pos[1] + 0.2, v.pos[2]];
-    if (!lineOfSight(eye, chest) && !lineOfSight(eye, head) && !lineOfSight(eye, feet)) continue;
+    const walls = MAPS[mapId].boxes;
+    if (!lineOfSight(walls, eye, chest) && !lineOfSight(walls, eye, head) && !lineOfSight(walls, eye, feet)) continue;
     budget -= n;
 
     let dmg = w.dmg;
@@ -246,6 +249,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
   }
   if (players.size === 0) {
     mode = msg.mode === 'ffa' ? 'ffa' : 'tdm';
+    mapId = isMapId(msg.map) ? msg.map : 'sands';
     roundOver = false;
     clearTimeout(roundTimer);
   }
@@ -261,7 +265,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
     profile: decodeProfile(msg.token),
   };
   players.set(p.id, p);
-  send(ws, { t: 'welcome', id: p.id, mode });
+  send(ws, { t: 'welcome', id: p.id, mode, map: mapId });
   sendProfile(p);
   broadcastPlayers();
   spawn(p);
@@ -271,7 +275,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
     if (o.id !== p.id) send(ws, { t: 'spawn', id: o.id, p: o.pos, yaw: o.yaw });
   }
   broadcastInfo();
-  console.log(`+ ${p.name} (${team}), игроков: ${players.size}, режим: ${mode}`);
+  console.log(`+ ${p.name} (${team}), игроков: ${players.size}, режим: ${mode}, карта: ${mapId}`);
   return p;
 }
 

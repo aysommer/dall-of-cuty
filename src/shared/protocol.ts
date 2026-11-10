@@ -1,6 +1,7 @@
 // Типы сетевого протокола — общие для клиента и сервера.
 
 import type { Levels, Stat } from './progress.js';
+import type { MapId } from './maps/types.js';
 
 export type Team = 'green' | 'red';
 export type Mode = 'tdm' | 'ffa';
@@ -26,7 +27,7 @@ export interface Winner {
   name?: string;
 }
 
-export type InfoMsg = { t: 'info'; mode: Mode; count: number; green: number; red: number; max: number };
+export type InfoMsg = { t: 'info'; mode: Mode; map: MapId; count: number; green: number; red: number; max: number };
 export type PlayersMsg = { t: 'players'; mode: Mode; limit: number; scores: Record<Team, number>; list: PlayerInfo[] };
 export type SpawnMsg = { t: 'spawn'; id: number; p: Vec3; yaw: number };
 export type SnapMsg = { t: 'snap'; ps: SnapRow[] };
@@ -45,11 +46,11 @@ export type ServerMsg =
   | OverMsg
   | ProfileMsg
   | { t: 'error'; text: string }
-  | { t: 'welcome'; id: number; mode: Mode }
+  | { t: 'welcome'; id: number; mode: Mode; map: MapId }
   | { t: 'reset' };
 
 export type ClientMsg =
-  | { t: 'join'; name: string; team: Team; mode: Mode; token?: string }
+  | { t: 'join'; name: string; team: Team; mode: Mode; map: MapId; token?: string }
   | { t: 'upgrade'; stat: Stat }
   | { t: 'state'; p: Vec3; yaw: number; pitch: number; w: WeaponId }
   | { t: 'shoot'; w: WeaponId; ends: Vec3[]; hits: Record<number, number> };

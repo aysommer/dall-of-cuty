@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import { BOXES, WEAPONS, WEAPON_ORDER, PLAYER, WORLD, rayBox, rayWorld, type Box } from '../shared/map.js';
+import {
+  MAPS, MAP_ORDER, WEAPONS, WEAPON_ORDER, PLAYER, rayBox, rayWorld,
+  type Box, type GameMap, type Ladder, type MapId,
+} from '../shared/map.js';
 import {
   KILLS_PER_POINT, STATS, UPGRADES, maxLevel, multiplier, newProfile, pointsLeft, type Profile,
 } from '../shared/progress.js';
@@ -14,7 +17,7 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
   return el as T;
 };
 const TEAM_COLOR: Record<Team, number> = { green: 0x2fc44e, red: 0xe23b3b };
-const SPEED = 6.5, JUMP = 7, GRAVITY = 19;
+const SPEED = 6.5, JUMP = 7, GRAVITY = 19, CLIMB = 4;
 const MOUSE_SENS = 0.0022;
 
 // ======================= настройки =======================
@@ -49,8 +52,10 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x9fc9ea);
-scene.fog = new THREE.Fog(0x9fc9ea, 50, 130);
+const sky = new THREE.Color(0x9fc9ea);
+const fog = new THREE.Fog(0x9fc9ea, 50, 130);
+scene.background = sky;
+scene.fog = fog;
 
 const camera = new THREE.PerspectiveCamera(75, 1, 0.05, 300);
 camera.rotation.order = 'YXZ';
@@ -74,19 +79,66 @@ function box(w: number, h: number, d: number, color: THREE.ColorRepresentation, 
   return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
 }
 
-// Карта: пол + блоки
-{
-  const size = WORLD.half * 2 + 2;
-  const floor = box(size, 1, size, 0xc9a86a);
+// ======================= карта =======================
+let currentMap: GameMap = MAPS.sands;
+let loadedMap: MapId | null = null;
+const mapGroup = new THREE.Group();
+scene.add(mapGroup);
+
+/** Лестница из блоков: две стойки и перекладины, прижатые к стене. */
+function buildLadder(l: Ladder): THREE.Group {
+  const g = new THREE.Group();
+  const COLOR = 0x3b3f46;
+  const alongX = l.normal[0] === 0; // лестница на стене, смотрящей вдоль Z, тянется по X
+  const height = l.max[1] - l.min[1];
+  const lo = alongX ? l.min[0] : l.min[2];
+  const hi = alongX ? l.max[0] : l.max[2];
+  // Плоскость лестницы — в 12 см от стены
+  const wall = alongX
+    ? (l.normal[1] > 0 ? l.min[2] : l.max[2])
+    : (l.normal[0] > 0 ? l.min[0] : l.max[0]);
+  const depth = wall + (alongX ? l.normal[1] : l.normal[0]) * 0.12;
+  const place = (m: THREE.Mesh, side: number, y: number): void => {
+    if (alongX) m.position.set(side, y, depth);
+    else m.position.set(depth, y, side);
+    g.add(m);
+  };
+  for (const side of [lo + 0.06, hi - 0.06]) {
+    place(box(0.1, height, 0.1, COLOR), side, l.min[1] + height / 2);
+  }
+  const width = hi - lo;
+  for (let y = l.min[1] + 0.4; y < l.max[1] - 0.1; y += 0.45) {
+    place(alongX ? box(width, 0.07, 0.07, COLOR) : box(0.07, 0.07, width, COLOR), (lo + hi) / 2, y);
+  }
+  return g;
+}
+
+function loadMap(id: MapId): void {
+  if (loadedMap === id) return;
+  loadedMap = id;
+  currentMap = MAPS[id];
+  mapGroup.traverse((o) => {
+    if (o instanceof THREE.Mesh) {
+      o.geometry.dispose();
+      (o.material as THREE.Material).dispose();
+    }
+  });
+  mapGroup.clear();
+
+  sky.set(currentMap.sky);
+  fog.color.set(currentMap.sky);
+  const floor = box(currentMap.half.x * 2 + 2, 1, currentMap.half.z * 2 + 2, currentMap.floor);
   floor.position.y = -0.5;
-  scene.add(floor);
-  for (const b of BOXES) {
+  mapGroup.add(floor);
+  for (const b of currentMap.boxes) {
     const w = b.max[0] - b.min[0], h = b.max[1] - b.min[1], d = b.max[2] - b.min[2];
     const m = box(w, h, d, b.color);
     m.position.set(b.min[0] + w / 2, b.min[1] + h / 2, b.min[2] + d / 2);
-    scene.add(m);
+    mapGroup.add(m);
   }
+  for (const l of currentMap.ladders) mapGroup.add(buildLadder(l));
 }
+loadMap('sands');
 
 // ======================= модели из кубиков =======================
 interface Gun {
@@ -352,6 +404,7 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
     case 'welcome':
       me.id = m.id;
       mode = m.mode;
+      loadMap(m.map);
       joined = true;
       $('menu').classList.add('hidden');
       $('hud').classList.remove('hidden');
@@ -469,6 +522,7 @@ function onOver(m: OverMsg): void {
 
 // ======================= меню =======================
 let chosenMode: Mode = 'tdm';
+let chosenMap: MapId = 'sands';
 let chosenTeam: Team = 'green';
 let lastInfo: InfoMsg | null = null;
 const nameInput = $<HTMLInputElement>('name');
@@ -488,9 +542,15 @@ function onInfo(m: InfoMsg): void {
     b.classList.toggle('active', b.dataset.mode === chosenMode);
     b.disabled = modeLocked;
   }
+  if (modeLocked) chosenMap = m.map;
+  for (const b of buttonsOf('map-choice')) {
+    b.classList.toggle('active', b.dataset.map === chosenMap);
+    b.disabled = modeLocked;
+  }
+  loadMap(chosenMap); // карта видна за меню
   $('mode-note').textContent = modeLocked
-    ? `На сервере уже ${m.count} из ${m.max} — режим выбрал первый игрок.`
-    : 'Ты первый — режим выбираешь ты.';
+    ? `На сервере уже ${m.count} из ${m.max} — режим и карту выбрал первый игрок.`
+    : 'Ты первый — режим и карту выбираешь ты.';
   const tdm = chosenMode === 'tdm';
   $('green-count').textContent = tdm ? `${m.green}/2` : '';
   $('red-count').textContent = tdm ? `${m.red}/2` : '';
@@ -512,6 +572,19 @@ $('mode-choice').addEventListener('click', (e) => {
   chosenMode = b.dataset.mode === 'ffa' ? 'ffa' : 'tdm';
   if (lastInfo) onInfo(lastInfo);
 });
+for (const id of MAP_ORDER) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.dataset.map = id;
+  b.textContent = MAPS[id].name;
+  $('map-choice').append(b);
+}
+$('map-choice').addEventListener('click', (e) => {
+  const b = pickedButton(e);
+  if (!b) return;
+  chosenMap = MAP_ORDER.find((id) => id === b.dataset.map) ?? 'sands';
+  if (lastInfo) onInfo(lastInfo);
+});
 $('team-choice').addEventListener('click', (e) => {
   const b = pickedButton(e);
   if (!b) return;
@@ -524,7 +597,7 @@ $('join-form').addEventListener('submit', (e) => {
   const name = nameInput.value.trim();
   localStorage.setItem('doc-name', name);
   playBtn.disabled = true;
-  sendMsg({ t: 'join', name, team: chosenTeam, mode: chosenMode, token: localStorage.getItem(TOKEN_KEY) ?? undefined });
+  sendMsg({ t: 'join', name, team: chosenTeam, mode: chosenMode, map: chosenMap, token: localStorage.getItem(TOKEN_KEY) ?? undefined });
 });
 
 // ======================= управление =======================
@@ -577,12 +650,56 @@ document.addEventListener('keyup', (e) => {
 // ======================= движение и столкновения =======================
 function hitBox(p: THREE.Vector3): Box | null {
   const r = PLAYER.w / 2;
-  for (const b of BOXES) {
+  for (const b of currentMap.boxes) {
     if (p.x + r > b.min[0] && p.x - r < b.max[0] &&
         p.y + PLAYER.h > b.min[1] && p.y < b.max[1] &&
         p.z + r > b.min[2] && p.z - r < b.max[2]) return b;
   }
   return null;
+}
+
+function touchingLadder(p: THREE.Vector3): Ladder | null {
+  const r = PLAYER.w / 2;
+  for (const l of currentMap.ladders) {
+    if (p.x + r > l.min[0] && p.x - r < l.max[0] &&
+        p.y + PLAYER.h > l.min[1] && p.y < l.max[1] &&
+        p.z + r > l.min[2] && p.z - r < l.max[2]) return l;
+  }
+  return null;
+}
+
+let ladderBlockedUntil = 0; // после спрыгивания лестница ненадолго «не липнет»
+let jumpHeld = false;
+
+/**
+ * Лестница: подошёл — «прилип», сила тяжести не действует.
+ * W — вверх, если смотришь на лестницу прямо или вверх, и вниз, если смотришь вниз или от неё; S — наоборот.
+ * Прыжок — оттолкнуться от лестницы. Возвращает true, если игрок сейчас на лестнице.
+ */
+function climb(ladder: Ladder, f: number, wish: { x: number; z: number }, now: number): boolean {
+  const [nx, nz] = ladder.normal;
+  const facingAway = -Math.sin(me.yaw) * nx - Math.cos(me.yaw) * nz > 0.3;
+  const vy = f * (me.pitch > -0.4 && !facingAway ? 1 : -1) * CLIMB;
+  if (me.grounded && vy <= 0) return false; // стоим на земле и не лезем вверх — обычная ходьба
+
+  if (keys.Space && !jumpHeld) {
+    me.vel.set(nx * 4.5, 3, nz * 4.5);
+    ladderBlockedUntil = now + 350;
+    return false;
+  }
+  // От лестницы отойти нельзя (только спрыгнуть или сойти вбок), прижиматься и смещаться вбок — можно
+  const away = wish.x * nx + wish.z * nz;
+  if (away > 0) { wish.x -= nx * away; wish.z -= nz * away; }
+  me.vel.x = wish.x * 0.45;
+  me.vel.z = wish.z * 0.45;
+  me.vel.y = vy;
+  // Долезли до верха — выталкиваем на площадку
+  if (vy > 0 && me.pos.y + vy * 0.05 >= ladder.max[1]) {
+    me.pos.y = ladder.max[1] + 0.02;
+    me.vel.set(-nx * 3.5, 2.5, -nz * 3.5);
+    ladderBlockedUntil = now + 300;
+  }
+  return true;
 }
 
 function move(dt: number): void {
@@ -592,16 +709,21 @@ function move(dt: number): void {
   const sin = Math.sin(me.yaw), cos = Math.cos(me.yaw);
   let speed = SPEED * multiplier(profile.levels, 'walk');
   if (keys.ShiftLeft || keys.ShiftRight) speed *= multiplier(profile.levels, 'sprint');
-  const wishX = (-sin * f + cos * s) / len * speed;
-  const wishZ = (-cos * f - sin * s) / len * speed;
-  const accel = me.grounded ? 14 : 4;
-  const k = Math.min(1, accel * dt);
-  me.vel.x += (wishX - me.vel.x) * k;
-  me.vel.z += (wishZ - me.vel.z) * k;
-  if (keys.Space && me.grounded) { me.vel.y = JUMP; me.grounded = false; }
-  me.vel.y -= GRAVITY * dt;
-
+  const wish = { x: (-sin * f + cos * s) / len * speed, z: (-cos * f - sin * s) / len * speed };
   const p = me.pos;
+  const now = performance.now();
+  const ladder = now >= ladderBlockedUntil ? touchingLadder(p) : null;
+
+  if (!ladder || !climb(ladder, f, wish, now)) {
+    const accel = me.grounded ? 14 : 4;
+    const k = Math.min(1, accel * dt);
+    me.vel.x += (wish.x - me.vel.x) * k;
+    me.vel.z += (wish.z - me.vel.z) * k;
+    if (keys.Space && me.grounded) { me.vel.y = JUMP; me.grounded = false; }
+    me.vel.y -= GRAVITY * dt;
+  }
+  jumpHeld = !!keys.Space;
+
   p.x += me.vel.x * dt;
   if (hitBox(p)) { p.x -= me.vel.x * dt; me.vel.x = 0; }
   p.z += me.vel.z * dt;
@@ -652,7 +774,7 @@ function fire(now: number): void {
     const a = Math.random() * Math.PI * 2, rad = Math.sqrt(Math.random()) * w.spread;
     const d = _dir.clone().addScaledVector(_right, Math.cos(a) * rad).addScaledVector(_up, Math.sin(a) * rad).normalize();
     const dv: Vec3 = [d.x, d.y, d.z];
-    let t = rayWorld(eye, dv);
+    let t = rayWorld(currentMap.boxes, eye, dv);
     let victim: number | null = null;
     for (const [id, r] of remotes) {
       if (!r.info.alive) continue;
@@ -899,7 +1021,8 @@ function frame(now: number): void {
   } else {
     // Облёт карты под меню
     const a = now / 9000;
-    camera.position.set(Math.sin(a) * 42, 26, Math.cos(a) * 42);
+    const r = Math.max(currentMap.half.x, currentMap.half.z) * 1.4;
+    camera.position.set(Math.sin(a) * r, r * 0.62, Math.cos(a) * r);
     camera.lookAt(0, 0, 0);
   }
   viewModel.visible = joined && me.alive;
