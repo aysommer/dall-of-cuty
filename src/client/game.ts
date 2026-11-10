@@ -742,12 +742,13 @@ function removeRocket(id: number): void {
 
 function onBoom(m: BoomMsg): void {
   removeRocket(m.id);
-  // Ракета с неба (id < 0): корпус остаётся в точке падения и, как тело, уходит под землю
+  // Ракета с неба (id < 0): после взрыва корпус сразу исчезает
   const missile = remoteMissiles.get(-m.id);
   if (m.id < 0 && missile) {
     remoteMissiles.delete(-m.id);
-    missile.position.set(m.p[0], m.p[1], m.p[2]);
-    sinking.push({ obj: missile, born: performance.now(), baseY: m.p[1] });
+    scene.remove(missile);
+    missile.geometry.dispose();
+    (missile.material as THREE.Material).dispose();
   }
   const now = performance.now();
   // Взрыв — растущий и гаснущий куб размером с зону поражения
