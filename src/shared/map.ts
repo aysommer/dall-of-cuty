@@ -41,9 +41,9 @@ export const HEAD = { from: 1.45, mul: 1.5 };
 /** Броня из ящика: ещё 100 единиц «здоровья», которые тратятся первыми. */
 export const ARMOR = { amount: 100 };
 
-/** Аптечки: падают с неба каждые everyMs, лечат на heal (не выше 100). */
+/** Аптечки: падают с неба каждые everyMs, лечат на heal (не выше 100); не подобранная исчезает через lifeMs. */
 export const MEDKIT = {
-  everyMs: 60_000, fallMs: 2500, fallHeight: 40, heal: 50, max: 3,
+  everyMs: 60_000, fallMs: 2500, fallHeight: 40, heal: 50, max: 3, lifeMs: 15_000,
   size: 0.6, height: 0.35, reach: 1.1,
 };
 
@@ -67,7 +67,7 @@ export const CRATE = {
   // Что внутри: 10% — взрыв, 40% — ракетница, остальные 50% — броня
   trapChance: 0.1, rocketChance: 0.4, trapRadius: 5,
 };
-export const ROCKET = { speed: 35, radius: 4, lifeMs: 4000 };
+export const ROCKET = { speed: 70, radius: 4, lifeMs: 4000 };
 export const WEAPON_ORDER: WeaponId[] = ['pistol', 'shotgun', 'rifle', 'sniper', 'knife'];
 
 /** Подкат: из спринта по C, игрок ложится и скользит ms миллисекунд. */

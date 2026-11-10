@@ -1742,6 +1742,9 @@ function updateMedkits(now: number): void {
     const lift = MEDKIT.fallHeight * (1 - (1 - left) ** 2);
     fx.g.position.set(fx.at[0], fx.at[1] + lift, fx.at[2]);
     fx.g.rotation.y = now / 700; // медленно вращается, чтобы бросалась в глаза
+    // Последние 3 секунды перед исчезновением мигает
+    const left2 = fx.landAt + MEDKIT.lifeMs - now;
+    fx.g.visible = left2 > 3000 || Math.floor(now / 200) % 2 === 0;
   }
 }
 

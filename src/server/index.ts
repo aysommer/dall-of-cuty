@@ -371,8 +371,16 @@ function dropMedkit(): void {
   const free = MAPS[mapId].medkitDrops.filter((pt) => !taken(pt));
   if (!free.length) return;
   const at = free[Math.floor(Math.random() * free.length)]!;
-  medkits.push({ id: nextMedkitId++, at: [...at], landAt: Date.now() + MEDKIT.fallMs });
+  const kit: Medkit = { id: nextMedkitId++, at: [...at], landAt: Date.now() + MEDKIT.fallMs };
+  medkits.push(kit);
   broadcast(medkitsMsg());
+  // Не подобрали за MEDKIT.lifeMs после приземления — аптечка исчезает
+  setTimeout(() => {
+    const i = medkits.indexOf(kit);
+    if (i < 0) return;
+    medkits.splice(i, 1);
+    broadcast(medkitsMsg());
+  }, MEDKIT.fallMs + MEDKIT.lifeMs);
 }
 function clearMedkits(): void {
   medkits = [];
