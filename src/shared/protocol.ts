@@ -33,7 +33,8 @@ export type PlayersMsg = { t: 'players'; mode: Mode; limit: number; scores: Reco
 export type SpawnMsg = { t: 'spawn'; id: number; p: Vec3; yaw: number };
 export type SnapMsg = { t: 'snap'; ps: SnapRow[] };
 export type ShotMsg = { t: 'shot'; id: number; w: WeaponId; ends: Vec3[] };
-export type KillMsg = { t: 'kill'; killer: number; victim: number; w: WeaponId };
+/** killer = null и w = 'crate' — игрока убил взорвавшийся ящик. */
+export type KillMsg = { t: 'kill'; killer: number | null; victim: number; w: WeaponId | 'crate' };
 export type ProfileMsg = { t: 'profile'; token: string; kills: number; levels: Levels };
 /** Состояние ящика; при открытии — кто открывает и сколько миллисекунд осталось. */
 export type CrateMsg = { t: 'crate'; state: CrateState; by: number | null; ms: number };

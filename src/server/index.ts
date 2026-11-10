@@ -181,14 +181,17 @@ function isNum(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
 
-function killPlayer(killer: Player, v: Player, w: WeaponId): void {
+/** killer = null — игрока убил взорвавшийся ящик: убийство никому не засчитывается. */
+function killPlayer(killer: Player | null, v: Player, w: WeaponId | 'crate'): void {
   v.hp = 0;
   v.alive = false;
   v.deaths++;
-  killer.kills++;
-  killer.profile.kills++;
-  sendProfile(killer);
-  broadcast({ t: 'kill', killer: killer.id, victim: v.id, w });
+  if (killer) {
+    killer.kills++;
+    killer.profile.kills++;
+    sendProfile(killer);
+  }
+  broadcast({ t: 'kill', killer: killer?.id ?? null, victim: v.id, w });
   // Погибший теряет ракетницу и перестаёт открывать ящик
   setRockets(v, 0);
   if (crate.state === 'opening' && crate.by === v.id) setCrate('idle');
@@ -236,8 +239,28 @@ function handleOpen(p: Player, on: boolean): void {
     const opener = players.get(p.id);
     if (!opener || !opener.alive) { setCrate('idle'); return; }
     setCrate('gone');
-    setRockets(opener, ROCKETS_IN_CRATE);
+    // Сюрприз: иногда вместо ракетницы ящик взрывается
+    if (Math.random() < CRATE.trapChance) explodeCrate();
+    else setRockets(opener, ROCKETS_IN_CRATE);
   }, CRATE.openMs);
+}
+
+/** Ящик-ловушка: убивает всех рядом, включая открывшего и его союзников. Стена закрывает. */
+function explodeCrate(): void {
+  const map = MAPS[mapId];
+  const [cx, cy, cz] = map.crate;
+  const at: Vec3 = [cx, cy + CRATE.height + 0.2, cz];
+  broadcast({ t: 'boom', id: 0, p: at });
+  for (const v of players.values()) {
+    if (!v.alive) continue;
+    const [min, max] = playerBox(v);
+    const d = Math.hypot(...([0, 1, 2] as const).map((i) => Math.max(min[i] - at[i], 0, at[i] - max[i])));
+    if (d > CRATE.trapRadius) continue;
+    const covered = [0.2, PLAYER.h / 2, PLAYER.h - 0.1]
+      .every((h) => !lineOfSight(map.boxes, at, [v.pos[0], v.pos[1] + h, v.pos[2]]));
+    if (!covered) killPlayer(null, v, 'crate');
+  }
+  broadcastPlayers();
 }
 
 // ---------- ракеты ----------

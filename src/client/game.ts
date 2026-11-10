@@ -686,7 +686,20 @@ function onShot(m: ShotMsg): void {
 function onKill(m: KillMsg): void {
   const k = roster.find((p) => p.id === m.killer);
   const v = roster.find((p) => p.id === m.victim);
-  if (!k || !v) return;
+  if (!v) return;
+  if (m.w === 'crate') {
+    // Ящик оказался ловушкой
+    const trap = document.createElement('div');
+    const name = document.createElement('span');
+    name.className = 't-' + v.team;
+    name.textContent = v.name;
+    trap.append('💥 Ящик ▸ ', name);
+    $('feed').prepend(trap);
+    setTimeout(() => trap.remove(), 5000);
+    if (m.victim === me.id) $('center-msg').textContent = 'Ящик взорвался!\nВозрождение через 3 сек.';
+    return;
+  }
+  if (!k) return;
   const row = document.createElement('div');
   const span = (p: PlayerInfo): HTMLSpanElement => {
     const s = document.createElement('span');
