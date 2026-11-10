@@ -107,12 +107,12 @@ export const STREAK = {
 export type StreakKind = 'uav' | 'missile' | 'nuke' | 'gunship';
 
 /**
- * Самолёт (серия 10): 15 секунд кружит высоко над картой сам, игрок только стреляет —
+ * Самолёт (серия 11): 15 секунд кружит высоко над картой сам, игрок только стреляет —
  * пулемёт (перегрев за 5 с непрерывной стрельбы, остывание 1 с) и ракеты (раз в 3 с).
  * Сбить можно двумя попаданиями из ракетницы.
  */
 export const GUNSHIP = {
-  streak: 10, ms: 15_000, height: 40, orbitShare: 0.65,
+  streak: 11, ms: 15_000, height: 40, orbitShare: 0.65,
   gunDmg: 28, gunRateMs: 80, heatMs: 5000, coolMs: 1000, spread: 0.012,
   rocketCdMs: 3000, rocketRadius: 5,
   hitsToDown: 2, half: [3.6, 1.1, 3.6] as const,
@@ -165,6 +165,22 @@ export function bodyPoints(pos: Vec3, sliding: boolean, scale = 1): Vec3[] {
 
 export const MAPS: Record<MapId, GameMap> = { sands: SANDS, bricks: BRICKS, depot: DEPOT, jumps: JUMPS, town: TOWN };
 export const MAP_ORDER: MapId[] = ['sands', 'bricks', 'depot', 'jumps', 'town'];
+
+/**
+ * Невидимые стены по краю арены — на месте внешних стен, но высотой 100 м:
+ * с вышки или трамплина забор не перепрыгнуть. Мешают только движению игрока —
+ * пули, ракеты и видимость их не замечают.
+ */
+export const CLIP_HEIGHT = 100;
+export function clipWalls(half: { x: number; z: number }): Box[] {
+  const { x, z } = half, lo = -10, hi = CLIP_HEIGHT, c = '';
+  return [
+    { min: [-x - 1, lo, -z - 1], max: [x + 1, hi, -z], color: c },
+    { min: [-x - 1, lo, z], max: [x + 1, hi, z + 1], color: c },
+    { min: [-x - 1, lo, -z], max: [-x, hi, z], color: c },
+    { min: [x, lo, -z], max: [x + 1, hi, z], color: c },
+  ];
+}
 
 export function isMapId(v: unknown): v is MapId {
   return typeof v === 'string' && Object.hasOwn(MAPS, v);
