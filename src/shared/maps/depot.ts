@@ -61,7 +61,8 @@ export const DEPOT: GameMap = {
   sky: '#cfd8e3',
   boxes,
   ladders,
-  crate: [0, DECK, 0], // посередине моста
+  // Ящик падает с неба: на мост или в одну из двух симметричных точек у контейнеров
+  crateDrops: [[0, DECK, 0], [-8, 0, 8.5], [8, 0, -8.5]],
   spawns: {
     green,
     red,

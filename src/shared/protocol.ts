@@ -5,8 +5,9 @@ import type { MapId } from './maps/types.js';
 
 export type Team = 'green' | 'red';
 export type Mode = 'tdm' | 'ffa';
-export type WeaponId = 'pistol' | 'shotgun' | 'rifle' | 'rocket';
-export type CrateState = 'idle' | 'opening' | 'gone';
+export type WeaponId = 'pistol' | 'shotgun' | 'rifle' | 'sniper' | 'knife' | 'rocket';
+/** falling — летит с неба, idle — лежит, opening — его открывают, gone — ящика нет */
+export type CrateState = 'falling' | 'idle' | 'opening' | 'gone';
 export type Vec3 = [number, number, number];
 
 export interface PlayerInfo {
@@ -19,8 +20,8 @@ export interface PlayerInfo {
   deaths: number;
 }
 
-/** [id, x, y, z, yaw, pitch, оружие] */
-export type SnapRow = [number, number, number, number, number, number, WeaponId];
+/** [id, x, y, z, yaw, pitch, оружие, подкат 0/1] */
+export type SnapRow = [number, number, number, number, number, number, WeaponId, 0 | 1];
 
 export interface Winner {
   team?: Team;
@@ -36,8 +37,11 @@ export type ShotMsg = { t: 'shot'; id: number; w: WeaponId; ends: Vec3[] };
 /** killer = null и w = 'crate' — игрока убил взорвавшийся ящик. */
 export type KillMsg = { t: 'kill'; killer: number | null; victim: number; w: WeaponId | 'crate' };
 export type ProfileMsg = { t: 'profile'; token: string; kills: number; levels: Levels };
-/** Состояние ящика; при открытии — кто открывает и сколько миллисекунд осталось. */
-export type CrateMsg = { t: 'crate'; state: CrateState; by: number | null; ms: number };
+/**
+ * Состояние ящика. at — куда он падает или где лежит; by — кто открывает;
+ * ms — сколько осталось падать или открывать; left — через сколько исчезнет, если не открыть.
+ */
+export type CrateMsg = { t: 'crate'; state: CrateState; at: Vec3 | null; by: number | null; ms: number; left: number };
 export type RocketMsg = { t: 'rocket'; id: number; by: number; o: Vec3; d: Vec3 };
 export type BoomMsg = { t: 'boom'; id: number; p: Vec3 };
 export type OverMsg = { t: 'over'; winner: Winner; pause: number };
@@ -64,5 +68,5 @@ export type ClientMsg =
   | { t: 'upgrade'; stat: Stat }
   | { t: 'open'; on: boolean }
   | { t: 'rocket'; d: Vec3 }
-  | { t: 'state'; p: Vec3; yaw: number; pitch: number; w: WeaponId }
+  | { t: 'state'; p: Vec3; yaw: number; pitch: number; w: WeaponId; sl: boolean }
   | { t: 'shoot'; w: WeaponId; ends: Vec3[]; hits: Record<number, number> };

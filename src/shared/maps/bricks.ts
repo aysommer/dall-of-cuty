@@ -81,6 +81,7 @@ export const BRICKS: GameMap = {
   sky: '#bfe3ff',
   boxes,
   ladders,
-  crate: [0, TOWER_H, 0], // на вершине башни
+  // Ящик падает с неба: на башню или в одну из двух симметричных точек середины
+  crateDrops: [[0, TOWER_H, 0], [-12, 0, 6.5], [12, 0, -6.5]],
   spawns,
 };

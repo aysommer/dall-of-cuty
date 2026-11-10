@@ -75,6 +75,21 @@ details.field .settings { margin-top: 10px; }
 #crosshair i:nth-child(2) { width: 2px; height: 8px; left: -1px; top: 5px; }
 #crosshair i:nth-child(3) { width: 8px; height: 2px; left: -13px; top: -1px; }
 #crosshair i:nth-child(4) { width: 8px; height: 2px; left: 5px; top: -1px; }
+/* В прицеле вместо креста — точка */
+#crosshair.ads i { display: none; }
+#crosshair.ads::after {
+  content: ''; position: absolute; width: 4px; height: 4px; left: -2px; top: -2px;
+  background: #fff; border-radius: 50%; box-shadow: 0 0 2px #000;
+}
+
+/* Снайперский прицел: круг обзора с перекрестием, вокруг — темнота */
+#scope {
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at center, transparent 0, transparent 37vmin, #000 37.4vmin);
+}
+#scope::before, #scope::after { content: ''; position: absolute; left: 50%; top: 50%; background: #000; transform: translate(-50%, -50%); }
+#scope::before { width: 74vmin; height: 2px; }
+#scope::after { width: 2px; height: 74vmin; }
 
 #hitmarker {
   position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px;

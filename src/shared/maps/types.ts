@@ -28,8 +28,8 @@ export interface GameMap {
   sky: string;
   boxes: Box[];
   ladders: Ladder[];
-  /** Где стоит ящик с ракетницей: центр по X/Z и высота пола под ним */
-  crate: Vec3;
+  /** Куда может упасть ящик с ракетницей: центр по X/Z и высота пола под ним */
+  crateDrops: Vec3[];
   spawns: Record<Team | 'ffa', SpawnPoint[]>;
 }
 
