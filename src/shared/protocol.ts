@@ -122,6 +122,8 @@ export type ServerMsg =
   | GunshipEndMsg
   | GunshipShotMsg
   | GrenadesMsg
+  /** Какие стёкла и двери уже разбиты */
+  | { t: 'breaks'; broken: number[] }
   | { t: 'gunship-hit'; id: number; left: number }
   | AmmoPacksMsg
   | WeatherMsg
@@ -160,4 +162,4 @@ export type ClientMsg =
   | { t: 'spray'; p: Vec3; n: [number, number]; e: number }
   | { t: 'state'; p: Vec3; yaw: number; pitch: number; w: WeaponId; sl: boolean }
   /** hits: id игрока → [попаданий в тело, попаданий в голову] */
-  | { t: 'shoot'; w: WeaponId; ends: Vec3[]; hits: Record<number, [number, number]> };
+  | { t: 'shoot'; w: WeaponId; ends: Vec3[]; hits: Record<number, [number, number]>; brk?: Record<number, number> };

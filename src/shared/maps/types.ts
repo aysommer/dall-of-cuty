@@ -1,7 +1,7 @@
 // Типы карт. Вся геометрия — только прямоугольные блоки.
 import type { Team, Vec3 } from '../protocol.js';
 
-export type MapId = 'sands' | 'bricks' | 'depot' | 'jumps' | 'town';
+export type MapId = 'sands' | 'bricks' | 'depot' | 'jumps' | 'town' | 'house';
 
 export interface Box {
   min: Vec3;
@@ -16,6 +16,14 @@ export interface Ladder {
   min: Vec3;
   max: Vec3;
   normal: [number, number];
+}
+
+/** Разрушаемый блок: стекло или дверь. Пока цел — твёрдый; набрал урон hp — разлетается и исчезает. */
+export interface Breakable {
+  id: number;
+  box: Box;
+  hp: number;
+  kind: 'glass' | 'door';
 }
 
 /** Трамплин: встал на него — подбрасывает со скоростью vel. */
@@ -45,6 +53,10 @@ export interface GameMap {
   lamps: Vec3[];
   /** Трамплины (есть не на всех картах) */
   pads?: JumpPad[];
+  /** Разрушаемые стекло и двери */
+  breakables?: Breakable[];
+  /** Карта под крышей: погоды внутри нет, ящик и аптечки не падают сквозь крышу, а появляются на месте */
+  indoor?: boolean;
   spawns: Record<Team | 'ffa', SpawnPoint[]>;
 }
 

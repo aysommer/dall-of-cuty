@@ -20,7 +20,7 @@ export interface SewerSpec { axis: 'x' | 'z'; from: number; to: number; at: numb
 type Rect = [x1: number, z1: number, x2: number, z2: number];
 
 /** Прямоугольник area без дыр — набором прямоугольников (полосы по X). */
-function subtract(area: Rect, holes: Rect[]): Rect[] {
+export function subtract(area: Rect, holes: Rect[]): Rect[] {
   const xs = [...new Set([area[0], area[2], ...holes.flatMap((h) => [h[0], h[2]])])]
     .filter((x) => x >= area[0] && x <= area[2]).sort((a, b) => a - b);
   const out: Rect[] = [];

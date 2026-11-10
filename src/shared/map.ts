@@ -6,9 +6,10 @@ import { BRICKS } from './maps/bricks.js';
 import { DEPOT } from './maps/depot.js';
 import { JUMPS } from './maps/jumps.js';
 import { TOWN } from './maps/town.js';
+import { HOUSE } from './maps/house.js';
 import type { Box, GameMap, MapId } from './maps/types.js';
 
-export type { Box, GameMap, JumpPad, Ladder, MapId, SpawnPoint } from './maps/types.js';
+export type { Box, Breakable, GameMap, JumpPad, Ladder, MapId, SpawnPoint } from './maps/types.js';
 
 export interface Weapon {
   name: string;
@@ -194,8 +195,8 @@ export function bodyPoints(pos: Vec3, sliding: boolean, scale = 1): Vec3[] {
   return [0.2, h / 2, h - 0.1].map((y) => [pos[0], pos[1] + y, pos[2]] as Vec3);
 }
 
-export const MAPS: Record<MapId, GameMap> = { sands: SANDS, bricks: BRICKS, depot: DEPOT, jumps: JUMPS, town: TOWN };
-export const MAP_ORDER: MapId[] = ['sands', 'bricks', 'depot', 'jumps', 'town'];
+export const MAPS: Record<MapId, GameMap> = { sands: SANDS, bricks: BRICKS, depot: DEPOT, jumps: JUMPS, town: TOWN, house: HOUSE };
+export const MAP_ORDER: MapId[] = ['sands', 'bricks', 'depot', 'jumps', 'town', 'house'];
 
 /**
  * Невидимые стены по краю арены — на месте внешних стен, но высотой 100 м:
