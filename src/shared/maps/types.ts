@@ -1,7 +1,7 @@
 // Типы карт. Вся геометрия — только прямоугольные блоки.
 import type { Team, Vec3 } from '../protocol.js';
 
-export type MapId = 'sands' | 'bricks' | 'depot' | 'jumps';
+export type MapId = 'sands' | 'bricks' | 'depot' | 'jumps' | 'town';
 
 export interface Box {
   min: Vec3;
