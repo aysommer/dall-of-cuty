@@ -17,7 +17,7 @@
     <div id="damage"></div>
     <div id="score"></div>
     <div id="feed"></div>
-    <div id="health"><span class="label">HP</span><span id="hp">100</span><span id="armor" class="hidden"><span class="label"> 🛡</span><span id="armor-val">0</span></span></div>
+    <div id="health"><img id="my-face" alt=""><span class="label">HP</span><span id="hp">100</span><span id="armor" class="hidden"><span class="label"> 🛡</span><span id="armor-val">0</span></span></div>
     <div id="ammo">
       <div id="weapon-name">Пистолет</div>
       <div><span id="ammo-count">12</span><span class="label" id="ammo-total"> / ∞</span></div>
@@ -92,8 +92,12 @@
         <small id="mode-note"></small>
       </div>
 
-      <div class="field">Время матча
-        <div class="choice" id="time-choice"></div>
+      <div class="field">Матч до
+        <div class="choice" id="limit-kind">
+          <button type="button" data-kind="time" class="active">Времени</button>
+          <button type="button" data-kind="kills">Убийств</button>
+        </div>
+        <div class="choice" id="limit-value"></div>
       </div>
 
       <div class="field">Цвет

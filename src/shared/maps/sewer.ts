@@ -7,10 +7,12 @@ export const SEWER = {
   /** Низ плиты земли (= потолок канализации) и пол канализации */
   ceil: -1, floor: -4,
   /** Ширина коридора, размер люка, толщина стен */
-  width: 3, hole: 1.4, wall: 0.5,
+  width: 3, hole: 2, wall: 0.5,
 };
 /** Ниже этой высоты — под землёй: там темно и светит только фонарь. */
 export const UNDERGROUND_Y = SEWER.ceil;
+/** Бетон канализации: тёмный, чтобы внизу было темно и без выключения солнца */
+const DARK = '#26282b';
 
 /** Коридор вдоль оси axis от from до to; по другой оси — посередине at. Люки — на обоих концах. */
 export interface SewerSpec { axis: 'x' | 'z'; from: number; to: number; at: number }
@@ -43,8 +45,9 @@ export interface SewerResult { lamps: Vec3[]; holes: Rect[] }
  * half — половина арены; ground — цвет земли; walls — цвет стен канализации.
  */
 export function addGroundAndSewer(
-  boxes: Box[], ladders: Ladder[], half: { x: number; z: number }, s: SewerSpec, ground: string, walls: string,
+  boxes: Box[], ladders: Ladder[], half: { x: number; z: number }, s: SewerSpec, ground: string, _walls?: string,
 ): SewerResult {
+  const walls = DARK;
   const { ceil, floor, width, hole, wall } = SEWER;
   const w = width / 2, h = hole / 2;
   // Всё строим «вдоль X», а для оси Z меняем координаты местами
@@ -57,8 +60,9 @@ export function addGroundAndSewer(
 
   // Люки на концах коридора
   const holes: Rect[] = [rect(s.from, s.at - h, s.from + hole, s.at + h), rect(s.to - hole, s.at - h, s.to, s.at + h)];
+  // Плита: сверху — земля, снизу и в шахтах люков — тёмный бетон (из канализации наружу видно небо, а не свет внутри)
   for (const [x1, z1, x2, z2] of subtract([-half.x - 1, -half.z - 1, half.x + 1, half.z + 1], holes)) {
-    boxes.push({ min: [x1, ceil, z1], max: [x2, 0, z2], color: ground });
+    boxes.push({ min: [x1, ceil, z1], max: [x2, 0, z2], color: DARK, top: ground });
   }
   // Коридор: пол, две длинные стены и торцы
   put(s.from - wall, s.at - w - wall, s.to + wall, s.at + w + wall, floor - 1, floor, walls);
@@ -69,7 +73,7 @@ export function addGroundAndSewer(
 
   // Лестницы — на торцевых стенах под люками, от пола канализации до края люка
   const ladder = (a1: number, a2: number, normal: number): void => {
-    const [x1, z1, x2, z2] = rect(a1, s.at - 0.55, a2, s.at + 0.55);
+    const [x1, z1, x2, z2] = rect(a1, s.at - 0.7, a2, s.at + 0.7);
     ladders.push({
       min: [x1, floor, z1], max: [x2, 0.4, z2],
       normal: s.axis === 'x' ? [normal, 0] : [0, normal],
