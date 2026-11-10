@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  AMMO_PACK, CRATE, DEFAULT_KIT, GUNS, GUNSHIP, gunshipPos, HEAD, HIP_SPREAD, KIT_SIZE, MAPS, MAP_ORDER, MATCH, MEDKIT, ROCKET, SLIDE, STREAK,
+  AMMO_PACK, CRATE, DEFAULT_KIT, GUNS, GUNSHIP, clipWalls, gunshipPos, HEAD, HIP_SPREAD, KIT_SIZE, MAPS, MAP_ORDER, MATCH, MEDKIT, ROCKET, SLIDE, STREAK,
   THROW, WEAPONS, WEAPON_ORDER, WORLD_BOTTOM, PLAYER, isKit, type LimitKind, type WeatherKind,
   playerBox, rayBox, rayWorld, type StreakKind,
   type Box, type GameMap, type Ladder, type MapId,
@@ -93,6 +93,8 @@ function box(w: number, h: number, d: number, color: THREE.ColorRepresentation, 
 
 // ======================= карта =======================
 let currentMap: GameMap = MAPS.sands;
+/** Невидимые стены по краю текущей карты */
+let clips: Box[] = clipWalls(MAPS.sands.half);
 /** Свет фонарей канализации — включается, когда камера под землёй */
 const lampLights: THREE.PointLight[] = [];
 let loadedMap: MapId | null = null;
@@ -249,6 +251,7 @@ function loadMap(id: MapId): void {
   if (loadedMap === id) return;
   loadedMap = id;
   currentMap = MAPS[id];
+  clips = clipWalls(currentMap.half);
   mapGroup.traverse((o) => {
     if (o instanceof THREE.Mesh) {
       o.geometry.dispose();
@@ -1445,6 +1448,8 @@ function overlaps(p: THREE.Vector3, h: number, b: Box): boolean {
 
 function hitBox(p: THREE.Vector3, h: number = low ? SLIDE.height : PLAYER.h): Box | null {
   for (const b of currentMap.boxes) if (overlaps(p, h, b)) return b;
+  // Невидимые стены по краю карты — только для движения игрока
+  for (const b of clips) if (overlaps(p, h, b)) return b;
   // Лежащий ящик тоже твёрдый
   const c = insideCrate ? null : crateSolid();
   return c && overlaps(p, h, c) ? c : null;
