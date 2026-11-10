@@ -45,7 +45,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
  * лежит на земле lifeMs и, если его никто не открыл, исчезает.
  */
 export const CRATE = {
-  size: 1.2, height: 0.9, reach: 2.4, openMs: 5000,
+  size: 1.2, height: 0.9, reach: 2.4, openMs: 1000,
   dropEveryMs: 60_000, dropChance: 0.5, fallMs: 4000, fallHeight: 40, lifeMs: 120_000,
   trapChance: 0.1, trapRadius: 5,
 };

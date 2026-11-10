@@ -1,10 +1,7 @@
 // Карта «Пески»: две базы и три линии — открытая «длина», центр с дверями, крытый туннель.
-// Координаты ниже записаны в исходном масштабе и при построении уменьшаются вдвое (K);
-// высоты блоков не меняются.
 import { builder, type GameMap, type SpawnPoint } from './types.js';
 
-const K = 0.5;
-const WORLD = { half: 30 * K, wallH: 6 };
+const WORLD = { half: 30, wallH: 6 };
 
 const SAND = '#d8b878';
 const SAND_DARK = '#b9965a';
@@ -13,9 +10,7 @@ const CRATE = '#8a5a2b';
 const CRATE_LIGHT = '#a8743a';
 const TUNNEL = '#6f6455';
 
-const { boxes, b: put } = builder();
-const b = (x1: number, z1: number, x2: number, z2: number, h: number, color: string, y = 0): void =>
-  put(x1 * K, z1 * K, x2 * K, z2 * K, h, color, y);
+const { boxes, b } = builder();
 
 // Внешние стены
 b(-31, -31, 31, -30, WORLD.wallH, SAND_DARK);
@@ -30,8 +25,8 @@ b(4, -18, 14, -3, 5, SAND);
 b(4, 3, 14, 18, 5, SAND);
 
 // Центр: «двойные двери» с узким проходом
-b(-4, -0.4, -2, 0.4, 3.5, STONE);
-b(2, -0.4, 4, 0.4, 3.5, STONE);
+b(-4, -0.4, -1.2, 0.4, 3.5, STONE);
+b(1.2, -0.4, 4, 0.4, 3.5, STONE);
 b(-3.6, 8, -1.6, 10, 1.2, CRATE);
 b(1.6, -10, 3.6, -8, 1.2, CRATE);
 
@@ -64,16 +59,15 @@ b(20, -25, 22, -23, 1.2, CRATE_LIGHT);
 
 // Точки появления: [x, z, yaw]. yaw = 0 — взгляд на север (-z).
 const S = Math.PI; // взгляд на юг (+z)
-const sp = (x: number, z: number, yaw: number): SpawnPoint => [x * K, z * K, yaw];
-const green: SpawnPoint[] = [sp(-12, 26, 0), sp(-6, 26, 0), sp(6, 26, 0), sp(12, 26, 0), sp(-24, 27, 0), sp(24, 27, 0)];
-const red: SpawnPoint[] = green.map(([x, z]) => [-x, -z, S]);
+const green: SpawnPoint[] = [[-12, 26, 0], [-6, 26, 0], [6, 26, 0], [12, 26, 0], [-24, 27, 0], [24, 27, 0]];
+const red: SpawnPoint[] = [[-12, -26, S], [-6, -26, S], [6, -26, S], [12, -26, S], [-24, -27, S], [24, -27, S]];
 const spawns: GameMap['spawns'] = {
   green,
   red,
   ffa: [
     ...green, ...red,
-    sp(-26, 16, 0), sp(-26, -18, S), sp(26, 16, 0), sp(26, -16, S),
-    sp(-22, 4, 0), sp(16, 6, S), sp(-16, -6, 0), sp(27, -7, S),
+    [-26, 16, 0], [-26, -18, S], [26, 16, 0], [26, -16, S],
+    [-22, 4, 0], [16, 6, S], [-16, -6, 0], [27, -7, S],
   ],
 };
 
@@ -86,6 +80,6 @@ export const SANDS: GameMap = {
   boxes,
   ladders: [],
   // Ящик падает с неба — точки под открытым небом, симметричные для обеих сторон
-  crateDrops: [[-11, 0, -7], [11, 0, 7]],
+  crateDrops: [[-22, 0, -14], [22, 0, 14]],
   spawns,
 };

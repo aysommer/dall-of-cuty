@@ -11,6 +11,7 @@ import {
 import { chooseSpawn } from './spawn.js';
 import { isStat, maxLevel, pointsLeft, type Profile } from '../shared/progress.js';
 import { decodeProfile, encodeProfile } from './progress.js';
+import { EMOJIS, SPRAY } from '../shared/emoji.js';
 import type { CrateState, InfoMsg, Mode, ServerMsg, SnapRow, Team, Vec3, WeaponId, Winner } from '../shared/protocol.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -38,6 +39,8 @@ interface Player {
   kills: number;
   deaths: number;
   lastShot: number;
+  /** Когда последний раз рисовал на стене */
+  lastSpray: number;
   profile: Profile;
   /** Сколько ракет осталось (ракетница из ящика) */
   rockets: number;
@@ -414,6 +417,22 @@ function distToPlayer(v: Player, at: Vec3): number {
   return Math.hypot(...([0, 1, 2] as const).map((i) => Math.max(min[i] - at[i], 0, at[i] - max[i])));
 }
 
+/** T: эмодзи на стене. Не чаще раза в минуту, только на вертикальной стене рядом с игроком. */
+function handleSpray(p: Player, msg: Incoming): void {
+  const now = Date.now();
+  if (!p.alive || now - p.lastSpray < SPRAY.cooldownMs || !isVec3(msg.p)) return;
+  const n = msg.n;
+  if (!Array.isArray(n) || n.length !== 2) return;
+  const [nx, nz] = n as unknown[];
+  const axis = (a: unknown, b: unknown) => (a === 1 || a === -1) && b === 0;
+  if (!axis(nx, nz) && !axis(nz, nx)) return;
+  if (!Number.isInteger(msg.e) || (msg.e as number) < 0 || (msg.e as number) >= EMOJIS.length) return;
+  const eye = eyeOf(p);
+  if (Math.hypot(msg.p[0] - eye[0], msg.p[1] - eye[1], msg.p[2] - eye[2]) > SPRAY.reach + 1) return;
+  p.lastSpray = now;
+  broadcast({ t: 'spray', by: p.id, p: msg.p, n: [nx as number, nz as number], e: msg.e as number });
+}
+
 function handleShoot(p: Player, msg: Incoming): void {
   if (!isWeapon(msg.w) || msg.w === 'rocket' || !p.alive) return;
   const weaponId = msg.w;
@@ -474,7 +493,7 @@ function handleJoin(ws: WebSocket, msg: Incoming): Player | null {
   const p: Player = {
     id: nextId++, ws, name, team,
     pos: [0, 0, 0], yaw: 0, pitch: 0, w: 'pistol', slide: false,
-    hp: 100, alive: false, kills: 0, deaths: 0, lastShot: 0,
+    hp: 100, alive: false, kills: 0, deaths: 0, lastShot: 0, lastSpray: 0,
     profile: decodeProfile(msg.token),
     rockets: 0,
   };
@@ -527,6 +546,8 @@ wss.on('connection', (ws) => {
       handleOpen(me, msg.on === true);
     } else if (msg.t === 'rocket') {
       handleRocket(me, msg);
+    } else if (msg.t === 'spray') {
+      handleSpray(me, msg);
     } else if (msg.t === 'upgrade') {
       if (isStat(msg.stat) && pointsLeft(me.profile) > 0 && me.profile.levels[msg.stat] < maxLevel(msg.stat)) {
         me.profile.levels[msg.stat]++;
