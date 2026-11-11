@@ -1,0 +1,204 @@
+// Оружие в руках: прицеливание, поза у стены и в беге, оптика снайперки, анимации.
+import * as THREE from 'three';
+import type { Vec3, WeaponId } from '../../shared/protocol.js';
+import { GUNS, rayWorld, WEAPONS } from '../../shared/map.js';
+import { beep } from '../core/audio.js';
+import { box, camera } from '../core/scene.js';
+import { settings } from '../core/settings.js';
+import { keys, me, state } from '../core/state.js';
+import { BASE_FOV, SPEED } from '../core/util.js';
+import { openingUntil } from '../pickups/crate.js';
+import { buildGun } from '../render/models.js';
+import { toast, updateHud } from '../ui/hud.js';
+import { cookStart } from './grenade.js';
+import { _dir } from './shooting.js';
+import { solids } from '../world/map.js';
+import { sprintKey } from '../world/physics.js';
+
+export const SWING_MS = 300;
+
+// Оружие в руках (вид от первого лица)
+export const viewModel = new THREE.Group();
+
+export let viewGun = buildGun('pistol');
+
+export function setWeapon(w: WeaponId): void {
+  if (w === 'rocket' && me.ammo.rocket <= 0) return;
+  if (w === 'knife' && !state.hasKnife) return; // нож брошен — до смерти его нет
+  if (w === 'grenade' && state.myGrenades <= 0 && !cookStart) return; // граната одна на жизнь
+  if (GUNS.includes(w) && !settings.kit.includes(w)) return; // ствол не из набора
+  state.adsK = 0;
+  me.weapon = w;
+  me.reloadUntil = 0;
+  me.nextShot = Math.max(me.nextShot, performance.now() + 250);
+  viewModel.remove(viewGun.group);
+  viewGun = buildGun(w);
+  if (viewGun.scope) viewGun.scope.visible = state.scopeOn;
+  viewModel.add(viewGun.group);
+  updateHud();
+}
+
+/** ПКМ: камера приближается, оружие уходит в центр, разброс уменьшается. */
+export function updateAim(dt: number): void {
+  const w = WEAPONS[me.weapon];
+  const aiming = state.aimHeld && w.zoom !== null && me.alive && !me.reloadUntil && !openingUntil && !scopeAnim;
+  state.adsK += ((aiming ? 1 : 0) - state.adsK) * Math.min(1, dt * 12);
+  if (state.adsK < 0.001) state.adsK = 0;
+  // Снайперка без оптики — по мушке, с небольшим приближением
+  const zoom = me.weapon === 'sniper' && !state.scopeOn ? IRON_ZOOM : w.zoom ?? BASE_FOV;
+  const fov = BASE_FOV + (zoom - BASE_FOV) * state.adsK;
+  if (Math.abs(camera.fov - fov) > 0.01) {
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+  }
+  const handX = settings.hand === 'left' ? -0.22 : 0.22;
+  viewModel.position.x = handX * (1 - state.adsK);
+  // В прицеле центр прицела встаёт ровно на линию взгляда (красная точка — в центр экрана)
+  const aimPt = me.weapon === 'sniper' && !state.scopeOn ? viewGun.iron : viewGun.aim;
+  const aimY = aimPt ? -aimPt.y * viewModel.scale.y : -0.13;
+  viewModel.position.y = -0.2 + (aimY + 0.2) * state.adsK;
+}
+
+export function isSprinting(): boolean {
+  return sprintKey() && !!keys.KeyW && !state.aimHeld && !state.mouseDown && me.grounded && !state.low;
+}
+
+/**
+ * При беге оружие поднимается и разворачивается стволом вверх-вбок; у стены — задирается
+ * и отходит назад, чтобы не проходить сквозь неё.
+ */
+export function poseGun(dt: number): void {
+  const moving = Math.hypot(me.vel.x, me.vel.z) > SPEED * 0.9;
+  state.sprintK += ((isSprinting() && moving ? 1 : 0) - state.sprintK) * Math.min(1, dt * 10);
+  camera.getWorldDirection(_dir);
+  const eye: Vec3 = [camera.position.x, camera.position.y, camera.position.z];
+  const near = rayWorld(solids, eye, [_dir.x, _dir.y, _dir.z], 1.3);
+  const wallTarget = Math.max(0, Math.min(1, (1.3 - near) / 0.8));
+  state.wallK += (wallTarget - state.wallK) * Math.min(1, dt * 12);
+  const side = settings.hand === 'left' ? -1 : 1;
+  viewModel.rotation.x += 0.55 * state.sprintK + 1.0 * state.wallK;
+  viewModel.rotation.y += 0.45 * state.sprintK * side;
+  viewModel.rotation.z += 0.4 * state.sprintK * side;
+  viewModel.position.y += 0.05 * state.sprintK - 0.04 * state.wallK;
+  viewModel.position.x -= 0.06 * state.sprintK * side;
+  viewModel.position.z += 0.18 * state.wallK;
+}
+
+/** Анимация руки, которая снимает или надевает оптику */
+export let scopeAnim: { until: number; to: boolean } | null = null;
+
+const SCOPE_ANIM_MS = 700;
+
+/** Приближение по мушке, без оптики */
+const IRON_ZOOM = 50;
+
+let scopeHand: THREE.Mesh | null = null;
+
+export function toggleScope(now: number): void {
+  if (me.weapon !== 'sniper' || !me.alive || scopeAnim || me.reloadUntil) return;
+  scopeAnim = { until: now + SCOPE_ANIM_MS, to: !state.scopeOn };
+  state.aimHeld = false; // во время возни с оптикой не целимся
+  beep(state.scopeOn ? 520 : 760, 0.08, 0.06);
+}
+
+/**
+ * Квадратная рука тянется к оптике: при снятии — забирает её и уносит вниз,
+ * при надевании — приносит снизу и ставит на место.
+ */
+export function animateScope(now: number): void {
+  const g = viewGun;
+  if (!g.scope) { if (scopeHand) scopeHand.visible = false; return; }
+  if (!scopeHand) {
+    scopeHand = box(0.11, 0.07, 0.13, 0xd9a07a); // квадратная ладонь
+    viewModel.add(scopeHand);
+  }
+  if (!scopeAnim) {
+    scopeHand.visible = false;
+    g.scope.visible = state.scopeOn;
+    g.scope.position.set(0, g.scopeY, g.scopeZ);
+    return;
+  }
+  const p = 1 - Math.max(0, scopeAnim.until - now) / SCOPE_ANIM_MS;
+  const mount = new THREE.Vector3(0, g.scopeY + 0.07, g.scopeZ);
+  const below = new THREE.Vector3(0.12, -0.35, g.scopeZ + 0.1);
+  // Рука: снизу к оптике (0…0.45) и обратно вниз (0.55…1)
+  const up = ramp(p, 0, 0.45), down = ramp(p, 0.55, 1);
+  const hand = below.clone().lerp(mount, up).lerp(below, down);
+  scopeHand.visible = true;
+  scopeHand.position.copy(hand);
+  if (scopeAnim.to) {
+    // Надеваем: оптика в руке поднимается и встаёт на место
+    g.scope.visible = true;
+    if (p < 0.5) g.scope.position.copy(hand).add(new THREE.Vector3(0, -0.07, 0));
+    else g.scope.position.set(0, g.scopeY, g.scopeZ);
+  } else {
+    // Снимаем: оптика стоит, пока рука не дотянулась, дальше уходит вместе с рукой
+    g.scope.visible = p < 0.95;
+    if (p < 0.5) g.scope.position.set(0, g.scopeY, g.scopeZ);
+    else g.scope.position.copy(hand).add(new THREE.Vector3(0, -0.07, 0));
+  }
+  if (now >= scopeAnim.until) {
+    state.scopeOn = scopeAnim.to;
+    scopeAnim = null;
+    toast(state.scopeOn ? '🔭 Оптика надета' : '🔭 Оптика снята — целься по мушке (V — надеть)');
+  }
+}
+
+/**
+ * Тряска снайперки в прицеле, пока игрок двигается: чем быстрее, тем сильнее.
+ * Стоя на месте прицел спокойный. Выстрел летит туда, куда смотрит камера, — с учётом тряски.
+ */
+export function sniperSway(now: number): { yaw: number; pitch: number } {
+  if (me.weapon !== 'sniper' || state.adsK < 0.3 || !me.alive) return { yaw: 0, pitch: 0 };
+  const speed = Math.hypot(me.vel.x, me.vel.z) + (me.grounded ? 0 : 4);
+  const amp = Math.min(1, speed / SPEED) * 0.04 * state.adsK;
+  if (amp < 0.0005) return { yaw: 0, pitch: 0 };
+  const t = now / 1000;
+  return { yaw: amp * Math.sin(t * 6.3), pitch: amp * 0.7 * Math.sin(t * 12.1 + 1) };
+}
+
+export const BOLT_MS = 900;
+
+const ease = (x: number): number => x * x * (3 - 2 * x);
+
+/** 0 → 1 на отрезке [a, b] */
+const ramp = (p: number, a: number, b: number): number => ease(Math.max(0, Math.min(1, (p - a) / (b - a))));
+
+/** Перезарядка всех стволов и затвор снайперки. */
+export function animateGun(now: number): void {
+  const g = viewGun;
+  if (g.mag) g.mag.position.y = g.magY;
+  if (g.shell) g.shell.visible = false;
+  if (g.bolt) { g.bolt.position.z = g.boltZ; g.bolt.rotation.z = 0; }
+
+  if (me.reloadUntil) {
+    const p = 1 - Math.max(0, me.reloadUntil - now) / me.reloadMs;
+    // Оружие наклоняется и опускается, в конце возвращается
+    const tilt = ramp(p, 0, 0.15) * (1 - ramp(p, 0.85, 1));
+    viewModel.rotation.x += -0.45 * tilt;
+    viewModel.rotation.z += 0.5 * tilt;
+    viewModel.position.y -= 0.06 * tilt;
+    if (g.shell) {
+      // Дробовик: три патрона по очереди вставляются снизу
+      const q = (p - 0.2) / 0.65;
+      if (q >= 0 && q < 1) {
+        const k = (q * 3) % 1;
+        g.shell.visible = true;
+        g.shell.position.y = -0.14 + 0.1 * ease(Math.min(1, k * 1.4));
+      }
+    } else if (g.mag) {
+      // Старый магазин вниз, новый — снизу обратно
+      const out = ramp(p, 0.15, 0.4) * (1 - ramp(p, 0.55, 0.85));
+      g.mag.position.y = g.magY - 0.3 * out;
+    }
+  } else if (g.bolt && now < state.boltUntil) {
+    // Снайперка: рычаг вверх, назад, вперёд и вниз; ствол слегка покачивается
+    const p = 1 - (state.boltUntil - now) / BOLT_MS;
+    const up = ramp(p, 0.05, 0.2) * (1 - ramp(p, 0.75, 0.9));
+    const back = ramp(p, 0.2, 0.45) * (1 - ramp(p, 0.5, 0.75));
+    g.bolt.rotation.z = 1.2 * up;
+    g.bolt.position.z = g.boltZ + 0.1 * back;
+    viewModel.rotation.z += 0.25 * up;
+    viewModel.rotation.x -= 0.1 * up;
+  }
+}

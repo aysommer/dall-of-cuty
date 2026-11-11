@@ -57,7 +57,9 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
   shotgun: { name: 'Дробовик', dmg: 13, pellets: 8, rate: 900, mag: 6, reserve: 18, reload: 2200, spread: 0.045, auto: false, zoom: 62 },
   // Пулемёт: лента на 100 патронов, отдача вдвое сильнее, чем у автомата
   lmg:     { name: 'Пулемёт', dmg: 22, pellets: 1, rate: 95, mag: 100, reserve: 0, reload: 4200, spread: 0.014, auto: true, zoom: 58 },
-  rifle:   { name: 'Автомат', dmg: 21, pellets: 1, rate: 110, mag: 30, reserve: 60, reload: 2000, spread: 0.009, auto: true, zoom: 55 },
+  // Пистолет-пулемёт: урон ниже, скорострельность выше, чем у автомата
+  smg:     { name: 'Пистолет-пулемёт', dmg: 15, pellets: 1, rate: 70, mag: 32, reserve: 64, reload: 1700, spread: 0.012, auto: true, zoom: 60 },
+  rifle:   { name: 'Автомат', dmg: 21, pellets: 1, rate: 125, mag: 30, reserve: 60, reload: 2000, spread: 0.009, auto: true, zoom: 55 },
   sniper:  { name: 'Снайперка', dmg: 80, pellets: 1, rate: 1300, mag: 5, reserve: 19, reload: 2800, spread: 0.0015, auto: false, zoom: 20, headKill: true },
   knife:   { name: 'Нож', dmg: 100, pellets: 1, rate: 650, mag: 0, reserve: 0, reload: 0, spread: 0, auto: false, zoom: null, melee: 2 },
   // Ракетница достаётся только из ящика: 6 ракет, без перезарядки
@@ -117,6 +119,9 @@ export function stepGrenade(boxes: Box[], g: GrenadeBody, dt: number): void {
  * (команды — сумма убийств команды, «каждый сам за себя» — убийства игрока).
  */
 export const MATCH = { minutes: [5, 10, 15] as const, kills: [50, 100, 150] as const, voteMs: 15_000 };
+
+/** Комнаты: не больше max на сервере, по 4 игрока; пароль — от passMin до passMax символов (или без пароля). */
+export const ROOMS = { max: 4, players: 4, passMin: 4, passMax: 16, nameMax: 20 };
 export type LimitKind = 'time' | 'kills';
 
 /** Погода: раз в everyMs с вероятностью chance начинается дождь или снег на ms. */
@@ -156,11 +161,14 @@ export function gunshipPos(half: { x: number; z: number }, phase: number, elapse
   const a = phase + (elapsed / (GUNSHIP.ms / 1000)) * Math.PI * 2;
   return [Math.cos(a) * r, GUNSHIP.height, Math.sin(a) * r];
 }
-export const WEAPON_ORDER: WeaponId[] = ['pistol', 'shotgun', 'rifle', 'lmg', 'sniper', 'knife'];
+export const WEAPON_ORDER: WeaponId[] = ['pistol', 'smg', 'shotgun', 'rifle', 'lmg', 'sniper', 'knife'];
 
 /** Огнестрел, из которого собирают набор: не больше двух стволов, нож есть всегда. */
-export const GUNS: WeaponId[] = ['pistol', 'shotgun', 'rifle', 'lmg', 'sniper'];
+export const GUNS: WeaponId[] = ['pistol', 'smg', 'shotgun', 'rifle', 'lmg', 'sniper'];
 export const KIT_SIZE = 2;
+
+/** Дверь открывают и закрывают на F, стоя не дальше reach метров от неё */
+export const DOOR = { reach: 2.4 };
 export const DEFAULT_KIT: WeaponId[] = ['rifle', 'pistol'];
 export function isKit(v: unknown): v is WeaponId[] {
   return Array.isArray(v) && v.length >= 1 && v.length <= KIT_SIZE && new Set(v).size === v.length &&

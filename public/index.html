@@ -17,7 +17,8 @@
     <div id="damage"></div>
     <div id="score"></div>
     <div id="feed"></div>
-    <div id="health"><img id="my-face" alt=""><span class="label">HP</span><span id="hp">100</span><span id="armor" class="hidden"><span class="label"> 🛡</span><span id="armor-val">0</span></span><span id="helmet" class="hidden" title="Шлем: сколько попаданий в голову ещё выдержит"><span class="label"> 🪖</span><span id="helmet-val">0</span></span></div>
+    <div id="chat"></div>
+    <div id="health"><span class="label">HP</span><span id="hp">100</span><span id="armor" class="hidden"><span class="label"> 🛡</span><span id="armor-val">0</span></span><span id="helmet" class="hidden" title="Шлем: сколько попаданий в голову ещё выдержит"><span class="label"> 🪖</span><span id="helmet-val">0</span></span></div>
     <div id="ammo">
       <div id="weapon-name">Пистолет</div>
       <div><span id="ammo-count">12</span><span class="label" id="ammo-total"> / ∞</span></div>
@@ -40,8 +41,8 @@
     </div>
     <div id="missile-view" class="hidden"><div class="frame"></div><div id="missile-alt"></div></div>
     <div id="crown-note" class="hidden">♛ Корона у тебя</div>
-    <div id="upgrade-note" class="hidden">Есть очко прокачки — нажми Esc</div>
     <div id="scoreboard" class="hidden"></div>
+    <div id="promo" class="hidden"></div>
   </div>
 
   <div id="flash"></div>
@@ -55,78 +56,136 @@
     </div>
   </div>
 
+  <!-- Меню паузы (Esc): плитки -->
   <div id="pause" class="overlay hidden">
-    <div class="panel wide">
-      <button id="resume" class="primary" type="button">ИГРАТЬ</button>
-      <p>WASD — движение · Shift — спринт · C в спринте — подкат · Пробел — прыжок<br>
-         ЛКМ — огонь · ПКМ — прицел · G — бросить нож · 1 — нож, 2 и 3 — стволы, колесо — по кругу<br>
-         5 — БПЛА · 6 — ракета с неба · 7 — ракетница · 8 — бомба (награды за серию убийств)<br>
-         R — перезарядка · F — открыть ящик · T — эмодзи на стене · Tab — счёт · Esc — это меню</p>
-
-      <h3>Оружие</h3>
-      <small>Выбери до двух стволов — нож всегда с тобой. Клавиши: 1 — нож, 2 и 3 — стволы.</small>
-      <div class="choice kit"></div>
-      <small>Слот 1: нож или граната (одна на жизнь; зажми ЛКМ — сорвёшь чеку, отпусти — бросишь, через 3 с взрыв). Выбор — со следующей жизни.</small>
-      <div class="choice melee">
-        <button type="button" data-melee="knife">🔪 Нож</button>
-        <button type="button" data-melee="grenade">💣 Граната</button>
+    <div class="metro">
+      <div class="metro-head">
+        <button id="pause-back" class="back hidden" type="button" title="Назад (Esc)">←</button>
+        <h2 id="pause-title">Пауза</h2>
+        <button id="resume" class="primary" type="button">ИГРАТЬ</button>
       </div>
 
-      <h3>Настройки</h3>
-      <div class="settings"></div>
+      <div id="pv-home" class="pview tiles">
+        <div class="tile t-profile" id="tile-profile"></div>
+        <button class="tile t-classes" type="button" data-view="classes">
+          <span class="ico">🎒</span>
+          <span class="tile-sub" id="tile-class"></span>
+          <span class="tl">Классы</span>
+        </button>
+        <button class="tile t-settings" type="button" data-view="settings">
+          <span class="ico">⚙</span>
+          <span class="tl">Настройки</span>
+        </button>
+        <button class="tile t-exit" type="button" id="tile-exit">
+          <span class="ico">⏻</span>
+          <span class="tl">Выйти</span>
+        </button>
+      </div>
 
-      <h3>Прокачка</h3>
-      <small id="upgrade-points"></small>
-      <div id="upgrades"></div>
-      <small>1 очко за каждые 10 убийств. Прогресс сохраняется в этом браузере.</small>
+      <div id="pv-classes" class="pview hidden">
+        <small class="pv-hint">Класс — твой шаблон снаряжения: до двух стволов и нож или граната в слоте 1. Можно создать до 10 классов. Нажми на класс, чтобы выбрать его и изменить; оружие меняется сразу, нож и граната — со следующей жизни.</small>
+        <div id="class-list" class="class-list"></div>
+        <div id="class-edit" class="class-edit">
+          <label class="field">Название
+            <input id="class-name" maxlength="16" autocomplete="off">
+          </label>
+          <div class="field">Стволы (до двух)
+            <div class="choice kit"></div>
+          </div>
+          <div class="field">Слот 1
+            <div class="choice melee">
+              <button type="button" data-melee="knife">🔪 Нож</button>
+              <button type="button" data-melee="grenade">💣 Граната</button>
+            </div>
+            <small>Граната — одна на жизнь: зажми ЛКМ — сорвёшь чеку, отпусти — бросишь, через 3 с взрыв.</small>
+          </div>
+          <button id="class-delete" class="danger" type="button">Удалить класс</button>
+        </div>
+      </div>
+
+      <div id="pv-settings" class="pview hidden">
+        <div class="settings"></div>
+
+        <h3>Управление</h3>
+        <p>WASD — движение · Shift — спринт · C в спринте — подкат · Пробел — прыжок<br>
+           ЛКМ — огонь · ПКМ — прицел · G — бросить нож · 1 — нож, 2 и 3 — стволы, колесо — по кругу<br>
+           5 — БПЛА · 6 — ракета с неба · 7 — ракетница · 8 — бомба · 9 — самолёт (награды за серию)<br>
+           R — перезарядка · F — ящик и двери · V — снять оптику · T — эмодзи на стене · Tab — счёт · Esc — меню</p>
+      </div>
     </div>
   </div>
 
-  <!-- Меню входа -->
+  <!-- Меню входа: комнаты и лучший игрок -->
   <div id="menu" class="overlay">
-    <form class="panel" id="join-form">
-      <h1>DALL OF CUTY</h1>
-      <p class="sub">Сетевой шутер из кубиков · до 4 игроков</p>
+    <div class="menu-wrap">
+      <form class="panel" id="join-form" autocomplete="off">
+        <h1>DALL OF CUTY</h1>
+        <p class="sub">Сетевой шутер из кубиков · до 4 комнат по 4 игрока</p>
 
-      <label class="field">Имя
-        <input id="name" maxlength="14" placeholder="Игрок" autocomplete="off">
-      </label>
+        <label class="field">Имя
+          <input id="name" maxlength="14" placeholder="Игрок" autocomplete="off">
+        </label>
 
-      <div class="field">Режим
-        <div class="choice" id="mode-choice">
-          <button type="button" data-mode="tdm" class="active">Команды 2 × 2</button>
-          <button type="button" data-mode="ffa">Каждый сам за себя</button>
+        <div class="field">Комнаты <span id="rooms-note" class="rooms-note"></span>
+          <div id="room-list" class="room-list"></div>
         </div>
-      </div>
 
-      <div class="field">Карта
-        <div class="choice" id="map-choice"></div>
-        <small id="mode-note"></small>
-      </div>
+        <!-- Новая комната: её настройки -->
+        <div id="new-room">
+          <label class="field">Название комнаты
+            <input id="room-name" maxlength="20" placeholder="Комната" autocomplete="off">
+          </label>
+          <label class="field">Пароль <span class="opt">— необязательно</span>
+            <input id="room-pass-new" type="password" maxlength="16" placeholder="от 4 до 16 символов" autocomplete="new-password">
+          </label>
 
-      <div class="field">Матч до
-        <div class="choice" id="limit-kind">
-          <button type="button" data-kind="time" class="active">Времени</button>
-          <button type="button" data-kind="kills">Убийств</button>
+          <div class="field">Режим
+            <div class="choice" id="mode-choice">
+              <button type="button" data-mode="tdm" class="active">Команды 2 × 2</button>
+              <button type="button" data-mode="ffa">Каждый сам за себя</button>
+            </div>
+          </div>
+
+          <div class="field">Карта
+            <select id="map-choice" class="select"></select>
+          </div>
+
+          <div class="field">Матч до
+            <div class="choice" id="limit-kind">
+              <button type="button" data-kind="time" class="active">Времени</button>
+              <button type="button" data-kind="kills">Убийств</button>
+            </div>
+            <div class="choice" id="limit-value"></div>
+          </div>
         </div>
-        <div class="choice" id="limit-value"></div>
-      </div>
 
-      <div class="field">Цвет
-        <div class="choice" id="team-choice">
-          <button type="button" data-team="green" class="green active">Зелёные <b id="green-count"></b></button>
-          <button type="button" data-team="red" class="red">Красные <b id="red-count"></b></button>
+        <!-- Вход в существующую комнату -->
+        <div id="join-room" class="hidden">
+          <div class="room-desc" id="room-desc"></div>
+          <label class="field" id="room-pass-field">Пароль комнаты 🔒
+            <input id="room-pass" type="password" maxlength="16" placeholder="пароль" autocomplete="off">
+          </label>
         </div>
-      </div>
 
-      <details class="field">
-        <summary>Настройки</summary>
-        <div class="settings"></div>
-      </details>
+        <div class="field" id="team-field">Цвет
+          <div class="choice" id="team-choice">
+            <button type="button" data-team="green" class="green active">Зелёные <b id="green-count"></b></button>
+            <button type="button" data-team="red" class="red">Красные <b id="red-count"></b></button>
+          </div>
+        </div>
 
-      <button id="play" class="primary" type="submit" disabled>Подключение…</button>
-      <small id="status"></small>
-    </form>
+        <details class="field">
+          <summary>Настройки</summary>
+          <div class="rank-card"></div>
+          <div class="settings"></div>
+        </details>
+
+        <button id="play" class="primary" type="submit" disabled>Подключение…</button>
+        <small id="status"></small>
+      </form>
+
+      <aside id="best" class="best-card"></aside>
+    </div>
   </div>
 
   <script type="module" src="game.js"></script>

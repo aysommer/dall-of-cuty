@@ -1,12 +1,11 @@
 // Типы сетевого протокола — общие для клиента и сервера.
 
-import type { Levels, Stat } from './progress.js';
 import type { MapId } from './maps/types.js';
 import type { LimitKind, StreakKind, WeatherKind } from './map.js';
 
 export type Team = 'green' | 'red';
 export type Mode = 'tdm' | 'ffa';
-export type WeaponId = 'pistol' | 'shotgun' | 'rifle' | 'lmg' | 'sniper' | 'knife' | 'grenade' | 'rocket';
+export type WeaponId = 'pistol' | 'smg' | 'shotgun' | 'rifle' | 'lmg' | 'sniper' | 'knife' | 'grenade' | 'rocket';
 /** Что в слоте 1 вместо огнестрела: нож или граната */
 export type MeleeKind = 'knife' | 'grenade';
 /** falling — летит с неба, idle — лежит, opening — его открывают, gone — ящика нет */
@@ -31,8 +30,8 @@ export interface PlayerInfo {
   helmet: number;
 }
 
-/** [id, x, y, z, yaw, pitch, оружие, подкат 0/1] */
-export type SnapRow = [number, number, number, number, number, number, WeaponId, 0 | 1];
+/** [id, x, y, z, yaw, pitch, оружие, подкат 0/1, в воздухе 0/1, перезаряжается 0/1] */
+export type SnapRow = [number, number, number, number, number, number, WeaponId, 0 | 1, 0 | 1, 0 | 1];
 
 export interface Winner {
   team?: Team;
@@ -45,10 +44,19 @@ export interface Winner {
 /** Чем убили: оружие, ящик-ловушка, метательный нож, ракета с неба или бомба. */
 export type KillWeapon = WeaponId | 'crate' | 'throw' | 'missile' | 'nuke' | 'gunship';
 
-export type InfoMsg = {
-  t: 'info'; mode: Mode; map: MapId; limitKind: LimitKind; limitValue: number;
+/** Комната в списке главного меню. locked — с паролем. */
+export interface RoomInfo {
+  id: number; name: string; locked: boolean;
+  mode: Mode; map: MapId; limitKind: LimitKind; limitValue: number;
   count: number; green: number; red: number; max: number;
-};
+}
+/** Лучший игрок сейчас по всем комнатам: счёт в текущем матче и прогресс за всё время. */
+export interface BestPlayer {
+  name: string; room: string; rank: number;
+  kills: number; deaths: number; totalKills: number; totalDeaths: number;
+}
+/** Главное меню: список комнат, сколько их может быть и лучший игрок. */
+export type LobbyMsg = { t: 'lobby'; rooms: RoomInfo[]; maxRooms: number; best: BestPlayer | null };
 /** limit — до скольких убийств идёт матч (0 — по времени); left — сколько миллисекунд осталось (0 — по убийствам) */
 export type PlayersMsg = { t: 'players'; mode: Mode; limit: number; left: number; scores: Record<Team, number>; list: PlayerInfo[] };
 export type SpawnMsg = { t: 'spawn'; id: number; p: Vec3; yaw: number };
@@ -58,7 +66,7 @@ export type ShotMsg = { t: 'shot'; id: number; w: WeaponId; ends: Vec3[] };
 export type KillMsg = { t: 'kill'; killer: number | null; victim: number; w: KillWeapon; head?: boolean };
 /** Аптечки на карте: ms — сколько ещё падать. */
 export type MedkitsMsg = { t: 'medkits'; list: Array<{ id: number; at: Vec3; ms: number }> };
-export type ProfileMsg = { t: 'profile'; token: string; kills: number; levels: Levels };
+export type ProfileMsg = { t: 'profile'; token: string; kills: number; deaths: number };
 /**
  * Состояние ящика. at — куда он падает или где лежит; by — кто открывает;
  * ms — сколько осталось падать или открывать; left — через сколько исчезнет, если не открыть.
@@ -98,7 +106,9 @@ export type WeatherMsg = { t: 'weather'; kind: WeatherKind | null; ms: number };
 export type AmmoPacksMsg = { t: 'ammopacks'; list: Array<{ id: number; at: Vec3 }> };
 
 export type ServerMsg =
-  | InfoMsg
+  | LobbyMsg
+  /** Сообщение в чат комнаты: кто зашёл, кто вышел */
+  | { t: 'chat'; kind: 'join' | 'leave'; name: string; team: Team }
   | PlayersMsg
   | SpawnMsg
   | SnapMsg
@@ -124,6 +134,8 @@ export type ServerMsg =
   | GrenadesMsg
   /** Какие стёкла и двери уже разбиты */
   | { t: 'breaks'; broken: number[] }
+  /** Какие двери сейчас открыты */
+  | { t: 'doors'; open: number[] }
   | { t: 'gunship-hit'; id: number; left: number }
   | AmmoPacksMsg
   | WeatherMsg
@@ -140,8 +152,13 @@ export type ServerMsg =
   | { t: 'reset' };
 
 export type ClientMsg =
+  /**
+   * Войти в комнату room (id) или создать новую (room = 'new': roomName, mode, map и лимит — её настройки).
+   * password — пароль комнаты: при создании задаёт его (пустой — без пароля), при входе проверяется.
+   */
   | {
-    t: 'join'; name: string; team: Team; mode: Mode; map: MapId;
+    t: 'join'; room: number | 'new'; roomName?: string; password?: string;
+    name: string; team: Team; mode: Mode; map: MapId;
     limitKind: LimitKind; limitValue: number; kit: WeaponId[]; melee: MeleeKind; token?: string;
   }
   | { t: 'vote'; map: MapId }
@@ -156,10 +173,12 @@ export type ClientMsg =
   | { t: 'pin' }
   | { t: 'gthrow'; d: Vec3 }
   | { t: 'melee'; kind: MeleeKind }
-  | { t: 'upgrade'; stat: Stat }
+  /** F у двери — открыть или закрыть */
+  | { t: 'door'; id: number }
   | { t: 'open'; on: boolean }
   | { t: 'rocket'; d: Vec3 }
   | { t: 'spray'; p: Vec3; n: [number, number]; e: number }
-  | { t: 'state'; p: Vec3; yaw: number; pitch: number; w: WeaponId; sl: boolean }
+  /** sl — в подкате, air — в воздухе, rl — перезаряжается (два последних — только для анимации у других) */
+  | { t: 'state'; p: Vec3; yaw: number; pitch: number; w: WeaponId; sl: boolean; air?: boolean; rl?: boolean }
   /** hits: id игрока → [попаданий в тело, попаданий в голову] */
   | { t: 'shoot'; w: WeaponId; ends: Vec3[]; hits: Record<number, [number, number]>; brk?: Record<number, number> };
