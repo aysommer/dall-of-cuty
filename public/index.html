@@ -40,7 +40,7 @@
     </div>
     <div id="missile-view" class="hidden"><div class="frame"></div><div id="missile-alt"></div></div>
     <div id="crown-note" class="hidden">♛ Корона у тебя</div>
-    <div id="upgrade-note" class="hidden">Есть очко прокачки — нажми Esc</div>
+    <div id="upgrade-note" class="hidden">Есть очко прокачки — Esc → Настройки</div>
     <div id="scoreboard" class="hidden"></div>
     <div id="promo" class="hidden"></div>
   </div>
@@ -56,31 +56,68 @@
     </div>
   </div>
 
+  <!-- Меню паузы (Esc): плитки -->
   <div id="pause" class="overlay hidden">
-    <div class="panel wide">
-      <button id="resume" class="primary" type="button">ИГРАТЬ</button>
-      <p>WASD — движение · Shift — спринт · C в спринте — подкат · Пробел — прыжок<br>
-         ЛКМ — огонь · ПКМ — прицел · G — бросить нож · 1 — нож, 2 и 3 — стволы, колесо — по кругу<br>
-         5 — БПЛА · 6 — ракета с неба · 7 — ракетница · 8 — бомба (награды за серию убийств)<br>
-         R — перезарядка · F — открыть ящик · T — эмодзи на стене · Tab — счёт · Esc — это меню</p>
-
-      <h3>Оружие</h3>
-      <small>Выбери до двух стволов — нож всегда с тобой. Клавиши: 1 — нож, 2 и 3 — стволы.</small>
-      <div class="choice kit"></div>
-      <small>Слот 1: нож или граната (одна на жизнь; зажми ЛКМ — сорвёшь чеку, отпусти — бросишь, через 3 с взрыв). Выбор — со следующей жизни.</small>
-      <div class="choice melee">
-        <button type="button" data-melee="knife">🔪 Нож</button>
-        <button type="button" data-melee="grenade">💣 Граната</button>
+    <div class="metro">
+      <div class="metro-head">
+        <button id="pause-back" class="back hidden" type="button" title="Назад (Esc)">←</button>
+        <h2 id="pause-title">Пауза</h2>
+        <button id="resume" class="primary" type="button">ИГРАТЬ</button>
       </div>
 
-      <h3>Настройки</h3>
-      <div class="rank-card"></div>
-      <div class="settings"></div>
+      <div id="pv-home" class="pview tiles">
+        <div class="tile t-profile" id="tile-profile"></div>
+        <button class="tile t-classes" type="button" data-view="classes">
+          <span class="ico">🎒</span>
+          <span class="tile-sub" id="tile-class"></span>
+          <span class="tl">Классы</span>
+        </button>
+        <button class="tile t-settings" type="button" data-view="settings">
+          <span class="ico">⚙</span>
+          <span class="tile-badge hidden" id="tile-points"></span>
+          <span class="tl">Настройки</span>
+        </button>
+        <button class="tile t-exit" type="button" id="tile-exit">
+          <span class="ico">⏻</span>
+          <span class="tl">Выйти</span>
+        </button>
+      </div>
 
-      <h3>Прокачка</h3>
-      <small id="upgrade-points"></small>
-      <div id="upgrades"></div>
-      <small>1 очко за каждые 10 убийств. Прогресс сохраняется в этом браузере.</small>
+      <div id="pv-classes" class="pview hidden">
+        <small class="pv-hint">Класс — твой шаблон снаряжения: до двух стволов и нож или граната в слоте 1. Можно создать до 10 классов. Нажми на класс, чтобы выбрать его и изменить; оружие меняется сразу, нож и граната — со следующей жизни.</small>
+        <div id="class-list" class="class-list"></div>
+        <div id="class-edit" class="class-edit">
+          <label class="field">Название
+            <input id="class-name" maxlength="16" autocomplete="off">
+          </label>
+          <div class="field">Стволы (до двух)
+            <div class="choice kit"></div>
+          </div>
+          <div class="field">Слот 1
+            <div class="choice melee">
+              <button type="button" data-melee="knife">🔪 Нож</button>
+              <button type="button" data-melee="grenade">💣 Граната</button>
+            </div>
+            <small>Граната — одна на жизнь: зажми ЛКМ — сорвёшь чеку, отпусти — бросишь, через 3 с взрыв.</small>
+          </div>
+          <button id="class-delete" class="danger" type="button">Удалить класс</button>
+        </div>
+      </div>
+
+      <div id="pv-settings" class="pview hidden">
+        <div class="settings"></div>
+
+        <h3>Прокачка</h3>
+        <small id="upgrade-points"></small>
+        <div id="upgrades"></div>
+        <small>1 очко за каждые 10 убийств. Прогресс сохраняется в этом браузере.</small>
+
+        <h3>Управление</h3>
+        <p>WASD — движение · Shift — спринт · C в спринте — подкат · Пробел — прыжок<br>
+           ЛКМ — огонь · ПКМ — прицел · G — бросить нож · 1 — нож, 2 и 3 — стволы, колесо — по кругу<br>
+           5 — БПЛА · 6 — ракета с неба · 7 — ракетница · 8 — бомба · 9 — самолёт (награды за серию)<br>
+           R — перезарядка · F — ящик и двери · V — снять оптику · T — эмодзи на стене · Tab — счёт · Esc — меню</p>
+      </div>
     </div>
   </div>
 

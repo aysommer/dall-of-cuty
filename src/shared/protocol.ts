@@ -58,7 +58,7 @@ export type ShotMsg = { t: 'shot'; id: number; w: WeaponId; ends: Vec3[] };
 export type KillMsg = { t: 'kill'; killer: number | null; victim: number; w: KillWeapon; head?: boolean };
 /** Аптечки на карте: ms — сколько ещё падать. */
 export type MedkitsMsg = { t: 'medkits'; list: Array<{ id: number; at: Vec3; ms: number }> };
-export type ProfileMsg = { t: 'profile'; token: string; kills: number; levels: Levels };
+export type ProfileMsg = { t: 'profile'; token: string; kills: number; deaths: number; levels: Levels };
 /**
  * Состояние ящика. at — куда он падает или где лежит; by — кто открывает;
  * ms — сколько осталось падать или открывать; left — через сколько исчезнет, если не открыть.

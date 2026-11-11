@@ -143,7 +143,7 @@ function broadcast(msg: ServerMsg, exceptId: number | null = null): void {
   }
 }
 function sendProfile(p: Player): void {
-  send(p.ws, { t: 'profile', token: encodeProfile(p.profile), kills: p.profile.kills, levels: p.profile.levels });
+  send(p.ws, { t: 'profile', token: encodeProfile(p.profile), kills: p.profile.kills, deaths: p.profile.deaths, levels: p.profile.levels });
 }
 function teamCount(team: Team): number {
   let n = 0;
@@ -309,6 +309,8 @@ function killPlayer(killer: Player | null, v: Player, w: KillWeapon, head = fals
   v.helmet = 0;
   v.alive = false;
   v.deaths++;
+  v.profile.deaths++;
+  sendProfile(v);
   // Смерть обрывает серию; награды в запасе остаются
   v.streak = 0;
   sendLoadout(v);

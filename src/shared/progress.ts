@@ -22,11 +22,13 @@ export type Levels = Record<Stat, number>;
 
 export interface Profile {
   kills: number;
+  /** Смертей за всё время — для соотношения убийств и смертей */
+  deaths: number;
   levels: Levels;
 }
 
 export function newProfile(): Profile {
-  return { kills: 0, levels: { sprint: 0, walk: 0, reload: 0 } };
+  return { kills: 0, deaths: 0, levels: { sprint: 0, walk: 0, reload: 0 } };
 }
 
 export function maxLevel(stat: Stat): number {

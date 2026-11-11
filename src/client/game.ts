@@ -1155,6 +1155,7 @@ ws.addEventListener('message', (e: MessageEvent<string>) => {
 
 function onPlayers(m: PlayersMsg): void {
   mode = m.mode; limit = m.limit; scores = m.scores; roster = m.list;
+  if (pauseView === 'home' && !$('pause').classList.contains('hidden')) renderProfileTile();
   if (m.left > 0) matchEndsAt = performance.now() + m.left;
   const seen = new Set<number>();
   for (const p of roster) {
@@ -1446,6 +1447,7 @@ document.addEventListener('pointerlockchange', () => {
   if (!locked) unlockedAt = performance.now();
   menuClosed = false;
   $('pause').classList.toggle('hidden', locked || !joined || voting);
+  if (!locked) showPauseView('home');
   if (!locked) { mouseDown = false; aimHeld = false; for (const k in keys) keys[k] = false; }
 });
 document.addEventListener('mousemove', (e) => {
@@ -1496,6 +1498,11 @@ document.addEventListener('wheel', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Escape') {
     for (const d of document.querySelectorAll<HTMLDetailsElement>('details[open]')) d.open = false;
+    // Esc в разделе меню — назад к плиткам
+    if (joined && !locked && !menuClosed && pauseView !== 'home' && performance.now() - unlockedAt > 300) {
+      showPauseView('home');
+      return;
+    }
     // Esc при открытом меню — сразу обратно в игру (то же нажатие, что открыло меню, не считается)
     if (joined && !locked && !menuClosed && performance.now() - unlockedAt > 300) {
       $('pause').classList.add('hidden');
@@ -2007,13 +2014,16 @@ applySettings();
 // ======================= прокачка =======================
 function onProfile(m: ProfileMsg): void {
   const before = pointsLeft(profile);
-  profile = { kills: m.kills, levels: m.levels };
+  profile = { kills: m.kills, deaths: m.deaths, levels: m.levels };
   knownKills = m.kills;
+  knownDeaths = m.deaths;
   try {
     localStorage.setItem(TOKEN_KEY, m.token);
     localStorage.setItem(KILLS_KEY, String(m.kills));
+    localStorage.setItem(DEATHS_KEY, String(m.deaths));
   } catch { /* хранилище недоступно */ }
   renderRankCards();
+  renderProfileTile();
   if (pointsLeft(profile) > before && joined && profile.kills > 0) beep(660, 0.25);
   renderUpgrades();
 }
@@ -2024,6 +2034,9 @@ function renderUpgrades(): void {
   $('upgrade-points').textContent =
     `Убийств: ${profile.kills} · свободных очков: ${points} · до следующего очка: ${toNext}`;
   $('upgrade-note').classList.toggle('hidden', points <= 0);
+  $('tile-points').textContent = `+${points}`;
+  $('tile-points').title = 'Свободные очки прокачки';
+  $('tile-points').classList.toggle('hidden', points <= 0);
 
   const root = $('upgrades');
   root.textContent = '';
@@ -2054,9 +2067,12 @@ renderUpgrades();
 // Сервер присылает убийства только после входа (прогресс зашифрован), поэтому для меню
 // до входа помним последнее известное число — только чтобы показать, решает всё равно сервер.
 const KILLS_KEY = 'doc-kills';
-let knownKills = (() => {
-  try { return Math.max(0, Number(localStorage.getItem(KILLS_KEY)) || 0); } catch { return 0; }
-})();
+const DEATHS_KEY = 'doc-deaths';
+const storedCount = (key: string): number => {
+  try { return Math.max(0, Number(localStorage.getItem(key)) || 0); } catch { return 0; }
+};
+let knownKills = storedCount(KILLS_KEY);
+let knownDeaths = storedCount(DEATHS_KEY);
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** «1 убийство», «3 убийства», «5 убийств» */
@@ -2541,6 +2557,7 @@ function setMelee(kind: MeleeKind): void {
   if (settings.melee === kind) return;
   settings.melee = kind;
   applySettings();
+  saveActiveClass();
   sendMsg({ t: 'melee', kind });
   renderMeleeChoice();
   toast(kind === 'grenade' ? '💣 Граната вместо ножа — со следующей жизни' : '🔪 Нож вместо гранаты — со следующей жизни');
@@ -2560,6 +2577,7 @@ renderMeleeChoice();
 function setKit(kit: WeaponId[]): void {
   settings.kit = kit;
   applySettings();
+  saveActiveClass();
   sendMsg({ t: 'kit', guns: kit });
   if (GUNS.includes(me.weapon) && !kit.includes(me.weapon)) setWeapon(kit[0]!);
   renderKit();
@@ -2590,6 +2608,185 @@ function renderKit(): void {
   }
 }
 renderKit();
+
+// ======================= меню паузы: плитки =======================
+type PauseView = 'home' | 'classes' | 'settings';
+let pauseView: PauseView = 'home';
+const PAUSE_TITLES: Record<PauseView, string> = { home: 'Пауза', classes: 'Классы', settings: 'Настройки' };
+
+function showPauseView(view: PauseView): void {
+  pauseView = view;
+  for (const v of ['home', 'classes', 'settings'] as const) $('pv-' + v).classList.toggle('hidden', v !== view);
+  $('pause-title').textContent = PAUSE_TITLES[view];
+  $('pause-back').classList.toggle('hidden', view === 'home');
+  if (view === 'home') renderProfileTile();
+  if (view === 'classes') renderClasses();
+}
+for (const b of document.querySelectorAll<HTMLButtonElement>('#pv-home [data-view]')) {
+  b.addEventListener('click', () => showPauseView(b.dataset.view === 'classes' ? 'classes' : 'settings'));
+}
+$('pause-back').addEventListener('click', () => showPauseView('home'));
+// Выйти — на главный экран: соединение рвётся, сервер убирает игрока, меню входа — с чистого листа
+$('tile-exit').addEventListener('click', () => location.reload());
+
+/** Имя игрока: из списка на сервере, а до него — из поля в меню входа. */
+function myName(): string {
+  return roster.find((p) => p.id === me.id)?.name ?? ($<HTMLInputElement>('name').value.trim() || 'Игрок');
+}
+
+/** Плитка профиля: ник, звание, уровень, кольцо прогресса, убийства и смерти (не кликается). */
+function renderProfileTile(): void {
+  const tile = $('tile-profile');
+  const pr = rankProgress(knownKills);
+  const r = RANKS[pr.rank]!;
+  const next = RANKS[pr.rank + 1];
+  const kd = knownDeaths ? knownKills / knownDeaths : knownKills;
+  const mine = roster.find((p) => p.id === me.id);
+  tile.textContent = '';
+  const info = document.createElement('div');
+  info.className = 'profile-info';
+  info.append(
+    textEl('span', myName(), 'nick'),
+    textEl('span', `${r.abbr} · ${r.name}`, 'rank-line'),
+    textEl('small', next ? `${pr.done} / ${pr.need} до «${next.name}»` : 'Высшее звание'),
+  );
+  const stats = document.createElement('div');
+  stats.className = 'kd';
+  const stat = (value: string, label: string): HTMLElement => {
+    const el = document.createElement('div');
+    el.append(textEl('span', value, 'v'), textEl('small', label));
+    return el;
+  };
+  stats.append(
+    stat(String(knownKills), 'убийств'),
+    stat(String(knownDeaths), 'смертей'),
+    stat(kd.toFixed(2), 'У/С'),
+  );
+  info.append(stats);
+  if (mine) info.append(textEl('small', `В этом матче: ${mine.kills} / ${mine.deaths}`, 'match'));
+  tile.append(rankRing(pr.level, r.abbr, pr.part), info);
+}
+
+// ======================= классы: шаблоны снаряжения =======================
+interface PlayerClass { name: string; kit: WeaponId[]; melee: MeleeKind }
+const CLASSES_KEY = 'doc-classes';
+const MAX_CLASSES = 10;
+
+function loadClasses(): { list: PlayerClass[]; active: number } {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CLASSES_KEY) ?? 'null') as { list?: unknown; active?: unknown } | null;
+    if (raw && Array.isArray(raw.list)) {
+      const list = raw.list.flatMap((c: unknown): PlayerClass[] => {
+        const o = c as Partial<PlayerClass> | null;
+        if (!o || typeof o.name !== 'string' || !isKit(o.kit)) return [];
+        return [{ name: o.name.slice(0, 16) || 'Класс', kit: o.kit, melee: o.melee === 'grenade' ? 'grenade' : 'knife' }];
+      }).slice(0, MAX_CLASSES);
+      if (list.length) {
+        const a = Number(raw.active);
+        return { list, active: Number.isInteger(a) && a >= 0 && a < list.length ? a : 0 };
+      }
+    }
+  } catch { /* испорченные классы — берём стандартные */ }
+  // Первый запуск: текущий набор становится первым классом, плюс пара готовых шаблонов
+  return {
+    list: [
+      { name: 'Штурмовик', kit: [...settings.kit], melee: settings.melee },
+      { name: 'Снайпер', kit: ['sniper', 'smg'], melee: 'knife' },
+      { name: 'Ближний бой', kit: ['shotgun', 'pistol'], melee: 'grenade' },
+    ],
+    active: 0,
+  };
+}
+const classes = loadClasses();
+{
+  // Набор в игре — всегда набор выбранного класса
+  const c = classes.list[classes.active]!;
+  settings.kit = [...c.kit];
+  settings.melee = c.melee;
+  applySettings();
+  renderKit();
+  renderMeleeChoice();
+}
+
+function storeClasses(): void {
+  try { localStorage.setItem(CLASSES_KEY, JSON.stringify(classes)); } catch { /* хранилище недоступно */ }
+}
+
+/** Набор поменяли — записываем его в выбранный класс. */
+function saveActiveClass(): void {
+  const c = classes.list[classes.active];
+  if (!c) return;
+  c.kit = [...settings.kit];
+  c.melee = settings.melee;
+  storeClasses();
+  if (pauseView === 'classes') renderClasses();
+}
+
+function selectClass(i: number): void {
+  const c = classes.list[i];
+  if (!c) return;
+  classes.active = i;
+  storeClasses();
+  setKit([...c.kit]);
+  setMelee(c.melee);
+  renderClasses();
+}
+
+function renderClasses(): void {
+  const list = $('class-list');
+  list.textContent = '';
+  classes.list.forEach((c, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'class-tile' + (i === classes.active ? ' active' : '');
+    b.append(
+      textEl('span', c.name, 'cname'),
+      textEl('small', c.kit.map((w) => WEAPONS[w].name).join(' + ')),
+      textEl('small', c.melee === 'grenade' ? '💣 Граната' : '🔪 Нож'),
+    );
+    if (i === classes.active) b.append(textEl('span', '✓', 'check'));
+    b.addEventListener('click', () => selectClass(i));
+    list.append(b);
+  });
+  if (classes.list.length < MAX_CLASSES) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'class-tile add';
+    add.append(textEl('span', '+', 'plus'), textEl('small', `Новый класс (${classes.list.length}/${MAX_CLASSES})`));
+    add.addEventListener('click', () => {
+      // Новый класс — копия выбранного, его сразу можно переименовать и поменять
+      const base = classes.list[classes.active]!;
+      classes.list.push({ name: `Класс ${classes.list.length + 1}`, kit: [...base.kit], melee: base.melee });
+      selectClass(classes.list.length - 1);
+      $<HTMLInputElement>('class-name').select();
+    });
+    list.append(add);
+  }
+  const c = classes.list[classes.active]!;
+  const input = $<HTMLInputElement>('class-name');
+  if (document.activeElement !== input) input.value = c.name;
+  const del = $<HTMLButtonElement>('class-delete');
+  del.disabled = classes.list.length <= 1;
+  del.title = del.disabled ? 'Последний класс удалить нельзя' : '';
+  $('tile-class').textContent = c.name;
+}
+$('class-name').addEventListener('input', () => {
+  const c = classes.list[classes.active]!;
+  c.name = $<HTMLInputElement>('class-name').value.slice(0, 16);
+  storeClasses();
+  renderClasses();
+});
+$('class-name').addEventListener('blur', () => {
+  const c = classes.list[classes.active]!;
+  if (!c.name.trim()) { c.name = `Класс ${classes.active + 1}`; storeClasses(); renderClasses(); }
+});
+$('class-delete').addEventListener('click', () => {
+  if (classes.list.length <= 1) return;
+  classes.list.splice(classes.active, 1);
+  selectClass(Math.min(classes.active, classes.list.length - 1));
+});
+renderClasses();
+renderProfileTile();
 
 // ======================= патроны с погибших =======================
 interface PackFx { g: THREE.Group; at: Vec3 }
