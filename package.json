@@ -11,7 +11,8 @@
     "build:static": "node --input-type=module -e \"import{cpSync}from'node:fs';cpSync('public','dist/public',{recursive:true})\"",
     "build": "npm run typecheck && npm run build:server && npm run build:client && npm run build:static",
     "start": "node dist/server/index.js",
-    "dev": "npm run build && npm start"
+    "dev": "npm run build && npm start",
+    "test": "node tests/e2e.mjs"
   },
   "license": "MIT",
   "dependencies": {
