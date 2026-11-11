@@ -22,7 +22,7 @@ export interface PlayerInfo {
   alive: boolean;
   kills: number;
   deaths: number;
-  /** Суперброня из серии: игрок в 1,5 раза больше */
+  /** Суперброня из серии (Джаггернаут): игрок на 10% больше, весь серый и в шлеме */
   big: boolean;
   /** Звание: номер в RANKS (по убийствам за всё время) */
   rank: number;

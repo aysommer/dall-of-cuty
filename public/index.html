@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>Dall of Cuty</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -43,6 +43,26 @@
     <div id="crown-note" class="hidden">♛ Корона у тебя</div>
     <div id="scoreboard" class="hidden"></div>
     <div id="promo" class="hidden"></div>
+
+    <!-- Сенсорное управление: видно только на сенсорном экране во время игры -->
+    <div id="touch">
+      <div id="t-look"></div>
+      <div id="t-stick" class="hidden"><i></i></div>
+      <div class="t-top">
+        <button type="button" id="t-menu" aria-label="Меню">☰</button>
+        <button type="button" id="t-score" aria-label="Счёт">▤</button>
+        <button type="button" data-key="KeyT" aria-label="Эмодзи на стене">😀</button>
+        <button type="button" data-key="KeyV" aria-label="Оптика">◎</button>
+      </div>
+      <button type="button" id="t-fire" aria-label="Огонь">●</button>
+      <button type="button" id="t-aim" aria-label="Прицел">⌖</button>
+      <button type="button" id="t-jump" data-hold="Space" aria-label="Прыжок">▲</button>
+      <button type="button" id="t-reload" data-key="KeyR" aria-label="Перезарядка">↻</button>
+      <button type="button" id="t-slide" data-key="KeyC" aria-label="Подкат">▼</button>
+      <button type="button" id="t-throw" data-key="KeyG" aria-label="Бросить нож">🔪</button>
+      <button type="button" id="t-use" data-key="KeyF" aria-label="Действие">F</button>
+      <div id="t-rotate">Поверни телефон горизонтально ↻</div>
+    </div>
   </div>
 
   <div id="flash"></div>

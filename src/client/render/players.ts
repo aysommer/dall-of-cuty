@@ -6,31 +6,37 @@ import type { PlayerInfo, WeaponId } from '../../shared/protocol.js';
 import { box, scene } from '../core/scene.js';
 import { state } from '../core/state.js';
 import { TEAM_COLOR } from '../core/util.js';
-import { type Character, characterReady, createCharacter, updateCharacter } from './character.js';
+import { type Character, characterReady, createCharacter, setCharacterLook, updateCharacter } from './character.js';
 import { buildGun, type Gun, nameSprite } from './models.js';
 
 /** Высота центра головы модели над землёй, м */
 const HEAD_Y = 1.66;
 
 /**
- * Шлем Джаггернаута: тёмный металлический колпак на голову с наушниками по бокам и козырьком.
+ * Шлем Джаггернаута: округлый стальной купол с назатыльником и козырьком.
  * Собран вокруг центра головы: (0, 0, 0) — середина головы, козырёк смотрит на −Z.
  */
 function buildHelmet(): THREE.Group {
   const g = new THREE.Group();
-  const METAL = 0x3a3f45, EDGE = 0x22262b, W = 0.3;
-  const top = box(W, 0.1, W, METAL);
-  top.position.y = 0.15;
-  const back = box(W, 0.26, 0.05, METAL);
-  back.position.set(0, 0.02, W / 2);
-  const brim = box(W + 0.04, 0.04, 0.1, EDGE);
-  brim.position.set(0, 0.1, -W / 2 - 0.04);
-  g.add(top, back, brim);
-  for (const side of [-1, 1]) {
-    const ear = box(0.05, 0.26, W, METAL);
-    ear.position.set(side * (W / 2), 0.02, 0);
-    g.add(ear);
-  }
+  const steel = new THREE.MeshLambertMaterial({ color: 0x4a4f56 }), dark = new THREE.MeshLambertMaterial({ color: 0x24282d });
+  // Купол — верхняя половина сферы, чуть вытянутая назад
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(0.155, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), steel);
+  dome.scale.set(1, 1.05, 1.12);
+  dome.position.set(0, 0.03, 0.01);
+  // Назатыльник и уши — пояс сферы ниже купола, открытый спереди (лицо свободно)
+  const neck = new THREE.Mesh(new THREE.SphereGeometry(0.157, 20, 6, Math.PI * 0.25, Math.PI * 1.5, Math.PI * 0.5, Math.PI * 0.28), steel);
+  neck.scale.set(1, 1.05, 1.12);
+  neck.position.copy(dome.position);
+  neck.rotation.y = Math.PI / 2 + Math.PI; // разрез — к лицу (−Z)
+  steel.side = THREE.DoubleSide;
+  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.022, 20, 1, false, Math.PI * 0.72, Math.PI * 0.56), dark);
+  brim.scale.set(1, 1, 1.25);
+  brim.position.set(0, 0.035, -0.02);
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.156, 0.012, 6, 24), dark);
+  band.rotation.x = Math.PI / 2;
+  band.scale.set(1, 1.12, 1);
+  band.position.set(0, 0.035, 0.01);
+  g.add(dome, neck, brim, band);
   g.visible = false;
   return g;
 }
@@ -102,7 +108,7 @@ export interface Remote {
   poseK: number;
   labelY: number;
   crown: THREE.Group;
-  /** Бронежилет: закрывает корпус, голова и ноги видны */
+  /** Бронежилет на прямоугольнике (пока нет модели); у модели жилет свой — чёрное утолщённое туловище */
   armor: THREE.Mesh;
   /** Шлем Джаггернаута */
   helmet: THREE.Group;
@@ -158,7 +164,7 @@ export function buildPlayer(info: PlayerInfo): Remote {
   const crown = buildCrown();
   crown.position.y = HEAD_Y + 0.14;
   pose.add(crown);
-  const armor = box(0.44, 0.5, 0.3, 0x4b5320);
+  const armor = box(0.47, 0.5, 0.32, 0x16181b);
   armor.position.y = 1.2; // от пояса до плеч
   armor.visible = false;
   pose.add(armor);
@@ -194,8 +200,17 @@ function attachCharacter(r: Remote): void {
     o.position.set(0, y * 100, 0);
   };
   wear(r.helmet, c.bones.Head, 0.08);
-  wear(r.armor, c.bones.Spine1, 0.06);
+  r.armor.visible = false;
+  applyLook(r);
   placeCrown(r);
+}
+
+/** Броня, шлем и цвет по сведениям с сервера: жилет — чёрное туловище, Джаггернаут — весь серый и в шлеме. */
+export function applyLook(r: Remote): void {
+  const p = r.info;
+  r.helmet.visible = p.helmet > 0;
+  if (r.char) setCharacterLook(r.char, { vest: p.armor > 0 && !p.big, grey: p.big });
+  else r.armor.visible = p.armor > 0;
 }
 
 /** Корона — на макушке, а если надет шлем — поверх него. */

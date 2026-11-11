@@ -14,7 +14,7 @@ import { onAmmoPacks } from '../pickups/ammo.js';
 import { onCrate } from '../pickups/crate.js';
 import { onMedkits } from '../pickups/medkits.js';
 import { muzzleWorld } from '../render/models.js';
-import { buildPlayer, dropHelmet, leaderId, placeCrown, setRemoteWeapon } from '../render/players.js';
+import { applyLook, buildPlayer, dropHelmet, leaderId, placeCrown, setRemoteWeapon } from '../render/players.js';
 import { gunner, gunshipFx, onGunship, onGunshipEnd } from '../streaks/gunship.js';
 import { endMissile, onMissile, startMissile } from '../streaks/missile.js';
 import { onNuke } from '../streaks/nuke.js';
@@ -22,6 +22,7 @@ import { onPing } from '../streaks/uav.js';
 import { onLoadout } from '../ui/hotbar.js';
 import { feedNote, flashDamage, onChat, showHit, toast, updateHud } from '../ui/hud.js';
 import { onNewMap, onVote } from '../ui/match.js';
+import { unlock } from './input.js';
 import { onLobby } from '../ui/menu.js';
 import { pauseView, renderProfileTile } from '../ui/pause.js';
 import { onProfile, showPromotion } from '../ui/ranks.js';
@@ -65,12 +66,11 @@ function onPlayers(m: PlayersMsg): void {
     if (!r) { r = buildPlayer(p); remotes.set(p.id, r); }
     r.info = p;
     r.g.visible = p.alive;
-    r.armor.visible = p.armor > 0;
     // Шлем сбили — он слетает с головы
     if (r.helmet.visible && p.helmet === 0 && p.alive) dropHelmet(r);
-    r.helmet.visible = p.helmet > 0;
+    applyLook(r);
     placeCrown(r); // корона — поверх шлема
-    r.g.scale.setScalar(p.big ? STREAK.bigScale : 1); // суперброня — в полтора раза больше
+    r.g.scale.setScalar(p.big ? STREAK.bigScale : 1); // Джаггернаут чуть крупнее
   }
   for (const [id, r] of remotes) {
     if (!seen.has(id)) { scene.remove(r.g); remotes.delete(id); }
@@ -151,6 +151,7 @@ function onKill(m: KillMsg): void {
       spawnCorpse({
         pos: at, yaw: r ? r.yaw : me.yaw, team: v.team, lying: r ? r.slide : state.low,
         scale: (r ? r.info.big : me.big) ? STREAK.bigScale : 1,
+        grey: r ? r.info.big : me.big, vest: r ? r.info.armor > 0 && !r.info.big : me.armor > 0 && !me.big,
         char: r?.char ?? null, vel: r ? r.vel.clone() : me.vel.clone(), impulse,
       });
     }
@@ -212,7 +213,7 @@ export function initNet(): void {
     $('status').textContent = 'Соединение с сервером потеряно. Обнови страницу.';
     playBtn.disabled = true;
     if (state.joined) {
-      document.exitPointerLock();
+      unlock();
       $('hud').classList.add('hidden');
       $('pause').classList.add('hidden');
       $('menu').classList.remove('hidden');

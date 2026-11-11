@@ -265,6 +265,49 @@ if (!chromium) {
   check('лестница ведёт на крышу (y 7.3)', Math.abs(y - 7.3) < 0.05, y.toFixed(2));
   await H.close();
 
+  console.log('Сенсорный экран (телефон)');
+  {
+    const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true });
+    const T = await ctx.newPage();
+    T.on('pageerror', (e) => errors.push(e.message));
+    const cdp = await ctx.newCDPSession(T);
+    const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y, id]) => ({ x, y, id })) });
+    const centre = async (sel) => { const r = await T.locator(sel).boundingBox(); return [r.x + r.width / 2, r.y + r.height / 2]; };
+    await T.goto(URL);
+    await T.waitForFunction(() => !document.getElementById('play').disabled);
+    await T.locator('#play').scrollIntoViewIfNeeded();
+    await T.tap('#play');
+    await T.waitForFunction(() => document.getElementById('menu').classList.contains('hidden'));
+    await T.tap('#resume'); await T.waitForTimeout(400);
+    check('«ИГРАТЬ» пальцем запускает игру без захвата мыши', await T.evaluate(() => document.body.classList.contains('playing') && document.getElementById('pause').classList.contains('hidden')));
+    await T.evaluate(() => { game.me.pos.set(0, 0, 10); game.me.vel.set(0, 0, 0); game.me.yaw = 0; game.me.pitch = 0; });
+    await touch('touchStart', [[150, 260, 1]]);
+    await touch('touchMove', [[150, 230, 1]]); await T.waitForTimeout(1000);
+    const walk = await T.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z));
+    await touch('touchMove', [[150, 190, 1]]); await T.waitForTimeout(1000);
+    const run = await T.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z));
+    check('джойстик: ходьба и бег до упора', Math.abs(walk - 6.5) < 0.1 && Math.abs(run - 8.125) < 0.1, `${walk.toFixed(2)} и ${run.toFixed(2)}`);
+    const yaw0 = await T.evaluate(() => game.me.yaw);
+    await touch('touchStart', [[150, 190, 1], [520, 150, 2]]);
+    for (let x = 540; x <= 620; x += 20) await touch('touchMove', [[150, 190, 1], [x, 150, 2]]);
+    await T.waitForTimeout(100);
+    check('второй палец поворачивает взгляд, первый продолжает бег',
+      Math.abs(await T.evaluate((y) => game.me.yaw - y, yaw0)) > 0.3 && await T.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z)) > 6);
+    await touch('touchEnd', []); await T.waitForTimeout(500);
+    const ammo = await T.evaluate(() => game.me.ammo[game.me.weapon]);
+    const [fx, fy] = await centre('#t-fire');
+    await touch('touchStart', [[fx, fy, 3]]); await T.waitForTimeout(600); await touch('touchEnd', []);
+    check('кнопка огня стреляет', await T.evaluate(() => game.me.ammo[game.me.weapon]) < ammo);
+    await T.tap('#t-aim'); await T.waitForTimeout(700);
+    check('кнопка прицела включает прицел', (await T.evaluate(() => game.dbg().adsK)) > 0.9);
+    await T.tap('#t-aim');
+    await T.tap('#hotbar .slot >> nth=2'); await T.waitForTimeout(200);
+    check('слот оружия нажимается', await T.evaluate(() => game.me.weapon) === 'pistol');
+    await T.tap('#t-menu'); await T.waitForTimeout(200);
+    check('кнопка меню открывает паузу', await T.isVisible('#tile-profile'));
+    await ctx.close();
+  }
+
   check('без ошибок на страницах', errors.length === 0, errors.join(' | '));
   await browser.close();
 }

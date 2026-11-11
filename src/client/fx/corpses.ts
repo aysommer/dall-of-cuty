@@ -7,7 +7,7 @@ import { PLAYER, WORLD_BOTTOM } from '../../shared/map.js';
 import type { Box } from '../../shared/maps/types.js';
 import { box, scene } from '../core/scene.js';
 import { TEAM_COLOR } from '../core/util.js';
-import { aimBone, type BoneName, type Character, createCharacter, disposeCharacter } from '../render/character.js';
+import { aimBone, type BoneName, type Character, createCharacter, disposeCharacter, setCharacterLook } from '../render/character.js';
 import { solids } from '../world/map.js';
 
 const CORPSE = { physicsMs: 4500, sinkMs: 1200, depth: 0.7, max: 8 };
@@ -73,8 +73,11 @@ export interface CorpseSource {
   team: Team;
   /** Лежал в подкате */
   lying: boolean;
-  /** 1 или 1.5 у Джаггернаута */
+  /** 1 или чуть больше у Джаггернаута */
   scale: number;
+  /** Джаггернаут — серый; в бронежилете — чёрное туловище */
+  grey: boolean;
+  vest: boolean;
   /** Модель погибшего в её последней позе (у себя самого модели нет) */
   char: Character | null;
   /** Скорость тела в момент смерти и толчок от попадания или взрыва, м/с */
@@ -98,6 +101,7 @@ export function spawnCorpse(src: CorpseSource): void {
   while (corpses.length >= CORPSE.max) removeCorpse(0);
   const char = createCharacter(src.team);
   if (!char) { spawnBoxCorpse(src); return; }
+  setCharacterLook(char, { vest: src.vest, grey: src.grey });
   // Поза — как у живой модели в последний кадр (у себя самого модели нет — берём стойку)
   const pose = (src.char ?? char).allBones.map((b) => ({ p: b.position.clone(), q: b.quaternion.clone() }));
   if (src.char) {

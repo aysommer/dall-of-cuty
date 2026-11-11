@@ -21,7 +21,7 @@ export function addStreak(p: Player): void {
   if (p.streak === STREAK.missile) p.missile++;
   if (p.streak === STREAK.launcher) setRockets(p, Math.max(p.rockets, 6));
   if (p.streak === STREAK.superArmor) {
-    // Джаггернаут: суперброня, полтора размера и шлем, который держит выстрелы в голову
+    // Джаггернаут: суперброня, чуть больший размер и шлем, который держит выстрелы в голову
     p.armor = STREAK.superArmorHp;
     p.big = true;
     p.helmet = STREAK.helmetHits;
