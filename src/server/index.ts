@@ -10,7 +10,7 @@ import {
   type Box, type LimitKind, type MapId, type StreakKind, type WeatherKind,
 } from '../shared/map.js';
 import { chooseSpawn } from './spawn.js';
-import { isStat, maxLevel, pointsLeft, type Profile } from '../shared/progress.js';
+import type { Profile } from '../shared/progress.js';
 import { decodeProfile, encodeProfile } from './progress.js';
 import { EMOJIS, SPRAY } from '../shared/emoji.js';
 import { rankOf } from '../shared/ranks.js';
@@ -143,7 +143,7 @@ function broadcast(msg: ServerMsg, exceptId: number | null = null): void {
   }
 }
 function sendProfile(p: Player): void {
-  send(p.ws, { t: 'profile', token: encodeProfile(p.profile), kills: p.profile.kills, deaths: p.profile.deaths, levels: p.profile.levels });
+  send(p.ws, { t: 'profile', token: encodeProfile(p.profile), kills: p.profile.kills, deaths: p.profile.deaths });
 }
 function teamCount(team: Team): number {
   let n = 0;
@@ -1306,11 +1306,6 @@ wss.on('connection', (ws) => {
       if (isKit(msg.guns)) me.kit = msg.guns;
     } else if (msg.t === 'vote') {
       handleVote(me, msg.map);
-    } else if (msg.t === 'upgrade') {
-      if (isStat(msg.stat) && pointsLeft(me.profile) > 0 && me.profile.levels[msg.stat] < maxLevel(msg.stat)) {
-        me.profile.levels[msg.stat]++;
-      }
-      sendProfile(me);
     }
   });
 

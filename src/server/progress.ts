@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { STATS, maxLevel, newProfile, pointsLeft, type Profile } from '../shared/progress.js';
+import { newProfile, type Profile } from '../shared/progress.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sha256 = (data: string | Buffer): Buffer => crypto.createHash('sha256').update(data).digest();
@@ -38,7 +38,7 @@ export const MAX_TOKEN_LEN = 512;
 export function encodeProfile(p: Profile): string {
   const iv = crypto.randomBytes(IV_LEN);
   const cipher = crypto.createCipheriv('aes-256-gcm', KEY, iv);
-  const payload = JSON.stringify({ v: 1, k: p.kills, d: p.deaths, l: STATS.map((s) => p.levels[s]) });
+  const payload = JSON.stringify({ v: 1, k: p.kills, d: p.deaths });
   const body = Buffer.concat([cipher.update(payload, 'utf8'), cipher.final()]);
   return Buffer.concat([iv, cipher.getAuthTag(), body]).toString('base64url');
 }
@@ -52,18 +52,14 @@ export function decodeProfile(token: unknown): Profile {
     const decipher = crypto.createDecipheriv('aes-256-gcm', KEY, raw.subarray(0, IV_LEN));
     decipher.setAuthTag(raw.subarray(IV_LEN, IV_LEN + TAG_LEN));
     const text = Buffer.concat([decipher.update(raw.subarray(IV_LEN + TAG_LEN)), decipher.final()]).toString('utf8');
-    const data = JSON.parse(text) as { v?: unknown; k?: unknown; d?: unknown; l?: unknown };
-    if (data.v !== 1 || !Number.isSafeInteger(data.k) || (data.k as number) < 0 || !Array.isArray(data.l)) return fresh;
+    const data = JSON.parse(text) as { v?: unknown; k?: unknown; d?: unknown };
+    // Уровни прокачки (поле l) в старых токенах просто пропускаем
+    if (data.v !== 1 || !Number.isSafeInteger(data.k) || (data.k as number) < 0) return fresh;
     const profile = newProfile();
     profile.kills = data.k as number;
     // Смерти начали считать позже — в старых токенах их нет
     if (Number.isSafeInteger(data.d) && (data.d as number) >= 0) profile.deaths = data.d as number;
-    STATS.forEach((s, i) => {
-      const lvl: unknown = (data.l as unknown[])[i];
-      if (!Number.isInteger(lvl) || (lvl as number) < 0 || (lvl as number) > maxLevel(s)) throw new Error('level');
-      profile.levels[s] = lvl as number;
-    });
-    return pointsLeft(profile) >= 0 ? profile : fresh;
+    return profile;
   } catch {
     return fresh;
   }

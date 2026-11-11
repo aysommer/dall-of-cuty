@@ -63,16 +63,6 @@ details.field .settings { margin-top: 10px; }
 .setting .choice { flex: 1; margin: 0; }
 .setting .choice button { padding: 6px; }
 
-#upgrade-points { display: block; text-align: left; margin-bottom: 10px; }
-.upgrade { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 14px; }
-.upgrade .name { flex: 0 0 34%; text-align: left; }
-.upgrade .name small { display: block; font-size: 11px; }
-.upgrade .steps { flex: 1; display: flex; gap: 4px; }
-.upgrade .steps span { flex: 1; padding: 5px 0; font-size: 12px; background: #11141a; border: 1px solid #343b48; color: #6f7888; font-variant-numeric: tabular-nums; }
-.upgrade .steps .done { color: #9aa4b5; border-color: #4d5668; }
-.upgrade .steps .now { color: #fff; border-color: #5cf07a; background: #173d20; }
-.upgrade button { flex: 0 0 58px; padding: 6px 0; font-weight: 700; cursor: pointer; background: #e8e8e8; color: #111; border: 0; }
-.upgrade button:disabled { opacity: 0.35; cursor: default; }
 #status { display: block; margin-top: 10px; min-height: 18px; color: #ff8080; }
 
 /* ---------- HUD ---------- */
@@ -164,10 +154,6 @@ details.field .settings { margin-top: 10px; }
 #crown-note {
   position: absolute; top: 56px; left: 50%; transform: translateX(-50%);
   background: rgba(0, 0, 0, 0.45); padding: 4px 12px; font-size: 14px; color: #ffc928; white-space: nowrap;
-}
-#upgrade-note {
-  position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.45); padding: 6px 14px; font-size: 14px; color: #5cf07a; white-space: nowrap;
 }
 
 #center-msg {
@@ -343,7 +329,6 @@ button.tile:active { transform: scale(0.97); }
 .tile .ico { position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%); font-size: 44px; line-height: 1; }
 .tile .tl { position: absolute; left: 12px; bottom: 10px; font-size: 15px; font-weight: 600; }
 .tile .tile-sub { position: absolute; right: 12px; bottom: 11px; font-size: 12px; opacity: 0.85; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tile .tile-badge { position: absolute; right: 10px; top: 10px; background: #fff; color: #603cba; font-weight: 800; font-size: 13px; padding: 2px 7px; }
 .t-profile { grid-column: span 4; grid-row: span 2; background: #2b5797; display: flex; align-items: center; gap: 20px; padding: 16px 20px; cursor: default; }
 .t-classes { grid-column: span 2; background: #00a300; }
 .t-settings { background: #603cba; }

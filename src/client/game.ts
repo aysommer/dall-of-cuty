@@ -8,9 +8,6 @@ import {
 import { EMOJIS, SPRAY } from '../shared/emoji.js';
 import { UNDERGROUND_Y } from '../shared/maps/sewer.js';
 import { RANKS, killsForRank, levelOf, rankProgress } from '../shared/ranks.js';
-import {
-  KILLS_PER_POINT, STATS, UPGRADES, maxLevel, multiplier, newProfile, pointsLeft, type Profile,
-} from '../shared/progress.js';
 import type {
   AmmoPacksMsg, BoomMsg, CrateMsg, GrenadesMsg, GunshipMsg, MeleeKind, CrateState, KillWeapon, LoadoutMsg, MedkitsMsg, MissileMsg, NukeMsg, PingMsg, RocketMsg, SprayMsg,
   ThrowEndMsg, ThrowMsg, VoteMsg, WeatherMsg,
@@ -25,6 +22,8 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
 };
 const TEAM_COLOR: Record<Team, number> = { green: 0x2fc44e, red: 0xe23b3b };
 const SPEED = 6.5, JUMP = 7, GRAVITY = 19, CLIMB = 4;
+/** Во сколько раз бег быстрее ходьбы */
+const SPRINT_K = 1.25;
 const MOUSE_SENS = 0.0022;
 const BASE_FOV = 75;
 
@@ -57,8 +56,6 @@ function loadSettings(): Settings {
 }
 const settings = loadSettings();
 
-// Прокачка: данные приходят с сервера, в браузере лежит только зашифрованный токен
-let profile: Profile = newProfile();
 
 // ======================= сцена =======================
 const canvas = $<HTMLCanvasElement>('game');
@@ -1614,8 +1611,7 @@ function climb(ladder: Ladder, f: number, wish: { x: number; z: number }, now: n
 }
 
 const sprintKey = (): boolean => !!(keys.ShiftLeft || keys.ShiftRight);
-const sprintSpeed = (): number =>
-  SPEED * multiplier(profile.levels, 'walk') * multiplier(profile.levels, 'sprint');
+const sprintSpeed = (): number => SPEED * SPRINT_K;
 
 /** C в спринте: ложимся и скользим по инерции SLIDE.ms, управлять движением нельзя. */
 function trySlide(now: number): void {
@@ -1640,10 +1636,10 @@ function move(dt: number): void {
   const s = frozen ? 0 : (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
   const len = Math.hypot(f, s) || 1;
   const sin = Math.sin(me.yaw), cos = Math.cos(me.yaw);
-  let speed = SPEED * multiplier(profile.levels, 'walk');
+  let speed = SPEED;
   // В прицеле не бегаем
   // Бег — пока не целишься и не стреляешь (как в Call of Duty: выстрел прерывает спринт)
-  if (isSprinting()) speed *= multiplier(profile.levels, 'sprint');
+  if (isSprinting()) speed *= SPRINT_K;
   const wish = { x: (-sin * f + cos * s) / len * speed, z: (-cos * f - sin * s) / len * speed };
   const p = me.pos;
   const crate = crateSolid();
@@ -1716,7 +1712,7 @@ function startReload(): void {
   if (me.weapon === 'rocket' || w.melee) return; // ракетница и нож не перезаряжаются
   if (me.reloadUntil || me.ammo[me.weapon] >= w.mag || !me.alive) return;
   if (me.reserve[me.weapon] <= 0) { toast('Патроны кончились — подбери с погибших'); return; }
-  me.reloadMs = w.reload / multiplier(profile.levels, 'reload');
+  me.reloadMs = w.reload;
   me.reloadUntil = performance.now() + me.reloadMs;
   beep(300, 0.08, 0.08);
   updateHud();
@@ -2013,8 +2009,6 @@ applySettings();
 
 // ======================= прокачка =======================
 function onProfile(m: ProfileMsg): void {
-  const before = pointsLeft(profile);
-  profile = { kills: m.kills, deaths: m.deaths, levels: m.levels };
   knownKills = m.kills;
   knownDeaths = m.deaths;
   try {
@@ -2024,44 +2018,8 @@ function onProfile(m: ProfileMsg): void {
   } catch { /* хранилище недоступно */ }
   renderRankCards();
   renderProfileTile();
-  if (pointsLeft(profile) > before && joined && profile.kills > 0) beep(660, 0.25);
-  renderUpgrades();
 }
 
-function renderUpgrades(): void {
-  const points = pointsLeft(profile);
-  const toNext = KILLS_PER_POINT - (profile.kills % KILLS_PER_POINT);
-  $('upgrade-points').textContent =
-    `Убийств: ${profile.kills} · свободных очков: ${points} · до следующего очка: ${toNext}`;
-  $('upgrade-note').classList.toggle('hidden', points <= 0);
-  $('tile-points').textContent = `+${points}`;
-  $('tile-points').title = 'Свободные очки прокачки';
-  $('tile-points').classList.toggle('hidden', points <= 0);
-
-  const root = $('upgrades');
-  root.textContent = '';
-  for (const stat of STATS) {
-    const up = UPGRADES[stat];
-    const level = profile.levels[stat];
-    const row = document.createElement('div');
-    row.className = 'upgrade';
-    const steps = document.createElement('span');
-    steps.className = 'steps';
-    up.values.forEach((v, i) => {
-      steps.append(textEl('span', `×${v.toFixed(2)}`, i === level ? 'now' : i < level ? 'done' : ''));
-    });
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = level >= maxLevel(stat) ? 'МАКС' : '+';
-    btn.disabled = points <= 0 || level >= maxLevel(stat);
-    btn.addEventListener('click', () => sendMsg({ t: 'upgrade', stat }));
-    const title = textEl('span', up.name, 'name');
-    title.append(textEl('small', up.hint));
-    row.append(title, steps, btn);
-    root.append(row);
-  }
-}
-renderUpgrades();
 
 // ======================= звание и уровень =======================
 // Сервер присылает убийства только после входа (прогресс зашифрован), поэтому для меню

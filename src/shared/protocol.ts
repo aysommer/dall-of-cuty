@@ -1,6 +1,5 @@
 // Типы сетевого протокола — общие для клиента и сервера.
 
-import type { Levels, Stat } from './progress.js';
 import type { MapId } from './maps/types.js';
 import type { LimitKind, StreakKind, WeatherKind } from './map.js';
 
@@ -58,7 +57,7 @@ export type ShotMsg = { t: 'shot'; id: number; w: WeaponId; ends: Vec3[] };
 export type KillMsg = { t: 'kill'; killer: number | null; victim: number; w: KillWeapon; head?: boolean };
 /** Аптечки на карте: ms — сколько ещё падать. */
 export type MedkitsMsg = { t: 'medkits'; list: Array<{ id: number; at: Vec3; ms: number }> };
-export type ProfileMsg = { t: 'profile'; token: string; kills: number; deaths: number; levels: Levels };
+export type ProfileMsg = { t: 'profile'; token: string; kills: number; deaths: number };
 /**
  * Состояние ящика. at — куда он падает или где лежит; by — кто открывает;
  * ms — сколько осталось падать или открывать; left — через сколько исчезнет, если не открыть.
@@ -160,7 +159,6 @@ export type ClientMsg =
   | { t: 'melee'; kind: MeleeKind }
   /** F у двери — открыть или закрыть */
   | { t: 'door'; id: number }
-  | { t: 'upgrade'; stat: Stat }
   | { t: 'open'; on: boolean }
   | { t: 'rocket'; d: Vec3 }
   | { t: 'spray'; p: Vec3; n: [number, number]; e: number }
