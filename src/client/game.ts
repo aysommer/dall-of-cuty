@@ -399,24 +399,26 @@ interface Gun {
 
 /** Коллиматорный прицел: рамка со стеклом и красная точка в центре. */
 function buildRedDot(group: THREE.Group, y: number, z: number): void {
-  const FRAME = 0x1a1a1a, W = 0.055, H = 0.042;
+  // Компактный прицел: рамка ~3,8 × 2,9 см, точка ~2 мм — не загораживает цель
+  const FRAME = 0x1a1a1a, W = 0.038, H = 0.029, BASE_BOTTOM = 0.043;
   const part = (w: number, h: number, d: number, px: number, py: number, color: number, lit = true) => {
     const m = box(w, h, d, color, lit);
     m.position.set(px, py, z);
     group.add(m);
     return m;
   };
-  part(W * 0.7, 0.02, 0.07, 0, y - H / 2 - 0.012, FRAME);       // основание
-  part(0.01, H, 0.012, -W / 2, y, FRAME);                       // стойки
-  part(0.01, H, 0.012, W / 2, y, FRAME);
-  part(W + 0.01, 0.01, 0.012, 0, y + H / 2, FRAME);             // верх
+  const baseH = BASE_BOTTOM - H / 2;                            // основание до самого ствола
+  part(W * 0.7, baseH, 0.05, 0, y - H / 2 - baseH / 2, FRAME);  // основание
+  part(0.007, H, 0.009, -W / 2, y, FRAME);                      // стойки
+  part(0.007, H, 0.009, W / 2, y, FRAME);
+  part(W + 0.007, 0.007, 0.009, 0, y + H / 2, FRAME);           // верх
   const glass = new THREE.Mesh(
     new THREE.PlaneGeometry(W, H),
     new THREE.MeshBasicMaterial({ color: 0x9fd3ff, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide }),
   );
   glass.position.set(0, y, z);
   group.add(glass);
-  part(0.004, 0.004, 0.002, 0, y, 0xff2020, false).position.z = z - 0.004; // красная точка
+  part(0.0022, 0.0022, 0.001, 0, y, 0xff2020, false).position.z = z - 0.004; // красная точка
 }
 
 // Оружие смотрит стволом вдоль -Z.
