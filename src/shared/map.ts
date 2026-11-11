@@ -55,7 +55,7 @@ export const MEDKIT = {
 
 export const WEAPONS: Record<WeaponId, Weapon> = {
   pistol:  { name: 'Пистолет', dmg: 25, pellets: 1, rate: 280, mag: 12, reserve: 24, reload: 1200, spread: 0.006, auto: false, zoom: 60 },
-  shotgun: { name: 'Дробовик', dmg: 13, pellets: 8, rate: 900, mag: 6, reserve: 18, reload: 2200, spread: 0.045, auto: false, zoom: 62 },
+  shotgun: { name: 'Дробовик', dmg: 15, pellets: 8, rate: 900, mag: 6, reserve: 18, reload: 2200, spread: 0.045, auto: false, zoom: 62 },
   // Пулемёт: лента на 100 патронов, отдача вдвое сильнее, чем у автомата
   lmg:     { name: 'Пулемёт', dmg: 22, pellets: 1, rate: 95, mag: 100, reserve: 0, reload: 4200, spread: 0.014, auto: true, zoom: 58 },
   // Пистолет-пулемёт: урон ниже, скорострельность выше, чем у автомата
