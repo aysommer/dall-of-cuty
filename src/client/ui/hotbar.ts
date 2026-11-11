@@ -15,7 +15,7 @@ let streak = 0;
 
 const rewards: Record<StreakKind, number> = { uav: 0, missile: 0, nuke: 0, gunship: 0 };
 
-type SlotId = WeaponId | StreakKind;
+export type SlotId = WeaponId | StreakKind;
 
 /** Слоты: 1 — нож, 2 и 3 — стволы из набора, 5–8 — награды за серию. */
 export function hotbar(): Array<{ key: string; id: SlotId; label: string }> {

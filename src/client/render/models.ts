@@ -31,16 +31,17 @@ export interface Gun {
 }
 
 /** Коллиматорный прицел: рамка со стеклом и красная точка в центре. */
-function buildRedDot(group: THREE.Group, y: number, z: number): void {
+function buildRedDot(group: THREE.Group, y: number, z: number, top: number): void {
   // Компактный прицел: рамка ~3,8 × 2,9 см, точка ~2 мм — не загораживает цель
-  const FRAME = 0x1a1a1a, W = 0.038, H = 0.029, BASE_BOTTOM = 0.043;
+  const FRAME = 0x1a1a1a, W = 0.038, H = 0.029;
   const part = (w: number, h: number, d: number, px: number, py: number, color: number, lit = true) => {
     const m = box(w, h, d, color, lit);
     m.position.set(px, py, z);
     group.add(m);
     return m;
   };
-  const baseH = BASE_BOTTOM - H / 2;                            // основание до самого ствола
+  // Основание — от верха корпуса оружия (top) до рамки и чуть вглубь корпуса: прицел не висит в воздухе
+  const baseH = y - H / 2 - top + 0.006;
   part(W * 0.7, baseH, 0.05, 0, y - H / 2 - baseH / 2, FRAME);  // основание
   part(0.007, H, 0.009, -W / 2, y, FRAME);                      // стойки
   part(0.007, H, 0.009, W / 2, y, FRAME);
@@ -71,6 +72,8 @@ export function buildGun(type: WeaponId): Gun {
   let muzzleZ: number;
   let mag: THREE.Object3D | undefined, bolt: THREE.Object3D | undefined, shell: THREE.Object3D | undefined;
   let sight: Gun['sight'];
+  /** Высота верха корпуса под прицелом — на неё встаёт его подставка */
+  let sightTop = 0;
   let aim: Gun['aim'];
   let scope: THREE.Object3D | undefined;
   let iron: Gun['iron'];
@@ -79,6 +82,7 @@ export function buildGun(type: WeaponId): Gun {
     add(0.045, 0.13, 0.06, 0x3a2a1a, 0, -0.09, -0.03);
     mag = part(0.032, 0.05, 0.045, 0x111111, 0, -0.165, -0.03); // низ магазина торчит из рукояти
     sight = { y: 0.085, z: -0.1 };
+    sightTop = 0.035;
     aim = { ...sight, relief: 0.35 }; // пистолет держат на вытянутых руках
     muzzleZ = -0.26;
   } else if (type === 'shotgun') {
@@ -88,6 +92,7 @@ export function buildGun(type: WeaponId): Gun {
     shell = part(0.03, 0.03, 0.07, 0xc0262b, 0, -0.12, -0.08);
     shell.visible = false;
     sight = { y: 0.08, z: -0.15 };
+    sightTop = 0.03;
     aim = { ...sight, relief: 0.22 };
     muzzleZ = -0.72;
   } else if (type === 'sniper') {
@@ -144,6 +149,7 @@ export function buildGun(type: WeaponId): Gun {
       group.add(leg);
     }
     sight = { y: 0.13, z: -0.08 };
+    sightTop = 0.055;
     aim = { ...sight, relief: 0.24 };
     muzzleZ = -0.96;
   } else if (type === 'smg') {
@@ -153,6 +159,7 @@ export function buildGun(type: WeaponId): Gun {
     add(0.045, 0.12, 0.06, 0x1c1c1c, 0, -0.09, 0.0);        // рукоять
     add(0.05, 0.06, 0.2, 0x3a3a3a, 0, 0, 0.13);             // складной приклад
     sight = { y: 0.085, z: -0.12 };
+    sightTop = 0.04;
     aim = { ...sight, relief: 0.22 };
     muzzleZ = -0.48;
   } else {
@@ -161,10 +168,11 @@ export function buildGun(type: WeaponId): Gun {
     mag = part(0.045, 0.18, 0.07, 0x1c1c1c, 0, -0.12, -0.22);
     add(0.055, 0.1, 0.24, 0x4a3a28, 0, -0.02, 0.16);
     sight = { y: 0.1, z: -0.12 };
+    sightTop = 0.045;
     aim = { ...sight, relief: 0.22 };
     muzzleZ = -0.75;
   }
-  if (sight) buildRedDot(group, sight.y, sight.z);
+  if (sight) buildRedDot(group, sight.y, sight.z, sightTop);
   const flash = box(0.12, 0.12, 0.12, 0xffd34d, false);
   flash.position.set(0, 0, muzzleZ - 0.05);
   flash.visible = false;

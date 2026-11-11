@@ -27,6 +27,11 @@ export interface Character {
   walk: THREE.AnimationAction;
   run: THREE.AnimationAction;
   materials: THREE.Material[];
+  /** Материал поверхности тела — его цвет меняется (команда или серый Джаггернаут) */
+  skin: THREE.MeshLambertMaterial;
+  team: Team;
+  /** Бронежилет: чёрное утолщённое туловище поверх тела */
+  vest: THREE.SkinnedMesh[];
   /** Сглаженные веса: 0 — стоит, 1 — в воздухе; фаза перезарядки */
   airK: number;
   reloadT: number;
@@ -63,6 +68,8 @@ export function createCharacter(team: Team): Character | null {
   root.add(model);
 
   const materials: THREE.Material[] = [];
+  const skinned: THREE.SkinnedMesh[] = [];
+  let skin: THREE.MeshLambertMaterial | null = null;
   const allBones: THREE.Bone[] = [];
   const byName = new Map<string, THREE.Bone>();
   model.traverse((o) => {
@@ -74,6 +81,8 @@ export function createCharacter(team: Team): Character | null {
       const mat = new THREE.MeshLambertMaterial({ color: joints ? 0x23262c : TEAM_COLOR[team] });
       o.material = mat;
       materials.push(mat);
+      skinned.push(o);
+      if (!joints) skin = mat;
       // Границы скелетной сетки считаются по позе покоя — при анимации она иначе пропадает у края экрана
       o.frustumCulled = false;
     }
@@ -95,7 +104,44 @@ export function createCharacter(team: Team): Character | null {
   walk.setEffectiveWeight(0);
   run.setEffectiveWeight(0);
   mixer.update(0);
-  return { root, bones, allBones, mixer, idle, walk, run, materials, airK: 0, reloadT: 0, speed: 0 };
+  // Бронежилет — те же сетки, раздутые по нормалям и обрезанные по туловищу: двигается вместе с телом
+  const vestMat = vestMaterial();
+  materials.push(vestMat);
+  const vest = skinned.map((m) => {
+    const v = new THREE.SkinnedMesh(m.geometry, vestMat);
+    v.bind(m.skeleton, m.bindMatrix);
+    v.frustumCulled = false;
+    v.visible = false;
+    m.parent!.add(v);
+    return v;
+  });
+  return { root, bones, allBones, mixer, idle, walk, run, materials, skin: skin!, team, vest, airK: 0, reloadT: 0, speed: 0 };
+}
+
+/** Туловище в позе покоя модели: от пояса до плеч, без рук (метры) */
+const TORSO = { yMin: 0.98, yMax: 1.5, xMax: 0.2 };
+
+/** Чёрный материал жилета: вершины сдвинуты наружу по нормали, всё вне туловища отбрасывается. */
+function vestMaterial(): THREE.MeshLambertMaterial {
+  const mat = new THREE.MeshLambertMaterial({ color: 0x16181b });
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRest;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRest = position;\ntransformed += normalize(objectNormal) * 0.028;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRest;')
+      .replace('#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>\nif (vRest.y < ${TORSO.yMin.toFixed(3)} || vRest.y > ${TORSO.yMax.toFixed(3)} || abs(vRest.x) > ${TORSO.xMax.toFixed(3)}) discard;`);
+  };
+  return mat;
+}
+
+const JUGGERNAUT_GREY = 0x7d8288;
+
+/** Внешний вид: надет ли бронежилет и не Джаггернаут ли это (тот весь серый). */
+export function setCharacterLook(c: Character, look: { vest: boolean; grey: boolean }): void {
+  for (const v of c.vest) v.visible = look.vest;
+  c.skin.color.setHex(look.grey ? JUGGERNAUT_GREY : TEAM_COLOR[c.team]);
 }
 
 export function disposeCharacter(c: Character): void {

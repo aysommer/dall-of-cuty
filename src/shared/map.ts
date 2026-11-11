@@ -136,7 +136,7 @@ export const STREAK = {
   uav: 3, missile: 4, launcher: 5, superArmor: 7, nuke: 15,
   uavMs: 30_000, pingMs: 2000,
   missileHeight: 60, missileSpeed: 18, missileBoost: 55, missileRadius: 6, missileMaxMs: 20_000,
-  superArmorHp: 500, bigScale: 1.5,
+  superArmorHp: 500, bigScale: 1.1,
   /** Шлем Джаггернаута: голова неуязвима, пока шлем не собьют этим числом попаданий */
   helmetHits: 3,
   nukeMs: 4000,

@@ -13,7 +13,7 @@ import { updateEffects } from './fx/tracers.js';
 import { packFx, updateAmmoPacks } from './pickups/ammo.js';
 import { updateCrate } from './pickups/crate.js';
 import { medkitFx, updateMedkits } from './pickups/medkits.js';
-import { updateRemote } from './render/players.js';
+import { applyLook, updateRemote } from './render/players.js';
 import { characterFailed, characterReady, loadCharacterModel } from './render/character.js';
 import { gunner, gunshipFx, markerEls, updateGunship } from './streaks/gunship.js';
 import { missileCtl, remoteMissiles, updateMissile } from './streaks/missile.js';
@@ -143,7 +143,7 @@ function frame(now: number): void {
 declare global {
   interface Window {
     game: {
-      me: typeof me; remotes: typeof remotes; keys: typeof keys;
+      me: typeof me; remotes: typeof remotes; keys: typeof keys; applyLook: typeof applyLook;
       steer: (yaw: number, pitch: number) => void; dbg: () => Record<string, unknown>;
     };
   }
@@ -155,7 +155,7 @@ export function initLoop(): void {
   updateHud();
   requestAnimationFrame(frame);
   window.game = {
-    me, remotes, keys,
+    me, remotes, keys, applyLook,
     steer: (yaw: number, pitch: number) => {
       if (missileCtl) { missileCtl.yaw = yaw; missileCtl.pitch = pitch; }
       if (gunner) { gunner.yaw = yaw; gunner.pitch = pitch; }

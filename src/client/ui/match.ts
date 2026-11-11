@@ -2,6 +2,7 @@
 import type { VoteMsg } from '../../shared/protocol.js';
 import { MAP_ORDER, type MapId, MAPS } from '../../shared/map.js';
 import { overText, sendMsg } from '../core/net.js';
+import { unlock } from '../core/input.js';
 import { state } from '../core/state.js';
 import { $, textEl } from '../core/util.js';
 import { feedNote } from './hud.js';
@@ -27,7 +28,7 @@ export function onVote(m: VoteMsg): void {
   if (!voting) {
     voting = true;
     voteEndsAt = performance.now() + m.ms;
-    document.exitPointerLock();
+    unlock();
     $('pause').classList.add('hidden');
     $('vote').classList.remove('hidden');
   }
