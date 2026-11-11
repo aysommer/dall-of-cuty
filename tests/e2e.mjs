@@ -326,6 +326,24 @@ if (!chromium) {
   check('ходьба 6.5', Math.abs(walk - 6.5) < 0.05, walk.toFixed(2));
   check('бег 8.125', Math.abs(run - 8.125) < 0.05, run.toFixed(2));
 
+  console.log('Съёмный прицел');
+  {
+    await A.keyboard.press('Digit2'); await A.waitForTimeout(500);
+    const gun = await A.evaluate(() => game.me.weapon);
+    check('прицел по умолчанию надет', (await A.evaluate(() => game.dbg())).scopeOn === true);
+    await A.keyboard.press('KeyV');
+    const off = await A.waitForFunction(() => game.dbg().scopeOn === false && !game.dbg().scopeAnim, null, { timeout: 8000 }).then(() => true, () => false);
+    check('V снимает коллиматор', off);
+    check('выбор запомнен по стволу', JSON.parse(await A.evaluate(() => localStorage.getItem('doc-sights')))[gun] === false);
+    await A.keyboard.press('Digit3'); await A.waitForTimeout(500);
+    check('на другом стволе прицел остался', (await A.evaluate(() => game.dbg())).scopeOn === true);
+    await A.keyboard.press('Digit2'); await A.waitForTimeout(500);
+    check('вернулся к первому — прицел по-прежнему снят', (await A.evaluate(() => game.dbg())).scopeOn === false);
+    await A.keyboard.press('KeyV');
+    await A.waitForFunction(() => game.dbg().scopeOn === true && !game.dbg().scopeAnim, null, { timeout: 8000 }).catch(() => {});
+    check('V надевает обратно', (await A.evaluate(() => game.dbg())).scopeOn === true);
+  }
+
   console.log('Меню паузы');
   await A.evaluate(() => document.exitPointerLock()); await A.waitForTimeout(300);
   await A.evaluate(() => document.getElementById('pause').classList.remove('hidden'));

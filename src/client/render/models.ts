@@ -31,28 +31,55 @@ export interface Gun {
 }
 
 /** Коллиматорный прицел: рамка со стеклом и красная точка в центре. */
-function buildRedDot(group: THREE.Group, y: number, z: number, top: number): void {
+/**
+ * Съёмный коллиматор: все его детали — в одной группе с началом в центре рамки (0, y, z),
+ * чтобы его можно было снять и надеть целиком. Под ним на оружии — мушка и целик.
+ */
+function buildRedDot(group: THREE.Group, y: number, z: number, top: number): THREE.Group {
   // Компактный прицел: рамка ~3,8 × 2,9 см, точка ~2 мм — не загораживает цель
   const FRAME = 0x1a1a1a, W = 0.038, H = 0.029;
+  const dot = new THREE.Group();
+  dot.position.set(0, y, z);
   const part = (w: number, h: number, d: number, px: number, py: number, color: number, lit = true) => {
     const m = box(w, h, d, color, lit);
-    m.position.set(px, py, z);
-    group.add(m);
+    m.position.set(px, py, 0);
+    dot.add(m);
     return m;
   };
   // Основание — от верха корпуса оружия (top) до рамки и чуть вглубь корпуса: прицел не висит в воздухе
   const baseH = y - H / 2 - top + 0.006;
-  part(W * 0.7, baseH, 0.05, 0, y - H / 2 - baseH / 2, FRAME);  // основание
-  part(0.007, H, 0.009, -W / 2, y, FRAME);                      // стойки
-  part(0.007, H, 0.009, W / 2, y, FRAME);
-  part(W + 0.007, 0.007, 0.009, 0, y + H / 2, FRAME);           // верх
+  part(W * 0.7, baseH, 0.05, 0, -H / 2 - baseH / 2, FRAME);  // основание
+  part(0.007, H, 0.009, -W / 2, 0, FRAME);                   // стойки
+  part(0.007, H, 0.009, W / 2, 0, FRAME);
+  part(W + 0.007, 0.007, 0.009, 0, H / 2, FRAME);            // верх
   const glass = new THREE.Mesh(
     new THREE.PlaneGeometry(W, H),
     new THREE.MeshBasicMaterial({ color: 0x9fd3ff, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide }),
   );
-  glass.position.set(0, y, z);
-  group.add(glass);
-  part(0.0022, 0.0022, 0.001, 0, y, 0xff2020, false).position.z = z - 0.004; // красная точка
+  dot.add(glass);
+  part(0.0022, 0.0022, 0.001, 0, 0, 0xff2020, false).position.z = -0.004; // красная точка
+  group.add(dot);
+  return dot;
+}
+
+/** Высота мушки и целика над корпусом — по ним целятся, когда коллиматор снят */
+const IRON_H = 0.018;
+
+/**
+ * Мушка у дула и целик из двух зубцов ближе к глазу. Стоят на своих местах корпуса (rearTop и frontTop —
+ * высота корпуса под ними), а верхушки — на одной линии; возвращает высоту этой линии прицеливания.
+ */
+function buildIrons(group: THREE.Group, rearTop: number, rearZ: number, frontTop: number, frontZ: number): number {
+  const DARK = 0x0c0c0c, line = Math.max(rearTop, frontTop) + IRON_H;
+  const post = (x: number, z: number, base: number): void => {
+    const m = box(0.008, line - base, 0.008, DARK);
+    m.position.set(x, (line + base) / 2, z);
+    group.add(m);
+  };
+  post(0, frontZ, frontTop);
+  post(-0.011, rearZ, rearTop);
+  post(0.011, rearZ, rearTop);
+  return line;
 }
 
 // Оружие смотрит стволом вдоль -Z.
@@ -172,7 +199,15 @@ export function buildGun(type: WeaponId): Gun {
     aim = { ...sight, relief: 0.22 };
     muzzleZ = -0.75;
   }
-  if (sight) buildRedDot(group, sight.y, sight.z, sightTop);
+  if (sight && aim) {
+    // Коллиматор съёмный (V); без него целятся по мушке и целику, глаз — на том же расстоянии
+    scope = buildRedDot(group, sight.y, sight.z, sightTop);
+    // У пулемёта мушка стоит на кожухе ствола — он выше ствольной коробки
+    const line = type === 'lmg'
+      ? buildIrons(group, sightTop, sight.z + 0.06, 0.085, -0.5)
+      : buildIrons(group, sightTop, sight.z + 0.06, sightTop, muzzleZ + 0.04);
+    iron = { y: line - 0.002, z: sight.z + 0.06, relief: aim.relief + 0.04 };
+  }
   const flash = box(0.12, 0.12, 0.12, 0xffd34d, false);
   flash.position.set(0, 0, muzzleZ - 0.05);
   flash.visible = false;

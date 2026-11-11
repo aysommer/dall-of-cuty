@@ -33,6 +33,7 @@ export function setWeapon(w: WeaponId): void {
   me.nextShot = Math.max(me.nextShot, performance.now() + 250);
   viewModel.remove(viewGun.group);
   viewGun = buildGun(w);
+  state.scopeOn = sightOn(w);
   if (viewGun.scope) viewGun.scope.visible = state.scopeOn;
   viewModel.add(viewGun.group);
   updateHud();
@@ -42,7 +43,9 @@ export function setWeapon(w: WeaponId): void {
 export function updateAim(dt: number): void {
   const w = WEAPONS[me.weapon];
   const aiming = state.aimHeld && w.zoom !== null && me.alive && !me.reloadUntil && !openingUntil && !scopeAnim;
-  state.adsK += ((aiming ? 1 : 0) - state.adsK) * Math.min(1, dt * 12);
+  // Без прицела оружие легче — вскидывается чуть быстрее
+  const bare = !!viewGun.scope && !state.scopeOn;
+  state.adsK += ((aiming ? 1 : 0) - state.adsK) * Math.min(1, dt * (bare ? ADS_SPEED_BARE : ADS_SPEED));
   if (state.adsK < 0.001) state.adsK = 0;
   // Снайперка без оптики — по мушке, с небольшим приближением
   const zoom = me.weapon === 'sniper' && !state.scopeOn ? IRON_ZOOM : w.zoom ?? BASE_FOV;
@@ -54,7 +57,7 @@ export function updateAim(dt: number): void {
   const handX = settings.hand === 'left' ? -0.22 : 0.22;
   viewModel.position.x = handX * (1 - state.adsK);
   // В прицеле центр прицела встаёт ровно на линию взгляда (красная точка — в центр экрана)
-  const aimPt = me.weapon === 'sniper' && !state.scopeOn ? viewGun.iron : viewGun.aim;
+  const aimPt = aimPoint();
   const aimY = aimPt ? -aimPt.y * viewModel.scale.y : -0.13;
   viewModel.position.y = -0.2 + (aimY + 0.2) * state.adsK;
 }
@@ -84,6 +87,27 @@ export function poseGun(dt: number): void {
   viewModel.position.z += 0.18 * state.wallK;
 }
 
+/** Скорость вскидки в прицел: с прицелом и без него (без — на четверть быстрее) */
+const ADS_SPEED = 12, ADS_SPEED_BARE = 15;
+
+// Стоит ли прицел — помнится по каждому стволу отдельно и переживает перезапуск игры
+const SIGHTS_KEY = 'doc-sights';
+const sights: Record<string, boolean> = (() => {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(SIGHTS_KEY) ?? '{}');
+    return raw && typeof raw === 'object' ? Object.fromEntries(Object.entries(raw).filter(([, v]) => typeof v === 'boolean')) as Record<string, boolean> : {};
+  } catch { return {}; }
+})();
+/** Надет ли прицел на этом стволе (по умолчанию — да) */
+export const sightOn = (w: WeaponId): boolean => sights[w] ?? true;
+function rememberSight(w: WeaponId, on: boolean): void {
+  sights[w] = on;
+  try { localStorage.setItem(SIGHTS_KEY, JSON.stringify(sights)); } catch { /* хранилище недоступно */ }
+}
+
+/** Куда подводится глаз в прицеле: к прицелу, а если он снят — к мушке с целиком. */
+export const aimPoint = (): typeof viewGun.aim => !state.scopeOn && viewGun.iron ? viewGun.iron : viewGun.aim;
+
 /** Анимация руки, которая снимает или надевает оптику */
 export let scopeAnim: { until: number; to: boolean } | null = null;
 
@@ -94,8 +118,9 @@ const IRON_ZOOM = 50;
 
 let scopeHand: THREE.Mesh | null = null;
 
+/** V: снять или надеть прицел на оружии в руках — оптику снайперки или коллиматор остальных стволов. */
 export function toggleScope(now: number): void {
-  if (me.weapon !== 'sniper' || !me.alive || scopeAnim || me.reloadUntil) return;
+  if (!viewGun.scope || !me.alive || scopeAnim || me.reloadUntil) return;
   scopeAnim = { until: now + SCOPE_ANIM_MS, to: !state.scopeOn };
   state.aimHeld = false; // во время возни с оптикой не целимся
   beep(state.scopeOn ? 520 : 760, 0.08, 0.06);
@@ -140,7 +165,9 @@ export function animateScope(now: number): void {
   if (now >= scopeAnim.until) {
     state.scopeOn = scopeAnim.to;
     scopeAnim = null;
-    toast(state.scopeOn ? '🔭 Оптика надета' : '🔭 Оптика снята — целься по мушке (V — надеть)');
+    rememberSight(me.weapon, state.scopeOn);
+    const what = me.weapon === 'sniper' ? 'Оптика' : 'Прицел';
+    toast(state.scopeOn ? `🔭 ${what}: на месте` : `🔭 ${what}: снят — целься по мушке, вскидка быстрее (V — надеть)`);
   }
 }
 

@@ -29,7 +29,7 @@ import { cookStart, grenadeFx, updateGrenades } from './weapons/grenade.js';
 import { updateKnives } from './weapons/knife.js';
 import { updateRockets } from './weapons/rockets.js';
 import { updateShooting } from './weapons/shooting.js';
-import { animateGun, animateScope, poseGun, scopeAnim, sniperSway, SWING_MS, updateAim, viewGun, viewModel } from './weapons/viewmodel.js';
+import { aimPoint, animateGun, animateScope, poseGun, scopeAnim, sniperSway, SWING_MS, updateAim, viewGun, viewModel } from './weapons/viewmodel.js';
 import { brokenIds, currentMap, openDoors, updateDoors } from './world/map.js';
 import { move, touchingLadder } from './world/physics.js';
 import { sinking, updateSinking, updateUnderground } from './world/underground.js';
@@ -86,7 +86,7 @@ function frame(now: number): void {
     const swing = sw >= 0 ? Math.sin(Math.PI * sw) : 0;
     // В прицеле глаз подводится к прицелу: прицел оказывается в aim.relief метрах перед глазом,
     // а приклад уходит назад к щеке, за пределы обзора. Отдача в прицеле мягче.
-    const aim = me.weapon === 'sniper' && !state.scopeOn ? viewGun.iron : viewGun.aim;
+    const aim = aimPoint();
     const aimZ = aim ? -aim.relief - aim.z * viewModel.scale.z : -0.25;
     viewModel.position.z = -0.45 + (aimZ + 0.45) * state.adsK + state.kick * (1 - 0.7 * state.adsK) - swing * 0.12;
     viewModel.position.x += sw >= 0 ? 0.2 - 0.4 * sw : 0;
