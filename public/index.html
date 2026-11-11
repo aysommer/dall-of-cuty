@@ -52,7 +52,7 @@
         <button type="button" id="t-menu" aria-label="Меню">☰</button>
         <button type="button" id="t-score" aria-label="Счёт">▤</button>
         <button type="button" data-key="KeyT" aria-label="Эмодзи на стене">😀</button>
-        <button type="button" data-key="KeyV" aria-label="Оптика">◎</button>
+        <button type="button" data-key="KeyV" aria-label="Снять или надеть прицел">◎</button>
       </div>
       <button type="button" id="t-fire" aria-label="Огонь">●</button>
       <button type="button" id="t-aim" aria-label="Прицел">⌖</button>
@@ -66,6 +66,7 @@
   </div>
 
   <div id="flash"></div>
+  <div id="blind" class="hidden"></div>
 
   <div id="vote" class="overlay hidden">
     <div class="panel">
@@ -109,15 +110,12 @@
           <label class="field">Название
             <input id="class-name" maxlength="16" autocomplete="off">
           </label>
-          <div class="field">Стволы (до двух)
+          <div class="field">Стволы (до двух) <span class="opt" id="unlock-note"></span>
             <div class="choice kit"></div>
           </div>
           <div class="field">Слот 1
-            <div class="choice melee">
-              <button type="button" data-melee="knife">🔪 Нож</button>
-              <button type="button" data-melee="grenade">💣 Граната</button>
-            </div>
-            <small>Граната — одна на жизнь: зажми ЛКМ — сорвёшь чеку, отпусти — бросишь, через 3 с взрыв.</small>
+            <div class="choice melee"></div>
+            <small id="gear-hint"></small>
           </div>
           <button id="class-delete" class="danger" type="button">Удалить класс</button>
         </div>
@@ -130,7 +128,7 @@
         <p>WASD — движение · Shift — спринт · C в спринте — подкат · Пробел — прыжок<br>
            ЛКМ — огонь · ПКМ — прицел · G — бросить нож · 1 — нож, 2 и 3 — стволы, колесо — по кругу<br>
            5 — БПЛА · 6 — ракета с неба · 7 — ракетница · 8 — бомба · 9 — самолёт (награды за серию)<br>
-           R — перезарядка · F — ящик и двери · V — снять оптику · T — эмодзи на стене · Tab — счёт · Esc — меню</p>
+           R — перезарядка · F — ящик и двери · V — снять или надеть прицел · T — эмодзи на стене · Tab — счёт · Esc — меню</p>
       </div>
     </div>
   </div>

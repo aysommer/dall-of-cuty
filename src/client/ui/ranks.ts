@@ -1,8 +1,10 @@
 // Звание и уровень: прогресс с сервера, окно звания, всплывающее «Вас повысили».
-import type { ProfileMsg } from '../../shared/protocol.js';
-import { killsForRank, levelOf, rankProgress, RANKS } from '../../shared/ranks.js';
+import type { ProfileMsg, WeaponId } from '../../shared/protocol.js';
+import { killsForRank, levelOf, rankProgress, RANKS, UNLOCK_LEVEL } from '../../shared/ranks.js';
+import { GEAR, isGear, WEAPONS } from '../../shared/map.js';
 import { TOKEN_KEY } from '../core/settings.js';
 import { $, textEl } from '../core/util.js';
+import { enforceUnlocks } from './classes.js';
 import { renderProfileTile } from './pause.js';
 
 export function onProfile(m: ProfileMsg): void {
@@ -15,6 +17,7 @@ export function onProfile(m: ProfileMsg): void {
   } catch { /* хранилище недоступно */ }
   renderRankCards();
   renderProfileTile();
+  enforceUnlocks();
 }
 
 // Сервер присылает убийства только после входа (прогресс зашифрован), поэтому для меню
@@ -130,6 +133,10 @@ export function showPromotion(rank: number): void {
     textEl('span', r.name, 'promo-name'),
     textEl('small', `Уровень ${levelOf(rank)}${RANKS[rank + 1] ? ` · следующее звание через ${killsWord(killsForRank(rank + 1) - killsForRank(rank))}` : ' · высшее звание'}`),
   );
+  // Что открылось на этом уровне — оружие и снаряжение для классов
+  const opened = Object.entries(UNLOCK_LEVEL).filter(([, lv]) => lv === levelOf(rank))
+    .map(([id]) => isGear(id) ? GEAR[id].name : WEAPONS[id as WeaponId].name);
+  if (opened.length) el.append(textEl('span', `🔓 Открыто: ${opened.join(', ')}`, 'promo-unlock'));
   // Перезапуск анимации, если повысили два раза подряд
   el.classList.add('hidden');
   void el.offsetWidth;

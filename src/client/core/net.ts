@@ -27,6 +27,7 @@ import { onLobby } from '../ui/menu.js';
 import { pauseView, renderProfileTile } from '../ui/pause.js';
 import { onProfile, showPromotion } from '../ui/ranks.js';
 import { onGrenades } from '../weapons/grenade.js';
+import { onBlind, onFlash, onMines } from '../weapons/mines.js';
 import { onThrow, onThrown } from '../weapons/knife.js';
 import { onBoom, onRocket } from '../weapons/rockets.js';
 import { setWeapon } from '../weapons/viewmodel.js';
@@ -144,7 +145,7 @@ function onKill(m: KillMsg): void {
     const at = m.victim === me.id ? me.pos : r?.pos;
     if (at) {
       const from = m.killer === me.id ? me.pos : m.killer !== null ? remotes.get(m.killer)?.pos : undefined;
-      const blast = m.w === 'rocket' || m.w === 'grenade' || m.w === 'missile' || m.w === 'nuke' || m.w === 'crate' || m.w === 'gunship';
+      const blast = m.w === 'rocket' || m.w === 'grenade' || m.w === 'mine' || m.w === 'missile' || m.w === 'nuke' || m.w === 'crate' || m.w === 'gunship';
       const impulse = new THREE.Vector3();
       if (from && from !== at) impulse.subVectors(at, from).setY(0).normalize().multiplyScalar(blast ? 6 : m.w === 'shotgun' || m.w === 'sniper' ? 4.5 : 2.5);
       if (blast) impulse.y = 5.5;
@@ -191,7 +192,7 @@ function onKill(m: KillMsg): void {
 
 function weaponName(w: KillWeapon): string {
   const extra: Record<string, string> = {
-    crate: 'Ящик', throw: 'Метательный нож', missile: 'Ракета с неба', nuke: 'Бомба', gunship: 'Самолёт',
+    crate: 'Ящик', throw: 'Метательный нож', missile: 'Ракета с неба', nuke: 'Бомба', gunship: 'Самолёт', mine: 'Мина',
   };
   return extra[w] ?? WEAPONS[w as WeaponId].name;
 }
@@ -251,6 +252,9 @@ export function initNet(): void {
       case 'loadout': onLoadout(m); break;
       case 'ammopacks': onAmmoPacks(m); break;
       case 'grenades': onGrenades(m); break;
+      case 'mines': onMines(m.list); break;
+      case 'flash': onFlash(m.p); break;
+      case 'blind': onBlind(m.ms); break;
       case 'breaks': onBreaks(m.broken); break;
       case 'doors': {
         const was = new Set(openDoors);

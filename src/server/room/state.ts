@@ -38,6 +38,8 @@ export interface Player {
   rockets: number;
   /** Что в слоте 1: нож или граната (выбор действует со следующей жизни) */
   melee: MeleeKind;
+  /** Что в слоте 1 в этой жизни (выбор melee на момент появления, если он открыт на уровне игрока) */
+  gear: MeleeKind;
   /** Гранат в руках (одна на жизнь) */
   grenades: number;
   /** Когда сорвана чека гранаты в руке (0 — не держит) */
@@ -81,7 +83,10 @@ export interface Gunship { id: number; owner: number; phase: number; start: numb
 
 export interface Knife { id: number; owner: number; pos: Vec3; vel: Vec3; born: number }
 
-export interface Grenade { id: number; owner: number; pos: Vec3; vel: Vec3; explodeAt: number }
+export interface Grenade { id: number; owner: number; pos: Vec3; vel: Vec3; explodeAt: number; kind: 'grenade' | 'flash' | 'sticky'; stuck: boolean }
+
+/** Мина или растяжка (to — конец верёвки); armedAt — когда её взвёл враг (0 — ещё нет) */
+export interface Mine { id: number; kind: 'mine' | 'tripwire'; owner: number; pos: Vec3; to: Vec3 | null; armedAt: number }
 
 export interface AmmoPack { id: number; at: Vec3; until: number }
 
@@ -119,6 +124,8 @@ export interface Room {
   knives: Knife[];
   nextKnifeId: number;
   grenades: Grenade[];
+  mines: Mine[];
+  nextMineId: number;
   nextGrenadeId: number;
   crate: {
     state: CrateState;
@@ -180,6 +187,8 @@ export function newRoom(id: number, roomName: string, password: string, hooks: R
     knives: [],
     nextKnifeId: 1,
     grenades: [],
+    mines: [],
+    nextMineId: 1,
     nextGrenadeId: 1,
     crate: { state: 'gone', at: null, by: null, start: [0, 0, 0], until: 0, expiresAt: 0, expired: false },
     dropTimer: undefined,

@@ -1,6 +1,7 @@
 // Общие данные для клиента и сервера: карты, оружие, размеры игрока.
 
-import type { Vec3, WeaponId } from './protocol.js';
+import type { MeleeKind, Vec3, WeaponId } from './protocol.js';
+import { isUnlocked } from './ranks.js';
 import { SANDS } from './maps/sands.js';
 import { BRICKS } from './maps/bricks.js';
 import { DEPOT } from './maps/depot.js';
@@ -54,7 +55,7 @@ export const MEDKIT = {
 
 export const WEAPONS: Record<WeaponId, Weapon> = {
   pistol:  { name: 'Пистолет', dmg: 25, pellets: 1, rate: 280, mag: 12, reserve: 24, reload: 1200, spread: 0.006, auto: false, zoom: 60 },
-  shotgun: { name: 'Дробовик', dmg: 13, pellets: 8, rate: 900, mag: 6, reserve: 18, reload: 2200, spread: 0.045, auto: false, zoom: 62 },
+  shotgun: { name: 'Дробовик', dmg: 15, pellets: 8, rate: 900, mag: 6, reserve: 18, reload: 2200, spread: 0.045, auto: false, zoom: 62 },
   // Пулемёт: лента на 100 патронов, отдача вдвое сильнее, чем у автомата
   lmg:     { name: 'Пулемёт', dmg: 22, pellets: 1, rate: 95, mag: 100, reserve: 0, reload: 4200, spread: 0.014, auto: true, zoom: 58 },
   // Пистолет-пулемёт: урон ниже, скорострельность выше, чем у автомата
@@ -92,6 +93,47 @@ export const GRENADE = {
   killR: 3, maxR: 7, maxDmg: 100,
 };
 export interface GrenadeBody { pos: Vec3; vel: Vec3 }
+
+/**
+ * Слот 1: нож или одно устройство на жизнь. Гранаты (осколочная, световая, липучка) бросают:
+ * зажал ЛКМ — чека, отпустил — бросок. Мину и растяжку ставят под ноги одним нажатием.
+ */
+export const GEAR: Record<MeleeKind, { name: string; icon: string; hint: string }> = {
+  knife: { name: 'Нож', icon: '🔪', hint: 'Удар вплотную убивает; можно бросить (G)' },
+  grenade: { name: 'Граната', icon: '💣', hint: 'Взрыв через 3 с, отскакивает' },
+  flash: { name: 'Световая', icon: '✨', hint: 'Ослепляет всех в 3 м, и тебя тоже' },
+  sticky: { name: 'Липучка', icon: '🧲', hint: 'Граната, которая прилипает к стене' },
+  mine: { name: 'Мина', icon: '🔴', hint: 'Срабатывает, когда враг подойдёт на 2 м' },
+  tripwire: { name: 'Растяжка', icon: '🪢', hint: 'Срабатывает, когда враг заденет верёвку' },
+};
+export const GEAR_ORDER: MeleeKind[] = ['knife', 'grenade', 'flash', 'sticky', 'mine', 'tripwire'];
+export const isGear = (v: unknown): v is MeleeKind => typeof v === 'string' && Object.hasOwn(GEAR, v);
+/** Гранаты, которые бросают (в отличие от мины и растяжки, которые ставят) */
+export const isThrown = (g: MeleeKind): boolean => g === 'grenade' || g === 'flash' || g === 'sticky';
+
+/**
+ * Мина и растяжка: срабатывают от врага (в triggerR метрах или задевшего верёвку), взрыв через delayMs.
+ * В killR — насмерть, до hurtR — dmg урона; своего хозяина тоже задевает. У игрока не больше max штук на карте.
+ * Верёвка растяжки — до wire метров, на высоте wireY.
+ */
+export const MINE = { triggerR: 2, delayMs: 1000, killR: 1, hurtR: 2.5, dmg: 50, wire: 2, wireY: 0.3, max: 2 };
+/** Световая граната: ослепляет всех в radius метрах на ms */
+export const FLASH = { radius: 3, ms: 3500 };
+
+/** Липучка: летит как граната, но при первом касании блока останавливается. true — прилипла. */
+export function stepSticky(boxes: Box[], g: GrenadeBody, dt: number): boolean {
+  const r = GRENADE.radius;
+  g.vel[1] -= GRENADE.gravity * dt;
+  for (const axis of [0, 1, 2] as const) {
+    const prev = g.pos[axis];
+    g.pos[axis] += g.vel[axis] * dt;
+    if (!grenadeInside(boxes, g.pos, r)) continue;
+    g.pos[axis] = prev;
+    g.vel[0] = g.vel[1] = g.vel[2] = 0;
+    return true;
+  }
+  return false;
+}
 
 function grenadeInside(boxes: Box[], p: Vec3, r: number): boolean {
   return boxes.some((b) => p[0] + r > b.min[0] && p[0] - r < b.max[0] && p[1] + r > b.min[1] && p[1] - r < b.max[1] &&
@@ -174,6 +216,14 @@ export function isKit(v: unknown): v is WeaponId[] {
   return Array.isArray(v) && v.length >= 1 && v.length <= KIT_SIZE && new Set(v).size === v.length &&
     v.every((w) => GUNS.includes(w as WeaponId));
 }
+
+/** Набор без стволов, которые ещё не открыты на этом уровне; если не осталось ни одного — стандартный. */
+export function fitKit(kit: WeaponId[], kills: number): WeaponId[] {
+  const open = kit.filter((w) => isUnlocked(w, kills));
+  return open.length ? open : [...DEFAULT_KIT];
+}
+/** Снаряжение слота 1: если ещё не открыто — нож. */
+export const fitGear = (gear: MeleeKind, kills: number): MeleeKind => isUnlocked(gear, kills) ? gear : 'knife';
 
 /** Патроны с трупов: подобрав, получаешь половину полного запаса к своим стволам. */
 export const AMMO_PACK = { share: 0.5, lifeMs: 30_000, reach: 1.1 };

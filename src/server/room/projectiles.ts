@@ -1,9 +1,10 @@
 // Снаряды: гранаты, метательные ножи и ракеты — полёт, попадания, взрывы.
 import type { Vec3 } from '../../shared/protocol.js';
-import { bodyPoints, clipWalls, GRENADE, GUNSHIP, lineOfSight, MAPS, playerBox, rayBox, rayWorld, ROCKET, stepGrenade, THROW, WEAPONS } from '../../shared/map.js';
+import { bodyPoints, clipWalls, FLASH, GRENADE, isThrown, stepSticky, GUNSHIP, lineOfSight, MAPS, playerBox, rayBox, rayWorld, ROCKET, stepGrenade, THROW, WEAPONS } from '../../shared/map.js';
 import { distToPlayer, eyeOf, hurt, isEnemy, killPlayer, scaleOf } from './combat.js';
 import { checkWin } from './match.js';
-import { broadcast, broadcastPlayers, isVec3 } from './net.js';
+import { placeMine } from './mines.js';
+import { broadcast, broadcastPlayers, isVec3, send } from './net.js';
 import { setRockets } from './pickups.js';
 import type { Grenade, Incoming, Knife, Player, Rocket, Room } from './state.js';
 import { endGunship, gunshipNow, sendLoadout } from './streaks.js';
@@ -11,14 +12,17 @@ import { blastBreakables, worldBoxes } from './world.js';
 
 /** Зажал ЛКМ с гранатой — чека сорвана, пошёл отсчёт. */
 export function pullPin(room: Room, p: Player): void {
-  if (!p.alive || room.roundOver || p.grenades <= 0 || p.cookStart) return;
+  // Мину и растяжку не бросают, а ставят под ноги тем же нажатием
+  if (p.gear === 'mine' || p.gear === 'tripwire') { placeMine(room, p); return; }
+  if (!p.alive || room.roundOver || p.grenades <= 0 || p.cookStart || !isThrown(p.gear)) return;
   p.grenades--;
   p.cookStart = Date.now();
   sendLoadout(p);
 }
 
 export function spawnGrenade(room: Room, p: Player, pos: Vec3, vel: Vec3): void {
-  room.grenades.push({ id: room.nextGrenadeId++, owner: p.id, pos, vel, explodeAt: p.cookStart + GRENADE.fuseMs });
+  const kind = p.gear === 'flash' || p.gear === 'sticky' ? p.gear : 'grenade';
+  room.grenades.push({ id: room.nextGrenadeId++, owner: p.id, pos, vel, explodeAt: p.cookStart + GRENADE.fuseMs, kind, stuck: false });
   p.cookStart = 0;
 }
 
@@ -60,12 +64,29 @@ export function explodeGrenade(room: Room, ownerId: number, at: Vec3, id: number
   checkWin(room);
 }
 
+/**
+ * Световая граната: вспышку видят все, а ослепляет она каждого, кто в FLASH.radius метрах
+ * и не закрыт стеной, — и своих, и чужих, и самого бросившего.
+ */
+export function flashBang(room: Room, at: Vec3): void {
+  broadcast(room, { t: 'flash', p: at });
+  if (room.roundOver) return;
+  const walls = worldBoxes(room);
+  const from: Vec3 = [at[0], at[1] + 0.2, at[2]];
+  for (const v of room.players.values()) {
+    if (!v.alive || distToPlayer(v, at) > FLASH.radius) continue;
+    if (bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt))) continue;
+    send(v.ws, { t: 'blind', ms: FLASH.ms });
+  }
+}
+
 export function stepGrenades(room: Room, dt: number, now: number): void {
-  // Передержал — граната взрывается в руке
+  // Передержал — граната срабатывает в руке
   for (const p of room.players.values()) {
     if (p.cookStart && now - p.cookStart >= GRENADE.fuseMs) {
       p.cookStart = 0;
-      explodeGrenade(room, p.id, eyeOf(p), room.nextGrenadeId++);
+      if (p.gear === 'flash') flashBang(room, eyeOf(p));
+      else explodeGrenade(room, p.id, eyeOf(p), room.nextGrenadeId++);
     }
   }
   if (!room.grenades.length) return;
@@ -73,14 +94,20 @@ export function stepGrenades(room: Room, dt: number, now: number): void {
   const solids = [...worldBoxes(room), ...clipWalls(MAPS[room.mapId].half)];
   const left: Grenade[] = [];
   for (const g of room.grenades) {
-    for (let i = 0; i < 5; i++) stepGrenade(solids, g, dt / 5);
-    if (now >= g.explodeAt) explodeGrenade(room, g.owner, [...g.pos], g.id);
-    else left.push(g);
+    for (let i = 0; i < 5 && !g.stuck; i++) {
+      // Липучка останавливается на первой же поверхности; остальные отскакивают
+      if (g.kind === 'sticky') g.stuck = stepSticky(solids, g, dt / 5);
+      else stepGrenade(solids, g, dt / 5);
+    }
+    if (now < g.explodeAt) left.push(g);
+    else if (g.kind === 'flash') flashBang(room, [...g.pos]);
+    else explodeGrenade(room, g.owner, [...g.pos], g.id);
   }
   room.grenades = left;
   broadcast(room, {
     t: 'grenades',
-    list: room.grenades.map((g) => [g.id, +g.pos[0].toFixed(2), +g.pos[1].toFixed(2), +g.pos[2].toFixed(2), g.explodeAt - now]),
+    list: room.grenades.map((g) => [g.id, +g.pos[0].toFixed(2), +g.pos[1].toFixed(2), +g.pos[2].toFixed(2), g.explodeAt - now,
+      g.kind === 'flash' ? 1 : g.kind === 'sticky' ? 2 : 0]),
   });
 }
 

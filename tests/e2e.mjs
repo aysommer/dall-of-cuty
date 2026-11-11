@@ -101,6 +101,92 @@ console.log('Снаряды (WebSocket)');
   g.ws.close(); await wait(1200);
 }
 
+console.log('Снаряжение и уровни (WebSocket)');
+{
+  const state = (c, p, yaw = 0) => c.ws.send(JSON.stringify({ t: 'state', p, yaw, pitch: 0, w: 'grenade', sl: false }));
+  const hpOf = (c, name) => last(c, 'players').list.find((p) => p.name === name)?.hp;
+  // Пара игроков в своей комнате: владелец устройства (с нужным числом убийств) и его противник
+  const pair = async (kills, melee, map = 'sands') => {
+    const a = await wsClient(), b = await wsClient();
+    join(a, { room: 'new', roomName: `Тест ${melee}`, name: 'Хозяин', melee, map, token: token(kills) }); await wait(250);
+    join(b, { room: last(a, 'welcome') && (await roomId(a)), name: 'Враг' }); await wait(250);
+    return [a, b];
+  };
+  const roomId = async (c) => { const l = await wsClient(); await wait(120); const id = l.msgs.find((m) => m.t === 'lobby').rooms.at(-1).id; l.ws.close(); return id; };
+  const done = async (...cs) => { for (const c of cs) c.ws.close(); await wait(300); };
+
+  // Уровни: без прогресса мина не выдаётся, с 20 убийствами (уровень 2) — выдаётся
+  const n = await wsClient();
+  join(n, { room: 'new', roomName: 'Новичок', name: 'N', melee: 'mine', kit: ['sniper', 'smg'] }); await wait(250);
+  check('уровень 1: мина закрыта — в слоте нож', last(n, 'loadout')?.gear === 'knife');
+  await done(n);
+
+  // Мина: хозяин её не взводит, враг в 2 м — взводит, через секунду взрыв; в 1,5 м — 50 урона
+  {
+    const [a, b] = await pair(20, 'mine');
+    check('уровень 2: мина открыта', last(a, 'loadout')?.gear === 'mine');
+    state(a, [0, 0, 10]); state(b, [0, 0, 30]); await wait(120);
+    a.ws.send(JSON.stringify({ t: 'pin' })); await wait(300);
+    const placed = last(a, 'mines')?.list ?? [];
+    check('мина лежит под ногами хозяина и не взведена им', placed.length === 1 && placed[0].kind === 'mine' && placed[0].armed === 0 && placed[0].p[2] === 10);
+    state(a, [0, 0, 30]); state(b, [0, 0, 13]); await wait(300);
+    check('враг в 3 м мину не взводит', last(a, 'mines').list[0].armed === 0);
+    state(b, [0, 0, 11.9]); await wait(200);
+    check('враг в 2 м взводит мину', last(b, 'mines').list[0]?.armed > 0);
+    await wait(1200);
+    check('через секунду взрыв: мины больше нет', last(b, 'mines').list.length === 0 && b.msgs.some((m) => m.t === 'boom'));
+    check('в 1,5 м от мины — 50 урона', hpOf(b, 'Враг') === 50, `здоровье ${hpOf(b, 'Враг')}`);
+    await done(a, b);
+  }
+  // Мина: кто не успел отойти (ближе метра) — погибает
+  {
+    const [a, b] = await pair(20, 'mine');
+    state(a, [0, 0, 10]); state(b, [0, 0, 30]); await wait(120);
+    a.ws.send(JSON.stringify({ t: 'pin' })); await wait(200);
+    state(a, [0, 0, 30]); state(b, [0, 0, 10.6]); await wait(1500);
+    check('вплотную к мине — смерть', b.msgs.some((m) => m.t === 'kill' && m.w === 'mine'));
+    await done(a, b);
+  }
+  // Растяжка (уровень 3): верёвка 2 м по взгляду; задел — взведена
+  {
+    const [a, b] = await pair(50, 'tripwire');
+    state(a, [0, 0, 10], 0); state(b, [8, 0, 30]); await wait(120);
+    a.ws.send(JSON.stringify({ t: 'pin' })); await wait(300);
+    const w = last(a, 'mines')?.list[0];
+    check('растяжка: верёвка 2 м вперёд по взгляду', !!w && w.kind === 'tripwire' && Math.abs(w.to[2] - 8) < 0.05 && Math.abs(w.to[0]) < 0.05);
+    state(a, [8, 0, 30]); state(b, [3, 0, 9]); await wait(300);
+    check('враг рядом, но не на верёвке — не взведена', last(a, 'mines').list[0].armed === 0);
+    state(b, [0.2, 0, 8.8]); await wait(200);
+    check('враг задел верёвку — взведена', last(a, 'mines').list[0]?.armed > 0);
+    await done(a, b);
+  }
+  // Световая (уровень 2): ослепляет того, кто рядом (и бросившего), а далёкого — нет
+  {
+    const [a, b] = await pair(20, 'flash');
+    state(a, [0, 0, 10]); state(b, [0, 0, 25]); await wait(120);
+    a.ws.send(JSON.stringify({ t: 'pin' })); await wait(100);
+    a.ws.send(JSON.stringify({ t: 'gthrow', d: [0, -1, 0] })); await wait(300);
+    check('световая летит как граната (вид 1)', last(a, 'grenades')?.list[0]?.[5] === 1);
+    await wait(3100);
+    check('вспышку видят все', a.msgs.some((m) => m.t === 'flash') && b.msgs.some((m) => m.t === 'flash'));
+    check('бросивший рядом — ослеплён, дальний — нет', a.msgs.some((m) => m.t === 'blind') && !b.msgs.some((m) => m.t === 'blind'));
+    check('световая не наносит урона', hpOf(a, 'Хозяин') === 100);
+    await done(a, b);
+  }
+  // Липучка (уровень 4): прилипает к стене, а не падает
+  {
+    const [a, b] = await pair(90, 'sticky', 'house');
+    state(a, [-3, 0, 4], Math.PI / 2); state(b, [10, 0, 8]); await wait(120);
+    a.ws.send(JSON.stringify({ t: 'pin' })); await wait(100);
+    a.ws.send(JSON.stringify({ t: 'gthrow', d: [-1, 0.1, 0] })); await wait(900);
+    const g1 = last(a, 'grenades')?.list[0]; await wait(500);
+    const g2 = last(a, 'grenades')?.list[0];
+    check('липучка висит на стене и не сползает', !!g1 && !!g2 && g1[5] === 2 && g1[2] > 1 && g1[1] === g2[1] && g1[2] === g2[2], JSON.stringify(g2));
+    await done(a, b);
+  }
+  await wait(1200);
+}
+
 // ---------- браузер ----------
 let chromium;
 try {
@@ -220,15 +306,43 @@ if (!chromium) {
   const speed = async (p, sprint) => {
     await p.evaluate(() => { game.me.pos.set(0, 0, 0); game.me.vel.set(0, 0, 0); game.me.yaw = 0; });
     if (sprint) await p.keyboard.down('ShiftLeft');
-    await p.keyboard.down('KeyW'); await p.waitForTimeout(1000);
-    const v = await p.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z));
+    await p.keyboard.down('KeyW'); await p.waitForTimeout(800);
+    // Скорость набирается плавно, а тестовый браузер рисует редко — берём установившееся значение
+    let v = 0;
+    for (let i = 0; i < 8; i++) { v = Math.max(v, await p.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z))); await p.waitForTimeout(150); }
     await p.keyboard.up('KeyW'); if (sprint) await p.keyboard.up('ShiftLeft');
     await p.waitForTimeout(300);
     return v;
   };
   const walk = await speed(A, false), run = await speed(A, true);
+  {
+    // На ходу камера слегка покачивается, стоя — нет
+    await A.keyboard.down('KeyW'); await A.waitForTimeout(700);
+    const bobs = []; for (let i = 0; i < 6; i++) { bobs.push((await A.evaluate(() => game.dbg())).bob); await A.waitForTimeout(60); }
+    await A.keyboard.up('KeyW'); await A.waitForTimeout(900);
+    check('камера покачивается на ходу (до 4,5 см)', bobs.some((b) => b < -0.005) && bobs.every((b) => b >= -0.05), bobs.join(' '));
+    check('стоя камера не качается', await A.waitForFunction(() => Math.abs(game.dbg().bob) < 0.002, null, { timeout: 8000 }).then(() => true, () => false));
+  }
   check('ходьба 6.5', Math.abs(walk - 6.5) < 0.05, walk.toFixed(2));
   check('бег 8.125', Math.abs(run - 8.125) < 0.05, run.toFixed(2));
+
+  console.log('Съёмный прицел');
+  {
+    await A.keyboard.press('Digit2'); await A.waitForTimeout(500);
+    const gun = await A.evaluate(() => game.me.weapon);
+    check('прицел по умолчанию надет', (await A.evaluate(() => game.dbg())).scopeOn === true);
+    await A.keyboard.press('KeyV');
+    const off = await A.waitForFunction(() => game.dbg().scopeOn === false && !game.dbg().scopeAnim, null, { timeout: 8000 }).then(() => true, () => false);
+    check('V снимает коллиматор', off);
+    check('выбор запомнен по стволу', JSON.parse(await A.evaluate(() => localStorage.getItem('doc-sights')))[gun] === false);
+    await A.keyboard.press('Digit3'); await A.waitForTimeout(500);
+    check('на другом стволе прицел остался', (await A.evaluate(() => game.dbg())).scopeOn === true);
+    await A.keyboard.press('Digit2'); await A.waitForTimeout(500);
+    check('вернулся к первому — прицел по-прежнему снят', (await A.evaluate(() => game.dbg())).scopeOn === false);
+    await A.keyboard.press('KeyV');
+    await A.waitForFunction(() => game.dbg().scopeOn === true && !game.dbg().scopeAnim, null, { timeout: 8000 }).catch(() => {});
+    check('V надевает обратно', (await A.evaluate(() => game.dbg())).scopeOn === true);
+  }
 
   console.log('Меню паузы');
   await A.evaluate(() => document.exitPointerLock()); await A.waitForTimeout(300);
@@ -236,7 +350,9 @@ if (!chromium) {
   check('плитка профиля: ник и звание', /Волк/.test(await A.textContent('#tile-profile')) && /PV2/.test(await A.textContent('#tile-profile')));
   await A.click('.t-classes');
   await A.click('.class-tile >> nth=1'); await A.waitForTimeout(200);
-  check('класс «Снайпер» меняет набор', /2:Снайперка/.test((await A.evaluate(() => game.dbg())).hotbar));
+  check('класс «Ближний бой» меняет набор', /2:Дробовик/.test((await A.evaluate(() => game.dbg())).hotbar));
+  check('закрытое по уровню подписано замком', /🔒.*Снайперка.*ур\. 5/.test(await A.textContent('#class-edit .kit')) && /🔒.*Растяжка.*ур\. 3/.test(await A.textContent('#class-edit .melee')));
+  check('на 2-м уровне мина уже открыта', await A.isEnabled('#class-edit .melee [data-melee=mine]'));
   await A.click('.class-tile.add'); await A.fill('#class-name', 'Тест'); await A.waitForTimeout(100);
   check('новый класс сохранён', JSON.parse(await A.evaluate(() => localStorage.getItem('doc-classes'))).list.some((c) => c.name === 'Тест'));
   await A.click('#pause-back');

@@ -6,6 +6,8 @@ import { settings } from './core/settings.js';
 import { keys, me, remotes, state } from './core/state.js';
 import { $ } from './core/util.js';
 import { corpseDebug, corpses, updateCorpses } from './fx/corpses.js';
+import { blindK, mineFx, updateBlind, updateMines } from './weapons/mines.js';
+import { gear } from './ui/hotbar.js';
 import { bursts, updateFireworks } from './fx/fireworks.js';
 import { stepCount, updateSteps } from './fx/footsteps.js';
 import { sprays, updateSprays } from './fx/sprays.js';
@@ -27,7 +29,7 @@ import { cookStart, grenadeFx, updateGrenades } from './weapons/grenade.js';
 import { updateKnives } from './weapons/knife.js';
 import { updateRockets } from './weapons/rockets.js';
 import { updateShooting } from './weapons/shooting.js';
-import { animateGun, animateScope, poseGun, scopeAnim, sniperSway, SWING_MS, updateAim, viewGun, viewModel } from './weapons/viewmodel.js';
+import { aimPoint, animateGun, animateScope, poseGun, scopeAnim, sniperSway, SWING_MS, updateAim, viewGun, viewModel } from './weapons/viewmodel.js';
 import { brokenIds, currentMap, openDoors, updateDoors } from './world/map.js';
 import { move, touchingLadder } from './world/physics.js';
 import { sinking, updateSinking, updateUnderground } from './world/underground.js';
@@ -37,6 +39,8 @@ let last = performance.now(), sendAcc = 0;
 
 /** Когда последний раз стояли на земле: «в воздухе» — только если оторвались дольше чем на мгновение */
 let groundedAt = 0, airFrames = 0;
+/** Покачивание камеры на ходу: фаза шага, сглаженный размах, текущие сдвиг по высоте и наклон */
+let bobPhase = 0, bobAmp = 0, bobY = 0, bobRoll = 0;
 function frame(now: number): void {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - last) / 1000);
@@ -48,8 +52,17 @@ function frame(now: number): void {
       if (me.grounded) { groundedAt = now; airFrames = 0; } else airFrames++;
       const eyeTarget = (state.low ? SLIDE.eye : PLAYER.eye) * (me.big ? STREAK.bigScale : 1);
       state.eyeH += (eyeTarget - state.eyeH) * Math.min(1, dt * 14);
-      camera.position.set(me.pos.x, me.pos.y + state.eyeH, me.pos.z);
+      // Покачивание при ходьбе и беге: шаг задаёт пройденный путь, размах — скорость; в прицеле почти гаснет
+      const ground = Math.hypot(me.vel.x, me.vel.z);
+      const walking = me.grounded && !state.low ? Math.min(1, ground / 8) : 0;
+      bobAmp += (walking - bobAmp) * Math.min(1, dt * 8);
+      bobPhase += ground * dt * 1.75;
+      const calm = 1 - 0.8 * state.adsK;
+      bobY = Math.abs(Math.sin(bobPhase)) * -0.045 * bobAmp * calm;
+      bobRoll = Math.sin(bobPhase) * 0.006 * bobAmp * calm;
+      camera.position.set(me.pos.x, me.pos.y + state.eyeH + bobY, me.pos.z);
     } else {
+      bobAmp = 0; bobY = 0; bobRoll = 0;
       // После смерти камера смотрит на место гибели сверху
       camera.position.set(me.pos.x, me.pos.y + 6, me.pos.z + 4);
       const left = Math.max(0, Math.ceil((state.respawnAt - now) / 1000));
@@ -59,7 +72,7 @@ function frame(now: number): void {
       }
     }
     const sway = sniperSway(now);
-    camera.rotation.set(me.alive ? Math.min(1.5, me.pitch + state.recoil + sway.pitch) : -0.9, me.alive ? me.yaw + sway.yaw : 0, 0);
+    camera.rotation.set(me.alive ? Math.min(1.5, me.pitch + state.recoil + sway.pitch) : -0.9, me.alive ? me.yaw + sway.yaw : 0, me.alive ? bobRoll : 0);
     // Камера ракеты с неба перекрывает обычный вид
     updateMissile(now, dt);
     updateGunship(now, dt);
@@ -73,7 +86,7 @@ function frame(now: number): void {
     const swing = sw >= 0 ? Math.sin(Math.PI * sw) : 0;
     // В прицеле глаз подводится к прицелу: прицел оказывается в aim.relief метрах перед глазом,
     // а приклад уходит назад к щеке, за пределы обзора. Отдача в прицеле мягче.
-    const aim = me.weapon === 'sniper' && !state.scopeOn ? viewGun.iron : viewGun.aim;
+    const aim = aimPoint();
     const aimZ = aim ? -aim.relief - aim.z * viewModel.scale.z : -0.25;
     viewModel.position.z = -0.45 + (aimZ + 0.45) * state.adsK + state.kick * (1 - 0.7 * state.adsK) - swing * 0.12;
     viewModel.position.x += sw >= 0 ? 0.2 - 0.4 * sw : 0;
@@ -128,6 +141,8 @@ function frame(now: number): void {
   updateFireworks(dt);
   updateDoors(dt);
   updateGrenades(now);
+  updateMines(now);
+  updateBlind(now);
   updateAmmoPacks(now);
   updateUnderground();
   updateWeather(dt);
@@ -162,7 +177,8 @@ export function initLoop(): void {
     },
     dbg: () => ({ openDoors: [...openDoors], sprintK: state.sprintK, wallK: state.wallK, broken: [...brokenIds], grenades: [...grenadeFx.values()].map((g) => g.mesh.position.toArray().map((v) => +v.toFixed(2))), myGrenades: state.myGrenades, cooking: cookStart > 0, scopeOn: state.scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground: state.underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
       kit: settings.kit, reserve: { ...me.reserve }, hotbar: hotbar().map((h) => `${h.key}:${h.label}`).join(' '),
-      missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, eyeH: state.eyeH, recoil: state.recoil, corpses: corpses.length, corpse: corpseDebug(), model: characterReady() ? 'ready' : characterFailed() ? 'failed' : 'loading',
+      missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, eyeH: state.eyeH, recoil: state.recoil, mines: [...mineFx.values()].map((m) => ({ kind: m.info.kind, armed: m.info.armed > 0, p: m.info.p, to: m.info.to })), blind: +blindK(performance.now()).toFixed(2), gear, bob: +bobY.toFixed(3),
+      corpses: corpses.length, corpse: corpseDebug(), model: characterReady() ? 'ready' : characterFailed() ? 'failed' : 'loading',
       remoteAnim: [...remotes.values()].map((r) => r.char ? { walk: +r.char.walk.getEffectiveWeight().toFixed(2), run: +r.char.run.getEffectiveWeight().toFixed(2), air: +r.char.airK.toFixed(2), reload: r.reloading, speed: +r.char.speed.toFixed(1) } : null), sprays: sprays.length,
       steps: stepCount, medkits: medkitFx.size, boltUntil: state.boltUntil, menuClosed: state.menuClosed, armor: me.armor }),
   };

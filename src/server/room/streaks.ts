@@ -10,7 +10,7 @@ import { blastBreakables, worldBoxes } from './world.js';
 
 export function sendLoadout(p: Player): void {
   send(p.ws, {
-    t: 'loadout', knife: p.hasKnife, grenades: p.grenades, streak: p.streak, uav: p.uav, missile: p.missile, nuke: p.nuke, gunship: p.gunship,
+    t: 'loadout', gear: p.gear, knife: p.hasKnife, grenades: p.grenades, streak: p.streak, uav: p.uav, missile: p.missile, nuke: p.nuke, gunship: p.gunship,
   });
 }
 
