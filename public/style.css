@@ -268,3 +268,53 @@ details.field .settings { margin-top: 10px; }
   #streak { bottom: 124px; }
   #health, #ammo { bottom: 52px; }
 }
+
+/* ===== Звание и уровень ===== */
+.rank-card {
+  display: flex; gap: 16px; align-items: flex-start; margin: 8px 0 12px; padding: 12px;
+  background: #11141a; border: 2px solid #343b48;
+}
+.ring { position: relative; width: 132px; height: 132px; flex: none; }
+.ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 10; }
+.ring circle.bg { stroke: #2a303c; }
+.ring circle.fg { stroke: #ffc928; stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; }
+.ring-in {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  line-height: 1.05;
+}
+.ring-in small { font-size: 10px; letter-spacing: 2px; color: #9aa4b5; }
+.ring-in .lv { font-size: 46px; font-weight: 800; color: #fff; }
+.ring-in .abbr { font-size: 13px; color: #ffc928; letter-spacing: 1px; font-weight: 700; }
+.rank-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; text-align: left; }
+.rank-name { font-size: 20px; font-weight: 700; color: #ffc928; }
+.rank-next .cnt { font-size: 18px; font-weight: 700; }
+.rank-info details { margin-top: 6px; }
+.rank-info summary { cursor: pointer; color: #9aa4b5; font-size: 13px; }
+.rank-info table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+.rank-info th, .rank-info td { text-align: left; }
+.rank-info th { color: #9aa4b5; font-weight: 400; padding: 2px 6px; }
+.rank-info td { padding: 2px 6px; border-top: 1px solid #2a303c; }
+.rank-info td:nth-child(3), .rank-info td:nth-child(4) { text-align: right; }
+.rank-info tr.done td { color: #7d8697; }
+.rank-info tr.now td { background: rgba(255, 201, 40, 0.15); color: #ffc928; font-weight: 700; }
+@media (max-width: 480px) {
+  .rank-card { flex-direction: column; align-items: center; }
+  .rank-info { width: 100%; }
+}
+#scoreboard td.level { color: #ffc928; font-weight: 700; }
+
+/* Всплывающее «Вас повысили» */
+#promo {
+  position: absolute; left: 50%; top: 18%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 28px;
+  background: rgba(10, 12, 16, 0.82); border: 2px solid #ffc928; text-align: center; pointer-events: none;
+  animation: promo-in 0.45s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+#promo.hidden { display: none; }
+#promo .promo-title { font-size: 16px; font-weight: 800; letter-spacing: 3px; color: #ffc928; }
+#promo .promo-name { font-size: 24px; font-weight: 800; }
+#promo small { color: #c8ccd4; }
+#promo .ring.fill circle.fg { animation: ring-fill 1.2s ease-out both; }
+@keyframes promo-in { from { opacity: 0; transform: translateX(-50%) scale(0.6); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
+@keyframes ring-fill { from { stroke-dashoffset: var(--len); } to { stroke-dashoffset: 0; } }

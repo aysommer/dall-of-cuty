@@ -1,6 +1,9 @@
-// Звания: каждые 50 убийств (за всё время, по сохранённому прогрессу) — следующее.
+// Звания и уровни: звание с номером i — это уровень i + 1. Повышают за убийства за всё время
+// (по сохранённому прогрессу), и чем выше уровень, тем больше убийств нужно до следующего:
+// с уровня L на L + 1 — RANK_BASE + RANK_STEP × (L − 1) убийств (20, 30, 40, …).
 // Названия — званий армии США, по порядку от рядового до генерала армии.
-export const KILLS_PER_RANK = 50;
+export const RANK_BASE = 20;
+export const RANK_STEP = 10;
 
 export const RANKS: Array<{ abbr: string; name: string }> = [
   { abbr: 'PV1', name: 'Рядовой' },
@@ -28,6 +31,37 @@ export const RANKS: Array<{ abbr: string; name: string }> = [
   { abbr: 'GA', name: 'Генерал армии' },
 ];
 
+/** Сколько убийств за всё время нужно, чтобы получить звание с номером rank (уровень rank + 1). */
+export function killsForRank(rank: number): number {
+  // Сумма арифметической прогрессии: RANK_BASE·n + RANK_STEP·n(n − 1)/2
+  return RANK_BASE * rank + (RANK_STEP * rank * (rank - 1)) / 2;
+}
+
+/** Номер звания в RANKS по числу убийств за всё время. */
 export function rankOf(kills: number): number {
-  return Math.min(RANKS.length - 1, Math.floor(Math.max(0, kills) / KILLS_PER_RANK));
+  let r = 0;
+  while (r < RANKS.length - 1 && kills >= killsForRank(r + 1)) r++;
+  return r;
+}
+
+/** Уровень игрока (с 1) — это номер звания + 1. */
+export const levelOf = (rank: number): number => rank + 1;
+
+export interface RankProgress {
+  rank: number;
+  level: number;
+  /** Убийств сделано на этом уровне и сколько всего нужно до следующего (0 — звание последнее) */
+  done: number;
+  need: number;
+  /** Доля пути до следующего звания, 0…1 (на последнем — 1) */
+  part: number;
+}
+
+export function rankProgress(kills: number): RankProgress {
+  const rank = rankOf(kills);
+  const last = rank >= RANKS.length - 1;
+  const from = killsForRank(rank);
+  const need = last ? 0 : killsForRank(rank + 1) - from;
+  const done = Math.max(0, kills) - from;
+  return { rank, level: levelOf(rank), done, need, part: last ? 1 : done / need };
 }
