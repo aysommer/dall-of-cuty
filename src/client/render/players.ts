@@ -1,93 +1,34 @@
-// Чужие игроки: модели, пиксельные лица (злее с каждым убийством), шлем Джаггернаута, корона лидера.
+// Чужие игроки: человекоподобная модель (или прямоугольник, пока она грузится), оружие в руках,
+// шлем Джаггернаута, бронежилет и корона лидера.
 import * as THREE from 'three';
 import { PLAYER, STREAK } from '../../shared/map.js';
 import type { PlayerInfo, WeaponId } from '../../shared/protocol.js';
 import { box, scene } from '../core/scene.js';
 import { state } from '../core/state.js';
 import { TEAM_COLOR } from '../core/util.js';
+import { type Character, characterReady, createCharacter, updateCharacter } from './character.js';
 import { buildGun, type Gun, nameSprite } from './models.js';
 
-/** Корона лидера — тоже из кубиков: обод и зубцы. */
-
-/** Сколько убийств в матче нужно для каждой ступени: от спокойного лица к свирепому. */
-export const FACE_STEPS = [0, 2, 5, 9, 14];
-
-export const faceLevel = (kills: number): number => FACE_STEPS.filter((k) => kills >= k).length - 1;
-
-const faceCache: THREE.CanvasTexture[] = [];
-
-export const faceUrl: string[] = [];
+/** Высота центра головы модели над землёй, м */
+const HEAD_Y = 1.66;
 
 /**
- * Лицо 16×10 «пикселей»: глаза, брови и рот. Чем выше ступень — тем ниже и круче брови,
- * уже глаза, а рот из ровной черты превращается в оскал; на последней ступени глаза красные.
- */
-function drawFace(level: number): HTMLCanvasElement {
-  const P = 8, W = 16, H = 10;
-  const c = document.createElement('canvas');
-  c.width = W * P; c.height = H * P;
-  const ctx = c.getContext('2d')!;
-  const px = (x: number, y: number, color: string, w = 1, h = 1) => { ctx.fillStyle = color; ctx.fillRect(x * P, y * P, w * P, h * P); };
-  const INK = '#141414', WHITE = '#f4f4f4', TEETH = '#f0ead6';
-  const pupil = level >= 4 ? '#e01b1b' : INK;
-  // Глаза: у спокойного — открытые 3×3, дальше всё уже
-  const eyeH = level >= 3 ? 1 : level >= 1 ? 2 : 3;
-  const eyeY = 4 - Math.floor(eyeH / 2);
-  for (const ex of [3, 10]) {
-    px(ex, eyeY, WHITE, 3, eyeH);
-    px(ex + 1, eyeY + Math.floor(eyeH / 2), pupil);
-  }
-  // Брови: ровные → наклонённые к переносице, всё ниже и толще
-  for (let i = 0; i < 4; i++) {
-    const tilt = Math.min(level, 3) * 0.4 * i;
-    const yl = Math.round(1 + (level >= 2 ? 1 : 0) + tilt * 0.5);
-    px(2 + i, Math.min(yl, eyeY - 1), INK, 1, level >= 3 ? 2 : 1);   // левая: внутренний край (правее) ниже
-    px(13 - i, Math.min(yl, eyeY - 1), INK, 1, level >= 3 ? 2 : 1);  // правая — зеркально
-  }
-  // Рот
-  if (level === 0) px(5, 8, INK, 6, 1);                                       // ровная черта
-  else if (level === 1) { px(5, 8, INK, 6, 1); px(4, 9, INK); px(11, 9, INK); } // уголки вниз
-  else if (level === 2) { px(5, 7, INK, 6, 1); px(5, 8, TEETH, 6, 1); px(5, 9, INK, 6, 1); } // сжатые зубы
-  else {
-    // Оскал: широкий рот с зубами, на последней ступени — раскрытый крик
-    const w = level >= 4 ? 10 : 8, x0 = 8 - w / 2;
-    px(x0, 7, INK, w, 1);
-    px(x0, 8, TEETH, w, level >= 4 ? 1 : 1);
-    for (let x = x0 + 1; x < x0 + w; x += 2) px(x, 8, INK);
-    px(x0, 9, INK, w, 1);
-  }
-  return c;
-}
-
-export function faceTexture(level: number): THREE.CanvasTexture {
-  if (!faceCache[level]) {
-    const canvasEl = drawFace(level);
-    const t = new THREE.CanvasTexture(canvasEl);
-    t.magFilter = THREE.NearestFilter; // чёткие пиксели
-    t.minFilter = THREE.NearestFilter;
-    faceCache[level] = t;
-    faceUrl[level] = canvasEl.toDataURL();
-  }
-  return faceCache[level];
-}
-
-/**
- * Шлем Джаггернаута: тёмный металлический колпак на голову с наушниками по бокам
- * и козырьком; лицо под ним остаётся видно.
+ * Шлем Джаггернаута: тёмный металлический колпак на голову с наушниками по бокам и козырьком.
+ * Собран вокруг центра головы: (0, 0, 0) — середина головы, козырёк смотрит на −Z.
  */
 function buildHelmet(): THREE.Group {
   const g = new THREE.Group();
-  const METAL = 0x3a3f45, EDGE = 0x22262b;
-  const top = box(PLAYER.w + 0.1, 0.16, PLAYER.w + 0.1, METAL);
-  top.position.y = PLAYER.h + 0.03;
-  const back = box(PLAYER.w + 0.1, 0.34, 0.08, METAL);
-  back.position.set(0, PLAYER.h - 0.13, PLAYER.w / 2 + 0.01);
-  const brim = box(PLAYER.w + 0.14, 0.05, 0.14, EDGE);
-  brim.position.set(0, PLAYER.h - 0.06, -PLAYER.w / 2 - 0.05);
+  const METAL = 0x3a3f45, EDGE = 0x22262b, W = 0.3;
+  const top = box(W, 0.1, W, METAL);
+  top.position.y = 0.15;
+  const back = box(W, 0.26, 0.05, METAL);
+  back.position.set(0, 0.02, W / 2);
+  const brim = box(W + 0.04, 0.04, 0.1, EDGE);
+  brim.position.set(0, 0.1, -W / 2 - 0.04);
   g.add(top, back, brim);
   for (const side of [-1, 1]) {
-    const ear = box(0.08, 0.34, PLAYER.w + 0.06, METAL);
-    ear.position.set(side * (PLAYER.w / 2 + 0.01), PLAYER.h - 0.13, 0);
+    const ear = box(0.05, 0.26, W, METAL);
+    ear.position.set(side * (W / 2), 0.02, 0);
     g.add(ear);
   }
   g.visible = false;
@@ -113,7 +54,7 @@ export function dropHelmet(r: Remote): void {
       vel.y -= 14 * (1 / 60);
       flying.position.addScaledVector(vel, 1 / 60);
       flying.rotation.x += 0.2;
-      if (flying.position.y < floorY - PLAYER.h) { flying.position.y = floorY - PLAYER.h; vel.set(0, 0, 0); }
+      if (flying.position.y < floorY + 0.1) { flying.position.y = floorY + 0.1; vel.set(0, 0, 0); }
     } else {
       flying.position.y -= 0.02; // лежит и уходит под землю
     }
@@ -122,18 +63,18 @@ export function dropHelmet(r: Remote): void {
   tick();
 }
 
+/** Корона лидера — тоже из кубиков: обод и зубцы. Основание — в (0, 0, 0). */
 function buildCrown(): THREE.Group {
   const GOLD = 0xffc928;
   const g = new THREE.Group();
-  const band = box(0.52, 0.1, 0.52, GOLD);
-  band.position.y = 0.05;
+  const band = box(0.28, 0.06, 0.28, GOLD);
+  band.position.y = 0.03;
   g.add(band);
-  for (const [x, z] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.2], [0.2, 0.2], [0, -0.2], [0, 0.2], [-0.2, 0], [0.2, 0]] as const) {
-    const prong = box(0.1, 0.16, 0.1, GOLD);
-    prong.position.set(x, 0.18, z);
+  for (const [x, z] of [[-0.11, -0.11], [0.11, -0.11], [-0.11, 0.11], [0.11, 0.11], [0, -0.11], [0, 0.11], [-0.11, 0], [0.11, 0]] as const) {
+    const prong = box(0.06, 0.09, 0.06, GOLD);
+    prong.position.set(x, 0.1, z);
     g.add(prong);
   }
-  g.position.y = PLAYER.h;
   g.visible = false;
   return g;
 }
@@ -151,15 +92,16 @@ export function leaderId(): number | null {
 export interface Remote {
   info: PlayerInfo;
   g: THREE.Group;
-  /** Тело, визор, рука и корона — всё, что ложится при подкате */
+  /** Тело, рука с оружием и всё надетое — то, что ложится при подкате */
   pose: THREE.Group;
+  /** Модель со скелетом; null — пока модель не загрузилась (тогда виден прямоугольник body) */
+  char: Character | null;
+  body: THREE.Mesh;
   slide: boolean;
   /** 0 — стоит, 1 — лежит */
   poseK: number;
   labelY: number;
   crown: THREE.Group;
-  face: THREE.Mesh;
-  faceLevel: number;
   /** Бронежилет: закрывает корпус, голова и ноги видны */
   armor: THREE.Mesh;
   /** Шлем Джаггернаута */
@@ -173,57 +115,100 @@ export interface Remote {
   w: WeaponId;
   pos: THREE.Vector3;
   target: THREE.Vector3;
+  /** Скорость по сглаженному положению — для анимации шага и для тела после смерти */
+  vel: THREE.Vector3;
   yaw: number;
   targetYaw: number;
   pitch: number;
+  /** С сервера: в воздухе, перезаряжается */
+  air: boolean;
+  reloading: boolean;
   flashUntil: number;
 }
 
 function remoteGun(w: WeaponId): Gun {
   const gun = buildGun(w);
-  gun.group.scale.setScalar(1.4);
+  gun.group.scale.setScalar(1.15);
   return gun;
 }
 
-// Игрок — одинаковый прямоугольник цвета команды
+/** Где на оружии руки (в координатах оружия): правая на рукояти, левая на цевье; null — рука свободна. */
+function grips(w: WeaponId): { right: THREE.Vector3; left: THREE.Vector3 | null } {
+  if (w === 'knife' || w === 'grenade') return { right: new THREE.Vector3(0, -0.04, 0), left: null };
+  if (w === 'pistol') return { right: new THREE.Vector3(0, -0.1, -0.02), left: new THREE.Vector3(-0.03, -0.12, -0.03) };
+  if (w === 'rocket') return { right: new THREE.Vector3(0, -0.1, -0.05), left: new THREE.Vector3(0, -0.08, -0.4) };
+  return { right: new THREE.Vector3(0, -0.1, 0), left: new THREE.Vector3(0, -0.07, -0.38) };
+}
+
 export function buildPlayer(info: PlayerInfo): Remote {
   const g = new THREE.Group();
   const pose = new THREE.Group();
   g.add(pose);
-  const body = box(PLAYER.w, PLAYER.h, PLAYER.w, TEAM_COLOR[info.team]);
+  // Прямоугольник цвета команды — пока модель грузится (или если она не загрузилась)
+  const body = box(0.45, PLAYER.h, 0.3, TEAM_COLOR[info.team]);
   body.position.y = PLAYER.h / 2;
   pose.add(body);
-  // Пиксельное лицо спереди: показывает, куда смотрит игрок, и злеет с каждым убийством
-  const face = new THREE.Mesh(
-    new THREE.PlaneGeometry(PLAYER.w * 0.9, 0.42),
-    new THREE.MeshLambertMaterial({ map: faceTexture(0), transparent: true }),
-  );
-  face.position.set(0, PLAYER.eye - 0.05, -PLAYER.w / 2 - 0.005);
-  face.rotation.y = Math.PI;
-  pose.add(face);
+  // Оружие — у правого плеча, стволом вперёд; руки модели тянутся к нему сами
   const hand = new THREE.Group();
-  hand.position.set(PLAYER.w / 2 + 0.06, 1.25, -0.25);
+  hand.position.set(0.15, 1.38, -0.24);
   pose.add(hand);
   const label = nameSprite(info.name, info.team);
   label.position.y = PLAYER.h + 0.35;
   g.add(label);
   const crown = buildCrown();
+  crown.position.y = HEAD_Y + 0.14;
   pose.add(crown);
-  const armor = box(PLAYER.w + 0.14, 0.8, PLAYER.w + 0.14, 0x4b5320);
-  armor.position.y = 0.55 + 0.4; // от бёдер (0.55) до плеч (1.35)
+  const armor = box(0.44, 0.5, 0.3, 0x4b5320);
+  armor.position.y = 1.2; // от пояса до плеч
   armor.visible = false;
   pose.add(armor);
   const helmet = buildHelmet();
+  helmet.position.y = HEAD_Y;
   pose.add(helmet);
   scene.add(g);
   const gun = remoteGun('pistol');
   hand.add(gun.group);
-  return {
-    info, g, pose, slide: false, poseK: 0, labelY: PLAYER.h + 0.35, crown, face, faceLevel: 0, armor, helmet, label, hand, gun, w: 'pistol',
+  const r: Remote = {
+    info, g, pose, char: null, body, slide: false, poseK: 0, labelY: PLAYER.h + 0.35, crown, armor, helmet, label, hand, gun, w: 'pistol',
     stepAcc: 0, lastPos: new THREE.Vector3(),
-    pos: new THREE.Vector3(), target: new THREE.Vector3(),
-    yaw: 0, targetYaw: 0, pitch: 0, flashUntil: 0,
+    pos: new THREE.Vector3(), target: new THREE.Vector3(), vel: new THREE.Vector3(),
+    yaw: 0, targetYaw: 0, pitch: 0, air: false, reloading: false, flashUntil: 0,
   };
+  attachCharacter(r);
+  return r;
+}
+
+/** Ставит модель вместо прямоугольника (как только она загрузилась); шлем и корона садятся на голову, жилет — на корпус. */
+function attachCharacter(r: Remote): void {
+  if (r.char || !characterReady()) return;
+  const c = createCharacter(r.info.team);
+  if (!c) return;
+  r.char = c;
+  r.pose.add(c.root);
+  r.body.visible = false;
+  // Кости модели в сантиметрах и развёрнуты на пол-оборота — возвращаем надетому метры и взгляд на −Z
+  const wear = (o: THREE.Object3D, bone: THREE.Bone, y: number): void => {
+    bone.add(o);
+    o.scale.setScalar(100);
+    o.rotation.y = Math.PI;
+    o.position.set(0, y * 100, 0);
+  };
+  wear(r.helmet, c.bones.Head, 0.08);
+  wear(r.armor, c.bones.Spine1, 0.06);
+  placeCrown(r);
+}
+
+/** Корона — на макушке, а если надет шлем — поверх него. */
+export function placeCrown(r: Remote): void {
+  const lift = r.info.helmet > 0 ? 0.09 : 0;
+  if (r.char) {
+    if (r.crown.parent !== r.char.bones.Head) {
+      r.char.bones.Head.add(r.crown);
+      r.crown.scale.setScalar(100);
+      r.crown.rotation.y = Math.PI;
+    }
+    r.crown.position.set(0, (0.2 + lift) * 100, 0);
+  } else r.crown.position.y = HEAD_Y + 0.14 + lift;
 }
 
 export function setRemoteWeapon(r: Remote, w: WeaponId): void {
@@ -236,4 +221,42 @@ export function setRemoteWeapon(r: Remote, w: WeaponId): void {
 
 export function scaleOfRemote(r: Remote): number {
   return r.info.big ? STREAK.bigScale : 1;
+}
+
+const _prev = new THREE.Vector3(), _rh = new THREE.Vector3(), _lh = new THREE.Vector3();
+
+/** Кадр чужого игрока: сглаженное движение, подкат и анимация модели. k — доля сглаживания за кадр. */
+export function updateRemote(r: Remote, dt: number, now: number, k: number): void {
+  _prev.copy(r.pos);
+  r.pos.lerp(r.target, k);
+  if (dt > 0) {
+    _prev.subVectors(r.pos, _prev).divideScalar(dt);
+    // Быстрее 12 м/с игроки не двигаются: больше — это рывок из-за задержки сети или редких кадров
+    r.vel.lerp(_prev.clampLength(0, 12), Math.min(1, dt * 12));
+  }
+  const dy = r.targetYaw - r.yaw;
+  r.yaw += Math.atan2(Math.sin(dy), Math.cos(dy)) * k;
+  r.g.position.copy(r.pos);
+  r.g.rotation.y = r.yaw;
+  r.hand.rotation.x = r.pitch;
+  r.gun.flash.visible = now < r.flashUntil;
+  // Подкат: тело ложится вдоль взгляда и встаёт обратно
+  r.poseK += ((r.slide ? 1 : 0) - r.poseK) * Math.min(1, dt * 12);
+  r.pose.rotation.x = (-Math.PI / 2) * r.poseK;
+  r.pose.position.set(0, 0.2 * r.poseK, (PLAYER.h / 2) * r.poseK);
+  r.label.position.y = r.labelY + (1.4 - r.labelY) * r.poseK;
+
+  attachCharacter(r);
+  if (!r.char || !r.g.visible) return;
+  r.g.updateMatrixWorld(true);
+  const grip = grips(r.w);
+  const speed = Math.hypot(r.vel.x, r.vel.z);
+  // Вперёд или назад идёт игрок относительно взгляда (взгляд — на (−sin yaw, −cos yaw))
+  const forward = speed > 0.2 ? (-Math.sin(r.yaw) * r.vel.x - Math.cos(r.yaw) * r.vel.z) / speed : 1;
+  updateCharacter(r.char, dt, {
+    speed: r.slide ? 0 : speed, forward, air: r.air && !r.slide, reloading: r.reloading,
+    rightHand: r.gun.group.localToWorld(_rh.copy(grip.right)),
+    leftHand: grip.left ? r.gun.group.localToWorld(_lh.copy(grip.left)) : null,
+    pitch: r.pitch,
+  });
 }

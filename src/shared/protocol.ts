@@ -30,8 +30,8 @@ export interface PlayerInfo {
   helmet: number;
 }
 
-/** [id, x, y, z, yaw, pitch, оружие, подкат 0/1] */
-export type SnapRow = [number, number, number, number, number, number, WeaponId, 0 | 1];
+/** [id, x, y, z, yaw, pitch, оружие, подкат 0/1, в воздухе 0/1, перезаряжается 0/1] */
+export type SnapRow = [number, number, number, number, number, number, WeaponId, 0 | 1, 0 | 1, 0 | 1];
 
 export interface Winner {
   team?: Team;
@@ -178,6 +178,7 @@ export type ClientMsg =
   | { t: 'open'; on: boolean }
   | { t: 'rocket'; d: Vec3 }
   | { t: 'spray'; p: Vec3; n: [number, number]; e: number }
-  | { t: 'state'; p: Vec3; yaw: number; pitch: number; w: WeaponId; sl: boolean }
+  /** sl — в подкате, air — в воздухе, rl — перезаряжается (два последних — только для анимации у других) */
+  | { t: 'state'; p: Vec3; yaw: number; pitch: number; w: WeaponId; sl: boolean; air?: boolean; rl?: boolean }
   /** hits: id игрока → [попаданий в тело, попаданий в голову] */
   | { t: 'shoot'; w: WeaponId; ends: Vec3[]; hits: Record<number, [number, number]>; brk?: Record<number, number> };

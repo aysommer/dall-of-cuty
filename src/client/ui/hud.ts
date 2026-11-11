@@ -4,7 +4,7 @@ import { WEAPONS } from '../../shared/map.js';
 import { levelOf, RANKS } from '../../shared/ranks.js';
 import { me, state } from '../core/state.js';
 import { $, textEl } from '../core/util.js';
-import { faceLevel, faceTexture, faceUrl, leaderId } from '../render/players.js';
+import { leaderId } from '../render/players.js';
 import { renderHotbar, renderStreak } from './hotbar.js';
 import { timerEl } from './match.js';
 import { cookStart } from '../weapons/grenade.js';
@@ -48,9 +48,6 @@ export function flashDamage(): void {
 
 export function updateHud(): void {
   $('hp').textContent = String(me.alive ? me.hp : 0);
-  const myKills = state.roster.find((p) => p.id === me.id)?.kills ?? 0;
-  faceTexture(faceLevel(myKills));
-  $<HTMLImageElement>('my-face').src = faceUrl[faceLevel(myKills)]!;
   $('armor').classList.toggle('hidden', !(me.alive && me.armor > 0));
   $('armor-val').textContent = String(me.armor);
   const myHelmet = state.roster.find((p) => p.id === me.id)?.helmet ?? 0;

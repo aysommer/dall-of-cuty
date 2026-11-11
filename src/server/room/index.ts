@@ -50,7 +50,7 @@ export function handleJoin(room: Room, ws: WebSocket, msg: Incoming): Player | n
   const name = rawName.replace(/[<>&]/g, '').trim().slice(0, 14) || 'Игрок';
   const p: Player = {
     id: nextId++, ws, name, team,
-    pos: [0, 0, 0], yaw: 0, pitch: 0, w: 'pistol', slide: false,
+    pos: [0, 0, 0], yaw: 0, pitch: 0, w: 'pistol', slide: false, air: false, reloading: false,
     hp: 100, armor: 0, alive: false, kills: 0, deaths: 0, lastShot: 0, lastSpray: 0,
     profile: decodeProfile(msg.token),
     rockets: 0,
@@ -88,6 +88,8 @@ export function handle(room: Room, me: Player, msg: Incoming): void {
   if (msg.t === 'state') {
     if (me.alive && isVec3(msg.p)) me.pos = msg.p;
     me.slide = me.alive && msg.sl === true;
+    me.air = me.alive && msg.air === true;
+    me.reloading = me.alive && msg.rl === true;
     pickMedkit(room, me);
     pickAmmo(room, me);
     // Во время открытия ящика двигаться нельзя: сдвинулся — открытие сорвано
@@ -183,7 +185,7 @@ export function tick(room: Room): void {
   if (room.players.size < 2) return;
   const ps: SnapRow[] = [];
   for (const p of room.players.values()) {
-    ps.push([p.id, p.pos[0], p.pos[1], p.pos[2], p.yaw, p.pitch, p.w, p.slide ? 1 : 0]);
+    ps.push([p.id, p.pos[0], p.pos[1], p.pos[2], p.yaw, p.pitch, p.w, p.slide ? 1 : 0, p.air ? 1 : 0, p.reloading ? 1 : 0]);
   }
   broadcast(room, { t: 'snap', ps });
 }

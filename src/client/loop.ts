@@ -5,7 +5,7 @@ import { camera, fog, renderer, scene } from './core/scene.js';
 import { settings } from './core/settings.js';
 import { keys, me, remotes, state } from './core/state.js';
 import { $ } from './core/util.js';
-import { corpses, updateCorpses } from './fx/corpses.js';
+import { corpseDebug, corpses, updateCorpses } from './fx/corpses.js';
 import { bursts, updateFireworks } from './fx/fireworks.js';
 import { stepCount, updateSteps } from './fx/footsteps.js';
 import { sprays, updateSprays } from './fx/sprays.js';
@@ -13,7 +13,8 @@ import { updateEffects } from './fx/tracers.js';
 import { packFx, updateAmmoPacks } from './pickups/ammo.js';
 import { updateCrate } from './pickups/crate.js';
 import { medkitFx, updateMedkits } from './pickups/medkits.js';
-import { FACE_STEPS, faceTexture, faceUrl } from './render/players.js';
+import { updateRemote } from './render/players.js';
+import { characterFailed, characterReady, loadCharacterModel } from './render/character.js';
 import { gunner, gunshipFx, markerEls, updateGunship } from './streaks/gunship.js';
 import { missileCtl, remoteMissiles, updateMissile } from './streaks/missile.js';
 import { updateNuke } from './streaks/nuke.js';
@@ -28,12 +29,14 @@ import { updateRockets } from './weapons/rockets.js';
 import { updateShooting } from './weapons/shooting.js';
 import { animateGun, animateScope, poseGun, scopeAnim, sniperSway, SWING_MS, updateAim, viewGun, viewModel } from './weapons/viewmodel.js';
 import { brokenIds, currentMap, openDoors, updateDoors } from './world/map.js';
-import { move } from './world/physics.js';
+import { move, touchingLadder } from './world/physics.js';
 import { sinking, updateSinking, updateUnderground } from './world/underground.js';
 import { updateWeather, weatherKind } from './world/weather.js';
 
 let last = performance.now(), sendAcc = 0;
 
+/** Когда последний раз стояли на земле: «в воздухе» — только если оторвались дольше чем на мгновение */
+let groundedAt = 0, airFrames = 0;
 function frame(now: number): void {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - last) / 1000);
@@ -42,6 +45,7 @@ function frame(now: number): void {
   if (state.joined) {
     if (me.alive) {
       move(dt);
+      if (me.grounded) { groundedAt = now; airFrames = 0; } else airFrames++;
       const eyeTarget = (state.low ? SLIDE.eye : PLAYER.eye) * (me.big ? STREAK.bigScale : 1);
       state.eyeH += (eyeTarget - state.eyeH) * Math.min(1, dt * 14);
       camera.position.set(me.pos.x, me.pos.y + state.eyeH, me.pos.z);
@@ -87,6 +91,7 @@ function frame(now: number): void {
         t: 'state',
         p: [+me.pos.x.toFixed(2), +me.pos.y.toFixed(2), +me.pos.z.toFixed(2)],
         yaw: +me.yaw.toFixed(3), pitch: +me.pitch.toFixed(3), w: me.weapon, sl: state.low,
+        air: airFrames >= 2 && now - groundedAt > 120 && !touchingLadder(me.pos), rl: performance.now() < me.reloadUntil,
       });
     }
   } else {
@@ -107,25 +112,14 @@ function frame(now: number): void {
 
   const k = 1 - Math.exp(-16 * dt);
   for (const r of remotes.values()) {
-    r.pos.lerp(r.target, k);
-    const dy = r.targetYaw - r.yaw;
-    r.yaw += Math.atan2(Math.sin(dy), Math.cos(dy)) * k;
-    r.g.position.copy(r.pos);
-    r.g.rotation.y = r.yaw;
-    r.hand.rotation.x = r.pitch;
-    r.gun.flash.visible = now < r.flashUntil;
-    // Подкат: прямоугольник ложится вдоль взгляда и встаёт обратно
-    r.poseK += ((r.slide ? 1 : 0) - r.poseK) * Math.min(1, dt * 12);
-    r.pose.rotation.x = (-Math.PI / 2) * r.poseK;
-    r.pose.position.set(0, (PLAYER.w / 2) * r.poseK, (PLAYER.h / 2) * r.poseK);
-    r.label.position.y = r.labelY + (1.4 - r.labelY) * r.poseK;
+    updateRemote(r, dt, now, k);
   }
 
   updateRockets(now, dt);
   updateEffects(now);
   updateCrate(now);
   updateCratePrompt(now);
-  updateCorpses(now);
+  updateCorpses(now, dt);
   updateSprays(now);
   updateMedkits(now);
   updateSteps(dt);
@@ -150,13 +144,14 @@ declare global {
   interface Window {
     game: {
       me: typeof me; remotes: typeof remotes; keys: typeof keys;
-      steer: (yaw: number, pitch: number) => void; faces: () => string[]; dbg: () => Record<string, unknown>;
+      steer: (yaw: number, pitch: number) => void; dbg: () => Record<string, unknown>;
     };
   }
 }
 
 /** Запуск модуля: подписки на события и начальная отрисовка (вызывается из main.ts). */
 export function initLoop(): void {
+  loadCharacterModel();
   updateHud();
   requestAnimationFrame(frame);
   window.game = {
@@ -165,10 +160,10 @@ export function initLoop(): void {
       if (missileCtl) { missileCtl.yaw = yaw; missileCtl.pitch = pitch; }
       if (gunner) { gunner.yaw = yaw; gunner.pitch = pitch; }
     },
-    faces: () => FACE_STEPS.map((_, l) => { faceTexture(l); return faceUrl[l]!; }),
     dbg: () => ({ openDoors: [...openDoors], sprintK: state.sprintK, wallK: state.wallK, broken: [...brokenIds], grenades: [...grenadeFx.values()].map((g) => g.mesh.position.toArray().map((v) => +v.toFixed(2))), myGrenades: state.myGrenades, cooking: cookStart > 0, scopeOn: state.scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground: state.underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
       kit: settings.kit, reserve: { ...me.reserve }, hotbar: hotbar().map((h) => `${h.key}:${h.label}`).join(' '),
-      missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, eyeH: state.eyeH, recoil: state.recoil, corpses: corpses.length, sprays: sprays.length,
+      missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, eyeH: state.eyeH, recoil: state.recoil, corpses: corpses.length, corpse: corpseDebug(), model: characterReady() ? 'ready' : characterFailed() ? 'failed' : 'loading',
+      remoteAnim: [...remotes.values()].map((r) => r.char ? { walk: +r.char.walk.getEffectiveWeight().toFixed(2), run: +r.char.run.getEffectiveWeight().toFixed(2), air: +r.char.airK.toFixed(2), reload: r.reloading, speed: +r.char.speed.toFixed(1) } : null), sprays: sprays.length,
       steps: stepCount, medkits: medkitFx.size, boltUntil: state.boltUntil, menuClosed: state.menuClosed, armor: me.armor }),
   };
 }

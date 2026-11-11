@@ -163,8 +163,48 @@ if (!chromium) {
   await A.waitForTimeout(300);
   check('чат у A: Лиса заходит', /Лиса заходит/.test(await A.textContent('#chat')));
 
+  console.log('Модель игрока');
+  check('модель загрузилась', (await A.evaluate(() => game.dbg())).model === 'ready');
+  check('пиксельных лиц больше нет', (await A.$('#my-face')) === null);
+  {
+    // B бежит — у A его модель переходит на бег; прыгает — «в воздухе»; перезаряжается — рука идёт за магазином
+    const anim = async () => (await A.evaluate(() => game.dbg())).remoteAnim[0];
+    await B.evaluate(() => { game.me.pos.set(0, 0, -6); game.me.vel.set(0, 0, 0); game.me.yaw = Math.PI; });
+    // Ждём, пока A увидит B на новом месте и стоящим (тестовый браузер рисует редко)
+    await A.waitForFunction(() => { const a = game.dbg().remoteAnim[0]; return a && Math.abs(a.speed) < 0.3 && Math.abs([...game.remotes.values()][0].pos.z + 6) < 0.3; }, null, { timeout: 10000 }).catch(() => {});
+    await B.keyboard.down('KeyW');
+    const ran = await A.waitForFunction(() => { const a = game.dbg().remoteAnim[0]; return a.run > 0.5 && a.speed > 3; }, null, { timeout: 10000 }).then(() => true, () => false);
+    const run = await anim();
+    await B.keyboard.up('KeyW'); await A.waitForTimeout(800);
+    check('у бегущего играет анимация бега', ran, JSON.stringify(run));
+    const airIs = (want) => A.waitForFunction((w) => (game.dbg().remoteAnim[0].air > 0.5) === w, want, { timeout: 10000 }).then(() => true, () => false);
+    await B.keyboard.down('Space');
+    const up = await airIs(true);
+    await B.keyboard.up('Space');
+    check('в прыжке ноги поджаты', up);
+    check('после приземления — снова на земле', await airIs(false));
+    await B.evaluate(() => { game.me.reloadUntil = performance.now() + 1500; }); await A.waitForTimeout(500);
+    check('перезарядка видна другим', (await anim()).reload === true);
+    await A.waitForTimeout(1500);
+  }
+
   console.log('Бой');
   check('A убивает B', await kill(A, B));
+  {
+    const corpse = () => A.evaluate(() => game.dbg().corpse);
+    const first = await corpse();
+    check('тело погибшего — модель с физикой', first?.modelled === true);
+    check('у погибшего на экране тоже своё тело с физикой', (await B.evaluate(() => game.dbg().corpse))?.modelled === true);
+    // Голова за пару секунд оказывается у земли, а конечности остаются на своих местах относительно тела
+    const fell = await A.waitForFunction(() => (game.dbg().corpse?.joints[2]?.[1] ?? 9) < 0.6, null, { timeout: 20000 }).then(() => true, () => false);
+    const c = await corpse();
+    check('тело упало на землю', fell, c ? `голова на высоте ${c.joints[2][1]}` : 'тела нет');
+    if (c) {
+      const d = (i, j) => Math.hypot(c.joints[i][0] - c.joints[j][0], c.joints[i][1] - c.joints[j][1], c.joints[i][2] - c.joints[j][2]);
+      check('кости не растянулись (бедро и голень ~0.4 м)', Math.abs(d(9, 10) - 0.41) < 0.08 && Math.abs(d(10, 11) - 0.42) < 0.08, `${d(9, 10).toFixed(2)} и ${d(10, 11).toFixed(2)}`);
+      check('тело не провалилось под землю', c.joints.every((j) => j[1] > -0.05));
+    }
+  }
   await A.waitForTimeout(500);
   check('счёт A вырос', /Ты: 1/.test(await A.textContent('#score')));
   check('лента убийств', /Лиса/.test(await A.textContent('#feed')));
@@ -180,7 +220,7 @@ if (!chromium) {
   const speed = async (p, sprint) => {
     await p.evaluate(() => { game.me.pos.set(0, 0, 0); game.me.vel.set(0, 0, 0); game.me.yaw = 0; });
     if (sprint) await p.keyboard.down('ShiftLeft');
-    await p.keyboard.down('KeyW'); await p.waitForTimeout(500);
+    await p.keyboard.down('KeyW'); await p.waitForTimeout(1000);
     const v = await p.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z));
     await p.keyboard.up('KeyW'); if (sprint) await p.keyboard.up('ShiftLeft');
     await p.waitForTimeout(300);

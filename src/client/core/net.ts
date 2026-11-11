@@ -14,7 +14,7 @@ import { onAmmoPacks } from '../pickups/ammo.js';
 import { onCrate } from '../pickups/crate.js';
 import { onMedkits } from '../pickups/medkits.js';
 import { muzzleWorld } from '../render/models.js';
-import { buildPlayer, dropHelmet, faceLevel, faceTexture, leaderId, setRemoteWeapon } from '../render/players.js';
+import { buildPlayer, dropHelmet, leaderId, placeCrown, setRemoteWeapon } from '../render/players.js';
 import { gunner, gunshipFx, onGunship, onGunshipEnd } from '../streaks/gunship.js';
 import { endMissile, onMissile, startMissile } from '../streaks/missile.js';
 import { onNuke } from '../streaks/nuke.js';
@@ -69,7 +69,7 @@ function onPlayers(m: PlayersMsg): void {
     // Шлем сбили — он слетает с головы
     if (r.helmet.visible && p.helmet === 0 && p.alive) dropHelmet(r);
     r.helmet.visible = p.helmet > 0;
-    r.crown.position.y = PLAYER.h + (p.helmet > 0 ? 0.14 : 0); // корона — поверх шлема
+    placeCrown(r); // корона — поверх шлема
     r.g.scale.setScalar(p.big ? STREAK.bigScale : 1); // суперброня — в полтора раза больше
   }
   for (const [id, r] of remotes) {
@@ -78,11 +78,6 @@ function onPlayers(m: PlayersMsg): void {
   const leader = leaderId();
   for (const [id, r] of remotes) {
     r.crown.visible = id === leader;
-    const lvl = faceLevel(r.info.kills);
-    if (lvl !== r.faceLevel) {
-      r.faceLevel = lvl;
-      (r.face.material as THREE.MeshLambertMaterial).map = faceTexture(lvl);
-    }
     r.labelY = PLAYER.h + (id === leader ? 0.7 : 0.35); // имя — над короной
   }
   $('crown-note').classList.toggle('hidden', leader !== me.id);
@@ -115,10 +110,12 @@ function onSpawn(m: SpawnMsg): void {
 }
 
 function onSnap(m: SnapMsg): void {
-  for (const [id, x, y, z, yaw, pitch, w, sl] of m.ps) {
+  for (const [id, x, y, z, yaw, pitch, w, sl, air, rl] of m.ps) {
     const r = remotes.get(id);
     if (!r) continue;
     r.slide = sl === 1;
+    r.air = air === 1;
+    r.reloading = rl === 1;
     r.target.set(x, y, z);
     r.targetYaw = yaw;
     r.pitch = pitch;
@@ -141,11 +138,22 @@ function onKill(m: KillMsg): void {
   const k = state.roster.find((p) => p.id === m.killer);
   const v = state.roster.find((p) => p.id === m.victim);
   if (!v) return;
-  // Тело падает и уходит под землю
-  if (m.victim === me.id) spawnCorpse(me.pos, me.yaw, v.team, state.low);
-  else {
-    const r = remotes.get(m.victim);
-    if (r) spawnCorpse(r.pos, r.yaw, v.team, r.slide);
+  // Тело падает по физике: его толкает в сторону от убийцы, взрыв — ещё и подбрасывает
+  {
+    const r = m.victim === me.id ? null : remotes.get(m.victim);
+    const at = m.victim === me.id ? me.pos : r?.pos;
+    if (at) {
+      const from = m.killer === me.id ? me.pos : m.killer !== null ? remotes.get(m.killer)?.pos : undefined;
+      const blast = m.w === 'rocket' || m.w === 'grenade' || m.w === 'missile' || m.w === 'nuke' || m.w === 'crate' || m.w === 'gunship';
+      const impulse = new THREE.Vector3();
+      if (from && from !== at) impulse.subVectors(at, from).setY(0).normalize().multiplyScalar(blast ? 6 : m.w === 'shotgun' || m.w === 'sniper' ? 4.5 : 2.5);
+      if (blast) impulse.y = 5.5;
+      spawnCorpse({
+        pos: at, yaw: r ? r.yaw : me.yaw, team: v.team, lying: r ? r.slide : state.low,
+        scale: (r ? r.info.big : me.big) ? STREAK.bigScale : 1,
+        char: r?.char ?? null, vel: r ? r.vel.clone() : me.vel.clone(), impulse,
+      });
+    }
   }
   if (!k || m.killer === null) {
     // Без убийцы: ящик-ловушка или бомба (для себя и своих)

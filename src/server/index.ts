@@ -20,6 +20,7 @@ const MIME: Record<string, string> = {
   '.json': 'application/json',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.glb': 'model/gltf-binary',
 };
 
 const server = http.createServer((req, res) => {
@@ -43,7 +44,8 @@ const server = http.createServer((req, res) => {
     }
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(file)] ?? 'application/octet-stream',
-      'Cache-Control': 'no-cache',
+      // Модели большие и не меняются — пусть браузер держит их сутки; остальное перепроверяется
+      'Cache-Control': urlPath.startsWith('/models/') ? 'public, max-age=86400' : 'no-cache',
     });
     res.end(data);
   });

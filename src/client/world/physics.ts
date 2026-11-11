@@ -31,7 +31,7 @@ function hitBox(p: THREE.Vector3, h: number = state.low ? SLIDE.height : PLAYER.
   return c && overlaps(p, h, c) ? c : null;
 }
 
-function touchingLadder(p: THREE.Vector3): Ladder | null {
+export function touchingLadder(p: THREE.Vector3): Ladder | null {
   const r = PLAYER.w / 2;
   for (const l of currentMap.ladders) {
     if (p.x + r > l.min[0] && p.x - r < l.max[0] &&

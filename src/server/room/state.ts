@@ -22,6 +22,9 @@ export interface Player {
   w: WeaponId;
   /** Лежит ли в подкате (меняет хитбокс) */
   slide: boolean;
+  /** В воздухе и перезаряжается — только для анимации у других игроков */
+  air: boolean;
+  reloading: boolean;
   hp: number;
   armor: number;
   alive: boolean;
