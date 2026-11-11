@@ -17,6 +17,7 @@
     <div id="damage"></div>
     <div id="score"></div>
     <div id="feed"></div>
+    <div id="chat"></div>
     <div id="health"><img id="my-face" alt=""><span class="label">HP</span><span id="hp">100</span><span id="armor" class="hidden"><span class="label"> 🛡</span><span id="armor-val">0</span></span><span id="helmet" class="hidden" title="Шлем: сколько попаданий в голову ещё выдержит"><span class="label"> 🪖</span><span id="helmet-val">0</span></span></div>
     <div id="ammo">
       <div id="weapon-name">Пистолет</div>
@@ -114,52 +115,77 @@
     </div>
   </div>
 
-  <!-- Меню входа -->
+  <!-- Меню входа: комнаты и лучший игрок -->
   <div id="menu" class="overlay">
-    <form class="panel" id="join-form">
-      <h1>DALL OF CUTY</h1>
-      <p class="sub">Сетевой шутер из кубиков · до 4 игроков</p>
+    <div class="menu-wrap">
+      <form class="panel" id="join-form" autocomplete="off">
+        <h1>DALL OF CUTY</h1>
+        <p class="sub">Сетевой шутер из кубиков · до 4 комнат по 4 игрока</p>
 
-      <label class="field">Имя
-        <input id="name" maxlength="14" placeholder="Игрок" autocomplete="off">
-      </label>
+        <label class="field">Имя
+          <input id="name" maxlength="14" placeholder="Игрок" autocomplete="off">
+        </label>
 
-      <div class="field">Режим
-        <div class="choice" id="mode-choice">
-          <button type="button" data-mode="tdm" class="active">Команды 2 × 2</button>
-          <button type="button" data-mode="ffa">Каждый сам за себя</button>
+        <div class="field">Комнаты <span id="rooms-note" class="rooms-note"></span>
+          <div id="room-list" class="room-list"></div>
         </div>
-      </div>
 
-      <div class="field">Карта
-        <select id="map-choice" class="select"></select>
-        <small id="mode-note"></small>
-      </div>
+        <!-- Новая комната: её настройки -->
+        <div id="new-room">
+          <label class="field">Название комнаты
+            <input id="room-name" maxlength="20" placeholder="Комната" autocomplete="off">
+          </label>
+          <label class="field">Пароль <span class="opt">— необязательно</span>
+            <input id="room-pass-new" type="password" maxlength="16" placeholder="от 4 до 16 символов" autocomplete="new-password">
+          </label>
 
-      <div class="field">Матч до
-        <div class="choice" id="limit-kind">
-          <button type="button" data-kind="time" class="active">Времени</button>
-          <button type="button" data-kind="kills">Убийств</button>
+          <div class="field">Режим
+            <div class="choice" id="mode-choice">
+              <button type="button" data-mode="tdm" class="active">Команды 2 × 2</button>
+              <button type="button" data-mode="ffa">Каждый сам за себя</button>
+            </div>
+          </div>
+
+          <div class="field">Карта
+            <select id="map-choice" class="select"></select>
+          </div>
+
+          <div class="field">Матч до
+            <div class="choice" id="limit-kind">
+              <button type="button" data-kind="time" class="active">Времени</button>
+              <button type="button" data-kind="kills">Убийств</button>
+            </div>
+            <div class="choice" id="limit-value"></div>
+          </div>
         </div>
-        <div class="choice" id="limit-value"></div>
-      </div>
 
-      <div class="field">Цвет
-        <div class="choice" id="team-choice">
-          <button type="button" data-team="green" class="green active">Зелёные <b id="green-count"></b></button>
-          <button type="button" data-team="red" class="red">Красные <b id="red-count"></b></button>
+        <!-- Вход в существующую комнату -->
+        <div id="join-room" class="hidden">
+          <div class="room-desc" id="room-desc"></div>
+          <label class="field" id="room-pass-field">Пароль комнаты 🔒
+            <input id="room-pass" type="password" maxlength="16" placeholder="пароль" autocomplete="off">
+          </label>
         </div>
-      </div>
 
-      <details class="field">
-        <summary>Настройки</summary>
-        <div class="rank-card"></div>
-        <div class="settings"></div>
-      </details>
+        <div class="field" id="team-field">Цвет
+          <div class="choice" id="team-choice">
+            <button type="button" data-team="green" class="green active">Зелёные <b id="green-count"></b></button>
+            <button type="button" data-team="red" class="red">Красные <b id="red-count"></b></button>
+          </div>
+        </div>
 
-      <button id="play" class="primary" type="submit" disabled>Подключение…</button>
-      <small id="status"></small>
-    </form>
+        <details class="field">
+          <summary>Настройки</summary>
+          <div class="rank-card"></div>
+          <div class="settings"></div>
+        </details>
+
+        <button id="play" class="primary" type="submit" disabled>Подключение…</button>
+        <small id="status"></small>
+      </form>
+
+      <aside id="best" class="best-card"></aside>
+    </div>
   </div>
 
   <script type="module" src="game.js"></script>

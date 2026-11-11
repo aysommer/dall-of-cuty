@@ -382,3 +382,53 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
   .t-classes { grid-column: span 2; }
   .metro-head h2 { font-size: 24px; }
 }
+
+/* ===== Главное меню: комнаты и лучший игрок ===== */
+.menu-wrap { margin: auto; display: flex; gap: 16px; align-items: flex-start; justify-content: center; width: 100%; max-width: 760px; }
+.menu-wrap > .panel { flex: 1 1 420px; max-width: 420px; }
+.rooms-note { float: right; text-transform: none; letter-spacing: 0; color: #c8ccd4; }
+.room-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.room {
+  display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; text-align: left; font: inherit;
+  background: #11141a; border: 2px solid #343b48; color: #c8ccd4; cursor: pointer; text-transform: none; letter-spacing: 0;
+}
+.room:hover:not(:disabled) { border-color: #6b7a94; }
+.room.active { border-color: #fff; color: #fff; background: #2a303c; }
+.room:disabled { opacity: 0.45; cursor: not-allowed; }
+.room .room-top { display: flex; justify-content: space-between; gap: 8px; }
+.room .room-name { font-weight: 700; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room .room-count { font-weight: 700; font-variant-numeric: tabular-nums; }
+.room small { font-size: 12px; color: #9aa4b5; }
+.room.new { border-style: dashed; }
+.field .opt { text-transform: none; letter-spacing: 0; color: #6f7888; }
+.room-desc { text-align: left; font-size: 14px; color: #c8ccd4; background: #11141a; border-left: 3px solid #ffc928; padding: 8px 10px; margin-bottom: 16px; }
+
+.best-card {
+  flex: 0 0 260px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center;
+  background: #1b1f27; border: 2px solid #ffc928; padding: 18px 16px;
+}
+.best-card .best-title { color: #ffc928; font-weight: 800; letter-spacing: 2px; font-size: 12px; margin-bottom: 6px; }
+.best-card .best-empty { color: #9aa4b5; font-size: 14px; padding: 20px 0; }
+.best-card .ring { width: 116px; height: 116px; }
+.best-card .ring-in .lv { font-size: 38px; }
+.best-card .best-name { font-size: 22px; font-weight: 800; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.best-card .best-rank { color: #ffc928; font-weight: 700; font-size: 14px; }
+.best-card small { color: #9aa4b5; }
+.best-card .best-sub { margin-top: 8px; text-transform: uppercase; letter-spacing: 1px; font-size: 11px; color: #6f7888; }
+.best-stats { display: flex; gap: 14px; justify-content: center; }
+.best-stats .v { display: block; font-size: 22px; font-weight: 800; line-height: 1.1; }
+.best-stats small { font-size: 11px; }
+.best-stats.small .v { font-size: 16px; }
+@media (max-width: 760px) {
+  .menu-wrap { flex-direction: column; align-items: center; }
+  .menu-wrap > .panel { flex: none; }
+  .best-card { flex: none; width: 100%; max-width: 420px; }
+}
+
+/* Чат комнаты: кто зашёл и кто вышел */
+#chat { position: absolute; left: 18px; bottom: 196px; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; font-size: 14px; pointer-events: none; }
+#chat .chat-row { background: rgba(0, 0, 0, 0.5); padding: 3px 10px; transition: opacity 1s ease; }
+#chat .chat-row .arrow { color: #9aa4b5; }
+#chat .chat-row.join .arrow { color: #5cf07a; }
+#chat .chat-row.leave .arrow { color: #ff8a8a; }
+#chat .chat-row.fade { opacity: 0; }

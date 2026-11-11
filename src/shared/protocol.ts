@@ -44,10 +44,19 @@ export interface Winner {
 /** Чем убили: оружие, ящик-ловушка, метательный нож, ракета с неба или бомба. */
 export type KillWeapon = WeaponId | 'crate' | 'throw' | 'missile' | 'nuke' | 'gunship';
 
-export type InfoMsg = {
-  t: 'info'; mode: Mode; map: MapId; limitKind: LimitKind; limitValue: number;
+/** Комната в списке главного меню. locked — с паролем. */
+export interface RoomInfo {
+  id: number; name: string; locked: boolean;
+  mode: Mode; map: MapId; limitKind: LimitKind; limitValue: number;
   count: number; green: number; red: number; max: number;
-};
+}
+/** Лучший игрок сейчас по всем комнатам: счёт в текущем матче и прогресс за всё время. */
+export interface BestPlayer {
+  name: string; room: string; rank: number;
+  kills: number; deaths: number; totalKills: number; totalDeaths: number;
+}
+/** Главное меню: список комнат, сколько их может быть и лучший игрок. */
+export type LobbyMsg = { t: 'lobby'; rooms: RoomInfo[]; maxRooms: number; best: BestPlayer | null };
 /** limit — до скольких убийств идёт матч (0 — по времени); left — сколько миллисекунд осталось (0 — по убийствам) */
 export type PlayersMsg = { t: 'players'; mode: Mode; limit: number; left: number; scores: Record<Team, number>; list: PlayerInfo[] };
 export type SpawnMsg = { t: 'spawn'; id: number; p: Vec3; yaw: number };
@@ -97,7 +106,9 @@ export type WeatherMsg = { t: 'weather'; kind: WeatherKind | null; ms: number };
 export type AmmoPacksMsg = { t: 'ammopacks'; list: Array<{ id: number; at: Vec3 }> };
 
 export type ServerMsg =
-  | InfoMsg
+  | LobbyMsg
+  /** Сообщение в чат комнаты: кто зашёл, кто вышел */
+  | { t: 'chat'; kind: 'join' | 'leave'; name: string; team: Team }
   | PlayersMsg
   | SpawnMsg
   | SnapMsg
@@ -141,8 +152,13 @@ export type ServerMsg =
   | { t: 'reset' };
 
 export type ClientMsg =
+  /**
+   * Войти в комнату room (id) или создать новую (room = 'new': roomName, mode, map и лимит — её настройки).
+   * password — пароль комнаты: при создании задаёт его (пустой — без пароля), при входе проверяется.
+   */
   | {
-    t: 'join'; name: string; team: Team; mode: Mode; map: MapId;
+    t: 'join'; room: number | 'new'; roomName?: string; password?: string;
+    name: string; team: Team; mode: Mode; map: MapId;
     limitKind: LimitKind; limitValue: number; kit: WeaponId[]; melee: MeleeKind; token?: string;
   }
   | { t: 'vote'; map: MapId }

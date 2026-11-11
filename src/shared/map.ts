@@ -119,6 +119,9 @@ export function stepGrenade(boxes: Box[], g: GrenadeBody, dt: number): void {
  * (команды — сумма убийств команды, «каждый сам за себя» — убийства игрока).
  */
 export const MATCH = { minutes: [5, 10, 15] as const, kills: [50, 100, 150] as const, voteMs: 15_000 };
+
+/** Комнаты: не больше max на сервере, по 4 игрока; пароль — от passMin до passMax символов (или без пароля). */
+export const ROOMS = { max: 4, players: 4, passMin: 4, passMax: 16, nameMax: 20 };
 export type LimitKind = 'time' | 'kills';
 
 /** Погода: раз в everyMs с вероятностью chance начинается дождь или снег на ms. */
