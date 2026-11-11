@@ -84,6 +84,23 @@ console.log('Комнаты (WebSocket)');
   await wait(1200);
 }
 
+console.log('Снаряды (WebSocket)');
+{
+  // Граната: сорвать чеку, бросить — летит, через 3 с взрывается; бросивший стоит рядом и погибает
+  const g = await wsClient();
+  join(g, { room: 'new', roomName: 'Гранаты', name: 'G', melee: 'grenade' }); await wait(300);
+  check('с гранатой в слоте 1 — одна граната', last(g, 'loadout')?.grenades === 1);
+  g.ws.send(JSON.stringify({ t: 'pin' })); await wait(100);
+  g.ws.send(JSON.stringify({ t: 'gthrow', d: [0, -1, 0] })); await wait(300);
+  check('граната летит', (last(g, 'grenades')?.list.length ?? 0) === 1);
+  await wait(3200);
+  check('взрыв гранаты под ногами убил бросившего', g.msgs.some((m) => m.t === 'kill' && m.w === 'grenade'));
+  // Ракета без ракетницы не вылетает
+  g.ws.send(JSON.stringify({ t: 'rocket', d: [0, 0, -1] })); await wait(200);
+  check('без ракетницы ракеты нет', !g.msgs.some((m) => m.t === 'rocket'));
+  g.ws.close(); await wait(1200);
+}
+
 // ---------- браузер ----------
 let chromium;
 try {

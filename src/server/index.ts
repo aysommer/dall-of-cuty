@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { ROOMS } from '../shared/map.js';
 import type { BestPlayer, LobbyMsg, ServerMsg } from '../shared/protocol.js';
-import { createRoom, type Incoming, type Player, type Room } from './room.js';
+import { createRoom, type Incoming, type Player, type RoomHandle as Room } from './room/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.resolve(__dirname, '..', 'public');
