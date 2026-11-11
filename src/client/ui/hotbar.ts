@@ -1,6 +1,6 @@
 // Слоты оружия внизу экрана и серия убийств с наградами.
-import { GUNSHIP, STREAK, type StreakKind, WEAPONS } from '../../shared/map.js';
-import type { LoadoutMsg, WeaponId } from '../../shared/protocol.js';
+import { GEAR, GUNSHIP, STREAK, type StreakKind, WEAPONS } from '../../shared/map.js';
+import type { MeleeKind, LoadoutMsg, WeaponId } from '../../shared/protocol.js';
 import { beep } from '../core/audio.js';
 import { sendMsg } from '../core/net.js';
 import { settings } from '../core/settings.js';
@@ -13,6 +13,9 @@ import { setWeapon } from '../weapons/viewmodel.js';
 
 let streak = 0;
 
+/** Что в слоте 1 в этой жизни: приходит с сервера (выбор в классе действует со следующей жизни) */
+export let gear: MeleeKind = settings.melee;
+
 const rewards: Record<StreakKind, number> = { uav: 0, missile: 0, nuke: 0, gunship: 0 };
 
 export type SlotId = WeaponId | StreakKind;
@@ -21,7 +24,8 @@ export type SlotId = WeaponId | StreakKind;
 export function hotbar(): Array<{ key: string; id: SlotId; label: string }> {
   const kit = settings.kit.map((id, i) => ({ key: String(i + 2), id: id as SlotId, label: WEAPONS[id].name }));
   return [
-    settings.melee === 'grenade' ? { key: '1', id: 'grenade', label: 'Граната' } : { key: '1', id: 'knife', label: 'Нож' },
+    // Слот 1: нож или устройство этой жизни (в руке оно — «граната», а что именно — говорит gear)
+    gear === 'knife' ? { key: '1', id: 'knife', label: 'Нож' } : { key: '1', id: 'grenade', label: GEAR[gear].name },
     ...kit,
     { key: '5', id: 'uav', label: 'БПЛА' },
     { key: '6', id: 'missile', label: 'Ракета с неба' },
@@ -55,7 +59,7 @@ export function useSlot(id: SlotId): void {
 export function renderHotbar(): void {
   const bar = $('hotbar');
   const list = hotbar();
-  const key = list.map((h) => h.id).join();
+  const key = list.map((h) => h.id + h.label).join();
   if (key !== hotbarKey) {
     // Набор поменялся — перестраиваем ячейки
     hotbarKey = key;
@@ -98,6 +102,7 @@ export function onLoadout(m: LoadoutMsg): void {
   if (m.streak === STREAK.superArmor && streak < m.streak) toast('🛡 Ты Джаггернаут: +500 брони, шлем держит 3 выстрела в голову');
   if (got('uav') || got('missile') || got('nuke') || got('gunship')) beep(1200, 0.3, 0.12);
   state.hasKnife = m.knife;
+  if (gear !== m.gear) { gear = m.gear; hotbarKey = ''; }
   state.myGrenades = m.grenades;
   streak = m.streak;
   rewards.uav = m.uav;

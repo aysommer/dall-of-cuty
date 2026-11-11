@@ -478,3 +478,11 @@ body.touch.playing #hotbar { pointer-events: auto; z-index: 2; bottom: 6px; }
 body.touch #hotbar .slot { min-width: 40px; padding: 8px 8px; touch-action: none; }
 body.touch #hotbar .slot .name { display: none; }
 body.touch #scoreboard { pointer-events: none; }
+
+/* ===== Снаряжение: замки по уровням и ослепление ===== */
+.choice.melee { flex-wrap: wrap; }
+.choice.melee button { flex: 1 1 30%; }
+.choice button.locked { opacity: 0.5; cursor: not-allowed; font-size: 12px; }
+#promo .promo-unlock { color: #5cf07a; font-weight: 700; font-size: 15px; margin-top: 4px; }
+/* Световая граната: белая пелена поверх всего, кроме меню */
+#blind { position: fixed; inset: 0; background: #fff; pointer-events: none; z-index: 8; }

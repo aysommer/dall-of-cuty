@@ -65,3 +65,17 @@ export function rankProgress(kills: number): RankProgress {
   const done = Math.max(0, kills) - from;
   return { rank, level: levelOf(rank), done, need, part: last ? 1 : done / need };
 }
+
+/**
+ * С какого уровня открываются оружие и снаряжение (чего в списке нет — доступно с первого).
+ * Уровень — номер звания + 1, растёт с убийствами за всё время.
+ */
+export const UNLOCK_LEVEL: Record<string, number> = {
+  mine: 2, flash: 2,
+  lmg: 3, tripwire: 3,
+  smg: 4, sticky: 4,
+  sniper: 5,
+};
+export const unlockLevel = (id: string): number => UNLOCK_LEVEL[id] ?? 1;
+/** Открыто ли оружие или снаряжение при таком числе убийств за всё время */
+export const isUnlocked = (id: string, kills: number): boolean => levelOf(rankOf(kills)) >= unlockLevel(id);

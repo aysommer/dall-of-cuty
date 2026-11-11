@@ -1,11 +1,11 @@
 // HUD: здоровье, броня, патроны, счёт, таблица по Tab, чат комнаты.
 import type { Team } from '../../shared/protocol.js';
-import { WEAPONS } from '../../shared/map.js';
+import { GEAR, WEAPONS } from '../../shared/map.js';
 import { levelOf, RANKS } from '../../shared/ranks.js';
 import { me, state } from '../core/state.js';
 import { $, textEl } from '../core/util.js';
 import { leaderId } from '../render/players.js';
-import { renderHotbar, renderStreak } from './hotbar.js';
+import { gear, renderHotbar, renderStreak } from './hotbar.js';
 import { timerEl } from './match.js';
 import { cookStart } from '../weapons/grenade.js';
 
@@ -54,7 +54,7 @@ export function updateHud(): void {
   $('helmet').classList.toggle('hidden', !(me.alive && myHelmet > 0));
   $('helmet-val').textContent = String(myHelmet);
   $('health').classList.toggle('low', me.hp <= 30);
-  $('weapon-name').textContent = WEAPONS[me.weapon].name;
+  $('weapon-name').textContent = me.weapon === 'grenade' ? GEAR[gear].name : WEAPONS[me.weapon].name;
   const melee = !!WEAPONS[me.weapon].melee;
   $('ammo-count').textContent = me.weapon === 'grenade' ? String(state.myGrenades + (cookStart ? 1 : 0))
     : melee ? '—' : me.reloadUntil ? '…' : String(me.ammo[me.weapon]);

@@ -1,8 +1,9 @@
 // Матч: появление, раунды, лимит по времени или убийствам, победитель, голосование за карту.
 import { chooseSpawn } from '../spawn.js';
-import { isMapId, MAP_ORDER, type MapId, MAPS, MATCH } from '../../shared/map.js';
+import { fitGear, isMapId, MAP_ORDER, type MapId, MAPS, MATCH } from '../../shared/map.js';
 import type { BestPlayer, ServerMsg, Winner } from '../../shared/protocol.js';
 import { rankOf } from '../../shared/ranks.js';
+import { clearMines } from './mines.js';
 import { broadcast, broadcastInfo, broadcastPlayers, send, teamScores } from './net.js';
 import { clearAmmoPacks, clearCrate, clearMedkits, setRockets } from './pickups.js';
 import type { Player, Room } from './state.js';
@@ -23,8 +24,9 @@ export function spawn(room: Room, p: Player): void {
   p.helmet = 0;
   p.slide = false;
   // Нож или граната возвращаются после смерти — смотря что выбрано
-  p.hasKnife = p.melee === 'knife';
-  p.grenades = p.melee === 'grenade' ? 1 : 0;
+  p.gear = fitGear(p.melee, p.profile.kills);
+  p.hasKnife = p.gear === 'knife';
+  p.grenades = p.gear === 'knife' ? 0 : 1;
   p.cookStart = 0;
   p.alive = true;
   sendLoadout(p);
@@ -46,6 +48,7 @@ export function resetRound(room: Room): void {
   room.rockets = [];
   room.knives = [];
   room.grenades = [];
+  clearMines(room);
   room.missiles.clear();
   clearCrate(room);
   clearMedkits(room);
@@ -100,6 +103,7 @@ export function endMatch(room: Room, winner: Winner): void {
   room.rockets = [];
   room.knives = [];
   room.grenades = [];
+  clearMines(room);
   room.missiles.clear();
   clearTimeout(room.nukeTimer);
   room.nukeTimer = undefined;

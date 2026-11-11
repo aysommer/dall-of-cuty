@@ -7,7 +7,7 @@ export type Team = 'green' | 'red';
 export type Mode = 'tdm' | 'ffa';
 export type WeaponId = 'pistol' | 'smg' | 'shotgun' | 'rifle' | 'lmg' | 'sniper' | 'knife' | 'grenade' | 'rocket';
 /** Что в слоте 1 вместо огнестрела: нож или граната */
-export type MeleeKind = 'knife' | 'grenade';
+export type MeleeKind = 'knife' | 'grenade' | 'flash' | 'sticky' | 'mine' | 'tripwire';
 /** falling — летит с неба, idle — лежит, opening — его открывают, gone — ящика нет */
 export type CrateState = 'falling' | 'idle' | 'opening' | 'gone';
 export type Vec3 = [number, number, number];
@@ -42,7 +42,7 @@ export interface Winner {
 }
 
 /** Чем убили: оружие, ящик-ловушка, метательный нож, ракета с неба или бомба. */
-export type KillWeapon = WeaponId | 'crate' | 'throw' | 'missile' | 'nuke' | 'gunship';
+export type KillWeapon = WeaponId | 'crate' | 'throw' | 'missile' | 'nuke' | 'gunship' | 'mine';
 
 /** Комната в списке главного меню. locked — с паролем. */
 export interface RoomInfo {
@@ -81,7 +81,8 @@ export type OverMsg = { t: 'over'; winner: Winner; pause: number };
 export type VoteMsg = { t: 'vote'; counts: Record<MapId, number>; ms: number; mine: MapId | null };
 /** Своё снаряжение: есть ли нож, текущая серия и запас наград. */
 export type LoadoutMsg = {
-  t: 'loadout'; knife: boolean; grenades: number; streak: number; uav: number; missile: number; nuke: number; gunship: number;
+  /** gear — что в слоте 1 в этой жизни; grenades — сколько штук осталось (у ножа — 0) */
+  t: 'loadout'; gear: MeleeKind; knife: boolean; grenades: number; streak: number; uav: number; missile: number; nuke: number; gunship: number;
 };
 /** Брошенный нож летит (o — откуда, d — направление) и где он остановился. */
 export type ThrowMsg = { t: 'throw'; id: number; by: number; o: Vec3; d: Vec3 };
@@ -99,7 +100,14 @@ export type GunshipEndMsg = { t: 'gunship-end'; id: number; by: number | null; p
 /** Очередь пулемёта самолёта — для трассеров у остальных */
 export type GunshipShotMsg = { t: 'gsshot'; id: number; ends: Vec3[] };
 /** Гранаты в полёте и на земле: [id, x, y, z, мс до взрыва] */
-export type GrenadesMsg = { t: 'grenades'; list: Array<[number, number, number, number, number]> };
+/** …и вид: 0 — осколочная, 1 — световая, 2 — липучка */
+export type GrenadesMsg = { t: 'grenades'; list: Array<[number, number, number, number, number, 0 | 1 | 2]> };
+/**
+ * Мина или растяжка на карте: p — где лежит, to — куда натянута верёвка (у растяжки),
+ * by и team — чья, armed — через сколько миллисекунд взорвётся (0 — не сработала).
+ */
+export interface MineInfo { id: number; kind: 'mine' | 'tripwire'; by: number; team: Team; p: Vec3; to: Vec3 | null; armed: number }
+export type MinesMsg = { t: 'mines'; list: MineInfo[] };
 /** Патроны, выпавшие из погибших */
 /** Погода: дождь или снег на ms миллисекунд; kind = null — ясно. */
 export type WeatherMsg = { t: 'weather'; kind: WeatherKind | null; ms: number };
@@ -132,6 +140,10 @@ export type ServerMsg =
   | GunshipEndMsg
   | GunshipShotMsg
   | GrenadesMsg
+  | MinesMsg
+  /** Световая граната: вспышка в точке p (всем) и ослепление на ms (тем, кто рядом) */
+  | { t: 'flash'; p: Vec3 }
+  | { t: 'blind'; ms: number }
   /** Какие стёкла и двери уже разбиты */
   | { t: 'breaks'; broken: number[] }
   /** Какие двери сейчас открыты */

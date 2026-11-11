@@ -1,10 +1,11 @@
 // Игровая комната: своя карта, свой матч и до 4 игроков. Комнат на сервере несколько,
 // у каждой всё состояние своё (объект Room). Здесь — вход игрока, разбор его сообщений, выход и такт.
 import type { WebSocket } from 'ws';
-import { DEFAULT_KIT, GUNSHIP, isKit, isMapId, isWeapon, MATCH, STREAK } from '../../shared/map.js';
+import { DEFAULT_KIT, fitGear, fitKit, GUNSHIP, isGear, isKit, isMapId, isWeapon, MATCH, STREAK } from '../../shared/map.js';
 import type { SnapRow, Team } from '../../shared/protocol.js';
 import { decodeProfile } from '../progress.js';
 import { handleShoot, handleSpray } from './combat.js';
+import { clearMines, minesMsg, stepMines } from './mines.js';
 import { best, endMatch, handleVote, spawn, startMatchClock, voteMsg, winnerByScore } from './match.js';
 import { broadcast, broadcastInfo, broadcastPlayers, info, isNum, isVec3, send, sendProfile, teamCount } from './net.js';
 import { cancelOpening, crateMsg, expireAmmoPacks, handleOpen, medkitsMsg, packsMsg, pickAmmo, pickMedkit, startDrops, stopDrops } from './pickups.js';
@@ -56,8 +57,11 @@ export function handleJoin(room: Room, ws: WebSocket, msg: Incoming): Player | n
     rockets: 0,
     hasKnife: true, streak: 0, uav: 0, missile: 0, nuke: 0, gunship: 0, uavUntil: 0, big: false, helmet: 0,
     kit: isKit(msg.kit) ? msg.kit : [...DEFAULT_KIT],
-    melee: msg.melee === 'grenade' ? 'grenade' : 'knife', grenades: 0, cookStart: 0,
+    melee: 'knife', gear: 'knife', grenades: 0, cookStart: 0,
   };
+  // Набор и снаряжение — только то, что открыто на уровне игрока
+  p.kit = fitKit(p.kit, p.profile.kills);
+  if (isGear(msg.melee)) p.melee = fitGear(msg.melee, p.profile.kills);
   room.players.set(p.id, p);
   send(ws, { t: 'welcome', id: p.id, mode: room.mode, map: room.mapId });
   if (room.roundOver) send(ws, voteMsg(room, p));
@@ -68,6 +72,7 @@ export function handleJoin(room: Room, ws: WebSocket, msg: Incoming): Player | n
   send(ws, weatherMsg(room));
   send(ws, { t: 'breaks', broken: [...room.brokenIds] });
   send(ws, { t: 'doors', open: [...room.openDoors] });
+  send(ws, minesMsg(room));
   if (room.gunship) send(ws, gunshipMsg(room.gunship));
   broadcastPlayers(room);
   spawn(room, p);
@@ -124,13 +129,13 @@ export function handle(room: Room, me: Player, msg: Incoming): void {
     toggleDoor(room, me, msg.id);
   } else if (msg.t === 'melee') {
     // Новый выбор вступит в силу со следующей жизни
-    if (msg.kind === 'knife' || msg.kind === 'grenade') me.melee = msg.kind;
+    if (isGear(msg.kind)) me.melee = fitGear(msg.kind, me.profile.kills);
   } else if (msg.t === 'gsrocket') {
     gunshipRocket(room, me, msg);
   } else if (msg.t === 'mhit') {
     missileHit(room, me, msg);
   } else if (msg.t === 'kit') {
-    if (isKit(msg.guns)) me.kit = msg.guns;
+    if (isKit(msg.guns)) me.kit = fitKit(msg.guns, me.profile.kills);
   } else if (msg.t === 'vote') {
     handleVote(room, me, msg.map);
   }
@@ -141,6 +146,7 @@ export function leave(room: Room, me: Player): void {
   clearTimeout(me.respawnTimer);
   room.players.delete(me.id);
   room.votes.delete(me.id);
+  clearMines(room, me.id);
   for (const [id, m] of room.missiles) if (m.owner === me.id) room.missiles.delete(id);
   if (room.gunship?.owner === me.id) endGunship(room, null);
   if (room.crate.state === 'opening' && room.crate.by === me.id) cancelOpening(room);
@@ -171,6 +177,7 @@ export function tick(room: Room): void {
   stepRockets(room, 0.05);
   stepKnives(room, 0.05);
   stepGrenades(room, 0.05, Date.now());
+  stepMines(room, Date.now());
   const now = Date.now();
   if (room.players.size) {
     sendPings(room, now);

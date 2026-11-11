@@ -1,6 +1,6 @@
 // Настройки игрока (громкость, чувствительность, рука, набор оружия) — хранятся в браузере.
 import type { MeleeKind, WeaponId } from '../../shared/protocol.js';
-import { DEFAULT_KIT, isKit } from '../../shared/map.js';
+import { DEFAULT_KIT, isKit, isGear } from '../../shared/map.js';
 
 interface Settings {
   /** Громкость, 0…1 */
@@ -26,7 +26,7 @@ function loadSettings(): Settings {
     if (typeof raw.sens === 'number') s.sens = Math.max(0.2, Math.min(3, raw.sens));
     if (raw.hand === 'left') s.hand = 'left';
     if (isKit(raw.kit)) s.kit = raw.kit;
-    if (raw.melee === 'grenade') s.melee = 'grenade';
+    if (isGear(raw.melee)) s.melee = raw.melee;
   } catch { /* испорченные настройки — берём стандартные */ }
   return s;
 }

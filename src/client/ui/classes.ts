@@ -1,12 +1,14 @@
 // Классы — шаблоны снаряжения: стволы, нож или граната; выбор и правка в меню Esc.
 import type { MeleeKind, WeaponId } from '../../shared/protocol.js';
-import { GUNS, isKit, KIT_SIZE, WEAPONS } from '../../shared/map.js';
+import { fitGear, fitKit, GEAR, GEAR_ORDER, GUNS, isGear, isKit, KIT_SIZE, WEAPONS } from '../../shared/map.js';
+import { isUnlocked, UNLOCK_LEVEL, unlockLevel } from '../../shared/ranks.js';
 import { sendMsg } from '../core/net.js';
 import { settings } from '../core/settings.js';
 import { me } from '../core/state.js';
 import { $, textEl } from '../core/util.js';
 import { toast, updateHud } from './hud.js';
 import { pauseView, renderProfileTile } from './pause.js';
+import { knownKills } from './ranks.js';
 import { applySettings } from './settings-menu.js';
 import { setWeapon } from '../weapons/viewmodel.js';
 
@@ -17,14 +19,50 @@ function setMelee(kind: MeleeKind): void {
   saveActiveClass();
   sendMsg({ t: 'melee', kind });
   renderMeleeChoice();
-  toast(kind === 'grenade' ? '💣 Граната вместо ножа — со следующей жизни' : '🔪 Нож вместо гранаты — со следующей жизни');
+  toast(`${GEAR[kind].icon} ${GEAR[kind].name} в слоте 1 — со следующей жизни`);
   updateHud();
 }
 
+/** Кнопка закрытого оружия или снаряжения: не нажимается и подписана уровнем, с которого откроется. */
+function markLock(b: HTMLButtonElement, id: string, title: string): void {
+  const open = isUnlocked(id, knownKills);
+  b.disabled = !open;
+  b.classList.toggle('locked', !open);
+  b.textContent = open ? title : `🔒 ${title} · ур. ${unlockLevel(id)}`;
+}
+
 function renderMeleeChoice(): void {
-  for (const b of document.querySelectorAll<HTMLButtonElement>('.melee button')) {
-    b.classList.toggle('active', b.dataset.melee === settings.melee);
+  for (const root of document.querySelectorAll<HTMLElement>('.melee')) {
+    if (!root.childElementCount) {
+      for (const g of GEAR_ORDER) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.melee = g;
+        b.addEventListener('click', () => setMelee(g));
+        root.append(b);
+      }
+    }
+    for (const b of root.querySelectorAll<HTMLButtonElement>('button')) {
+      const g = b.dataset.melee as MeleeKind;
+      markLock(b, g, `${GEAR[g].icon} ${GEAR[g].name}`);
+      b.classList.toggle('active', g === settings.melee);
+    }
   }
+  $('gear-hint').textContent = `${GEAR[settings.melee].hint}. Кроме ножа, всё — одна штука на жизнь; выбор действует со следующей жизни.`;
+}
+
+/**
+ * Уровень изменился или класс собран на другом уровне: закрытые стволы и снаряжение
+ * заменяются доступными, а кнопки показывают, что и с какого уровня открывается.
+ */
+export function enforceUnlocks(): void {
+  const kit = fitKit(settings.kit, knownKills);
+  if (kit.length !== settings.kit.length || kit.some((w, i) => w !== settings.kit[i])) setKit(kit);
+  if (fitGear(settings.melee, knownKills) !== settings.melee) setMelee('knife');
+  renderKit();
+  renderMeleeChoice();
+  const next = Object.entries(UNLOCK_LEVEL).filter(([id]) => !isUnlocked(id, knownKills)).sort((a, b) => a[1] - b[1])[0];
+  $('unlock-note').textContent = next ? `— следующее открытие на ${next[1]} уровне` : '';
 }
 
 function setKit(kit: WeaponId[]): void {
@@ -56,7 +94,9 @@ function renderKit(): void {
       }
     }
     for (const b of root.querySelectorAll<HTMLButtonElement>('button')) {
-      b.classList.toggle('active', settings.kit.includes(b.dataset.w as WeaponId));
+      const w = b.dataset.w as WeaponId;
+      markLock(b, w, WEAPONS[w].name);
+      b.classList.toggle('active', settings.kit.includes(w));
     }
   }
 }
@@ -74,7 +114,7 @@ function loadClasses(): { list: PlayerClass[]; active: number } {
       const list = raw.list.flatMap((c: unknown): PlayerClass[] => {
         const o = c as Partial<PlayerClass> | null;
         if (!o || typeof o.name !== 'string' || !isKit(o.kit)) return [];
-        return [{ name: o.name.slice(0, 16) || 'Класс', kit: o.kit, melee: o.melee === 'grenade' ? 'grenade' : 'knife' }];
+        return [{ name: o.name.slice(0, 16) || 'Класс', kit: o.kit, melee: isGear(o.melee) ? o.melee : 'knife' }];
       }).slice(0, MAX_CLASSES);
       if (list.length) {
         const a = Number(raw.active);
@@ -86,7 +126,6 @@ function loadClasses(): { list: PlayerClass[]; active: number } {
   return {
     list: [
       { name: 'Штурмовик', kit: [...settings.kit], melee: settings.melee },
-      { name: 'Снайпер', kit: ['sniper', 'smg'], melee: 'knife' },
       { name: 'Ближний бой', kit: ['shotgun', 'pistol'], melee: 'grenade' },
     ],
     active: 0,
@@ -129,7 +168,7 @@ export function renderClasses(): void {
     b.append(
       textEl('span', c.name, 'cname'),
       textEl('small', c.kit.map((w) => WEAPONS[w].name).join(' + ')),
-      textEl('small', c.melee === 'grenade' ? '💣 Граната' : '🔪 Нож'),
+      textEl('small', `${GEAR[c.melee].icon} ${GEAR[c.melee].name}`),
     );
     if (i === classes.active) b.append(textEl('span', '✓', 'check'));
     b.addEventListener('click', () => selectClass(i));
@@ -160,9 +199,6 @@ export function renderClasses(): void {
 
 /** Запуск модуля: подписки на события и начальная отрисовка (вызывается из main.ts). */
 export function initClasses(): void {
-  for (const b of document.querySelectorAll<HTMLButtonElement>('.melee button')) {
-    b.addEventListener('click', () => setMelee(b.dataset.melee === 'grenade' ? 'grenade' : 'knife'));
-  }
   renderMeleeChoice();
   renderKit();
   {
@@ -170,9 +206,11 @@ export function initClasses(): void {
     const c = classes.list[classes.active]!;
     settings.kit = [...c.kit];
     settings.melee = c.melee;
+    // Класс мог быть собран на более высоком уровне (другой прогресс) — закрытое заменяем доступным
+    settings.kit = fitKit(settings.kit, knownKills);
+    settings.melee = fitGear(settings.melee, knownKills);
     applySettings();
-    renderKit();
-    renderMeleeChoice();
+    enforceUnlocks();
   }
   $('class-name').addEventListener('input', () => {
     const c = classes.list[classes.active]!;
