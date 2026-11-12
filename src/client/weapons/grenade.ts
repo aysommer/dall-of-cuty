@@ -12,7 +12,7 @@ import { openingUntil } from '../pickups/crate.js';
 import { gear } from '../ui/hotbar.js';
 import { toast } from '../ui/hud.js';
 import { _dir } from './shooting.js';
-import { setWeapon, startThrow, viewGun } from './viewmodel.js';
+import { setWeapon, startPlace, startThrow, viewGun } from './viewmodel.js';
 
 /** Когда сорвана чека гранаты в руке (0 — не держу) */
 export let cookStart = 0;
@@ -45,8 +45,9 @@ export function updateGrenadeHand(now: number): void {
       state.firedThisPress = true;
       sendMsg({ t: 'pin' });
       beep(500, 0.08, 0.12);
+      startPlace(now);
       toast(gear === 'mine' ? '🔴 Мина поставлена' : '🪢 Растяжка поставлена');
-      setTimeout(() => { if (me.weapon === 'grenade') setWeapon(settings.kit[0]!); }, 300);
+      setTimeout(() => { if (me.weapon === 'grenade') setWeapon(settings.kit[0]!); }, 380);
     } else if (press) {
       cookStart = now;
       cookBeepAt = now;

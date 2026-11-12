@@ -1,7 +1,7 @@
 // Сеть: соединение с сервером и разбор всех его сообщений.
 import * as THREE from 'three';
 import type { ClientMsg, KillMsg, KillWeapon, OverMsg, PlayerInfo, PlayersMsg, ServerMsg, ShotMsg, SnapMsg, SpawnMsg, WeaponId } from '../../shared/protocol.js';
-import { AMMO_PACK, PLAYER, STREAK, WEAPON_ORDER, WEAPONS } from '../../shared/map.js';
+import { AMMO_PACK, PLAYER, STREAK, WEAPON_ORDER, WEAPONS, REWARD_NAMES } from '../../shared/map.js';
 import { beep, shotSound } from './audio.js';
 import { scene } from './scene.js';
 import { settings } from './settings.js';
@@ -318,6 +318,7 @@ export function initNet(): void {
       }
       case 'vote': onVote(m); break;
       case 'newmap': onNewMap(m.map); break;
+      case 'reward': toast(`📦 В ящике: ${REWARD_NAMES[m.kind]}`); beep(1200, 0.3, 0.12); break;
       case 'rockets': {
         const had = me.ammo.rocket;
         me.ammo.rocket = m.n;

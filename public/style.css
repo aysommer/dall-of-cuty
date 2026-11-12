@@ -558,3 +558,10 @@ button.danger:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 body.touch .shell { touch-action: pan-y; }
 #t-prone { right: calc(40px + env(safe-area-inset-right)); bottom: 268px; width: 46px; height: 46px; font-size: 18px; }
+.vote-section { display: block; text-align: left; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: 1.5px; font-size: 11px; color: var(--accent); }
+select optgroup { background: #1f1f1f; color: var(--accent); font-style: normal; }
+select option { color: var(--text); }
+/* Прогресс: только текущий и следующий уровень — две отметки по краям шкалы */
+.timeline.two { margin: 34px 70px 12px; height: 150px; }
+.timeline.two .items { left: -80px; width: 160px; }
+@media (max-width: 760px) { .timeline.two { margin: 20px 0 0; height: auto; } }

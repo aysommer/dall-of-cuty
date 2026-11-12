@@ -1,6 +1,6 @@
 // Обзор комнат: список, создание своей и вход (с паролем), случайный матч, лучший игрок.
 import type { BestPlayer, LobbyMsg, Mode, Team } from '../../shared/protocol.js';
-import { type LimitKind, MAP_ORDER, type MapId, MAPS, MATCH, ROOMS } from '../../shared/map.js';
+import { type LimitKind, MAP_ORDER, MAP_SECTIONS, type MapId, MAPS, MATCH, ROOMS } from '../../shared/map.js';
 import { levelOf, rankProgress, RANKS } from '../../shared/ranks.js';
 import { initAudio } from '../core/audio.js';
 import { playBtn, sendMsg } from '../core/net.js';
@@ -216,12 +216,19 @@ export function initMenu(): void {
     renderMenu();
   });
   // Карт много — выбор выпадающим списком, чтобы ничего не вылезало за края меню
-  for (const id of MAP_ORDER) {
-    const o = document.createElement('option');
-    o.value = id;
-    o.textContent = MAPS[id].name;
-    $('map-choice').append(o);
+  // Карты разложены по разделам: «Новые» и «Старые»
+  for (const section of MAP_SECTIONS) {
+    const group = document.createElement('optgroup');
+    group.label = section.title;
+    for (const id of section.maps) {
+      const o = document.createElement('option');
+      o.value = id;
+      o.textContent = MAPS[id].name;
+      group.append(o);
+    }
+    $('map-choice').append(group);
   }
+  $<HTMLSelectElement>('map-choice').value = chosenMap;
   $('map-choice').addEventListener('change', () => {
     const v = $<HTMLSelectElement>('map-choice').value;
     chosenMap = MAP_ORDER.find((id) => id === v) ?? 'sands';

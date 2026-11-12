@@ -1,5 +1,5 @@
 // Награды за серию убийств: БПЛА, ракета с неба, самолёт, бомба.
-import { bodyPoints, GUNSHIP, gunshipPos, lineOfSight, MAPS, STREAK, type StreakKind } from '../../shared/map.js';
+import { REWARD_KILLS, type RewardKind, bodyPoints, GUNSHIP, gunshipPos, lineOfSight, MAPS, STREAK, type StreakKind } from '../../shared/map.js';
 import type { ServerMsg, Vec3 } from '../../shared/protocol.js';
 import { blast, hurt, isEnemy, killPlayer, scaleOf, lowOf } from './combat.js';
 import { checkWin } from './match.js';
@@ -15,19 +15,23 @@ export function sendLoadout(p: Player): void {
 }
 
 /** Награды выдаются ровно на пороге серии: 3 — БПЛА, 4 — ракета с неба, 5 — ракетница, 7 — суперброня, 15 — бомба. */
-export function addStreak(p: Player): void {
-  p.streak++;
-  if (p.streak === STREAK.uav) p.uav++;
-  if (p.streak === STREAK.missile) p.missile++;
-  if (p.streak === STREAK.launcher) setRockets(p, Math.max(p.rockets, 6));
-  if (p.streak === STREAK.superArmor) {
+/** Выдать награду — за серию убийств или из ящика. */
+export function grantReward(p: Player, kind: RewardKind): void {
+  if (kind === 'launcher') setRockets(p, Math.max(p.rockets, 6));
+  else if (kind === 'juggernaut') {
     // Джаггернаут: суперброня, чуть больший размер и шлем, который держит выстрелы в голову
     p.armor = STREAK.superArmorHp;
     p.big = true;
     p.helmet = STREAK.helmetHits;
+  } else p[kind]++;
+  sendLoadout(p);
+}
+
+export function addStreak(p: Player): void {
+  p.streak++;
+  for (const kind of Object.keys(REWARD_KILLS) as RewardKind[]) {
+    if (p.streak === REWARD_KILLS[kind]) grantReward(p, kind);
   }
-  if (p.streak === GUNSHIP.streak) p.gunship++;
-  if (p.streak === STREAK.nuke) p.nuke++;
   sendLoadout(p);
 }
 

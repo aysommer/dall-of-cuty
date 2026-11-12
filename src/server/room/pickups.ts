@@ -1,14 +1,12 @@
-// Подбираемое: ящик с неба (ракетница, броня, ловушка), аптечки и патроны с погибших.
+// Подбираемое: ящик с неба (внутри — награда за серию убийств), аптечки и патроны с погибших.
 import type { CrateState, ServerMsg, Vec3 } from '../../shared/protocol.js';
-import { AMMO_PACK, ARMOR, bodyPoints, CRATE, lineOfSight, MAPS, MEDKIT, playerBox } from '../../shared/map.js';
-import { killPlayer, scaleOf, lowOf } from './combat.js';
+import { AMMO_PACK, CRATE, crateReward, MAPS, MEDKIT } from '../../shared/map.js';
 import { broadcast, broadcastPlayers, send } from './net.js';
 import type { Medkit, Player, Room } from './state.js';
-import { blastBreakables, worldBoxes } from './world.js';
+import { grantReward } from './streaks.js';
 
 // Раз в CRATE.dropEveryMs с вероятностью CRATE.dropChance ящик падает с неба в одну из точек карты.
 // Упав, он лежит CRATE.lifeMs; если за это время его не открыли — исчезает.
-const ROCKETS_IN_CRATE = 6;
 
 export function crateMsg(room: Room): ServerMsg {
   const now = Date.now();
@@ -103,33 +101,13 @@ export function handleOpen(room: Room, p: Player, on: boolean): void {
   room.crate.timer = setTimeout(() => {
     const opener = room.players.get(p.id);
     if (!opener || !opener.alive) { cancelOpening(room); return; }
-    const at = c;
     clearCrate(room);
-    // Что внутри: взрыв, ракетница или броня
-    const roll = Math.random();
-    if (roll < CRATE.trapChance) explodeCrate(room, at);
-    else if (roll < CRATE.trapChance + CRATE.rocketChance) setRockets(opener, ROCKETS_IN_CRATE);
-    else {
-      opener.armor = Math.max(opener.armor, ARMOR.amount);
-      broadcastPlayers(room);
-    }
+    // Внутри — одна из наград за серию убийств: чем она дороже, тем реже попадается. Ловушек нет
+    const kind = crateReward(Math.random());
+    grantReward(opener, kind);
+    send(opener.ws, { t: 'reward', kind });
+    broadcastPlayers(room);
   }, CRATE.openMs);
-}
-
-/** Ящик-ловушка: убивает всех рядом, включая открывшего и его союзников. Стена закрывает. */
-export function explodeCrate(room: Room, [cx, cy, cz]: Vec3): void {
-  const at: Vec3 = [cx, cy + CRATE.height + 0.2, cz];
-  broadcast(room, { t: 'boom', id: 0, p: at });
-  blastBreakables(room, at, CRATE.trapRadius);
-  for (const v of room.players.values()) {
-    if (!v.alive) continue;
-    const [min, max] = playerBox(v.pos, v.yaw, lowOf(v), scaleOf(v));
-    const d = Math.hypot(...([0, 1, 2] as const).map((i) => Math.max(min[i] - at[i], 0, at[i] - max[i])));
-    if (d > CRATE.trapRadius) continue;
-    const covered = bodyPoints(v.pos, lowOf(v), scaleOf(v)).every((pt) => !lineOfSight(worldBoxes(room), at, pt));
-    if (!covered) killPlayer(room, null, v, 'crate');
-  }
-  broadcastPlayers(room);
 }
 
 export function packsMsg(room: Room): ServerMsg {

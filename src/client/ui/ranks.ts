@@ -1,7 +1,7 @@
 // Звание и уровень: прогресс с сервера, окно звания, всплывающее «Вас повысили».
 import type { ProfileMsg, WeaponId } from '../../shared/protocol.js';
 import { killsForRank, levelOf, rankProgress, RANKS, UNLOCK_LEVEL } from '../../shared/ranks.js';
-import { GEAR, GEAR_ORDER, GUNS, isGear, WEAPONS } from '../../shared/map.js';
+import { GEAR, isGear, WEAPONS } from '../../shared/map.js';
 import { TOKEN_KEY } from '../core/settings.js';
 import { $, textEl } from '../core/util.js';
 import { enforceUnlocks } from './classes.js';
@@ -69,59 +69,48 @@ export function rankRing(level: number, abbr: string, part: number): HTMLElement
 }
 
 /** Доступно сразу, с первого уровня: всё, чего нет в списке открытий */
-const FIRST_LEVEL = [
-  ...GUNS.filter((w) => !(w in UNLOCK_LEVEL)).map((w) => WEAPONS[w].name),
-  ...GEAR_ORDER.filter((g) => !(g in UNLOCK_LEVEL)).map((g) => `${GEAR[g].icon} ${GEAR[g].name}`),
-];
-
-/** Что открывается на каком уровне: оружие и устройства по порядку уровней. */
-function unlocksByLevel(): Array<{ level: number; items: string[] }> {
-  const levels = new Map<number, string[]>();
-  for (const [id, lv] of Object.entries(UNLOCK_LEVEL)) {
-    const title = isGear(id) ? `${GEAR[id].icon} ${GEAR[id].name}` : WEAPONS[id as WeaponId].name;
-    levels.set(lv, [...(levels.get(lv) ?? []), title]);
-  }
-  return [...levels].sort((a, b) => a[0] - b[0]).map(([level, items]) => ({ level, items }));
+/** Что открывается на уровне level: оружие и устройства (на первом — ничего: с него доступно базовое) */
+function unlocksAt(level: number): string[] {
+  return Object.entries(UNLOCK_LEVEL).filter(([, lv]) => lv === level)
+    .map(([id]) => isGear(id) ? `${GEAR[id].icon} ${GEAR[id].name}` : WEAPONS[id as WeaponId].name);
 }
 
 /**
- * Прогресс: горизонтальная шкала уровней, под отметками — что на них открывается.
- * Шкала заполнена до текущего уровня и дальше — на долю пути к следующему. Названий будущих званий здесь нет.
+ * Прогресс: только текущий и следующий уровень. Шкала между ними заполнена на долю пути
+ * к следующему; под каждым — что на нём открывается. Дальние уровни и названия будущих званий не показываются.
  */
 export function renderProgress(): void {
   const root = $('progress');
   root.textContent = '';
   const pr = rankProgress(knownKills);
-  const steps = unlocksByLevel();
-  const last = Math.max(...steps.map((s) => s.level), pr.level + (pr.need ? 1 : 0));
-  // Отметки шкалы: все уровни от первого до последнего с открытиями (или до следующего после текущего)
-  const fill = last > 1 ? Math.min(1, (pr.level - 1 + pr.part) / (last - 1)) : 1;
-  const next = steps.find((s) => s.level > pr.level);
+  const hasNext = pr.need > 0;
+  const nextItems = hasNext ? unlocksAt(pr.level + 1) : [];
   root.append(textEl('span', `Уровень ${pr.level}`, 'prog-now'),
-    textEl('small', next
-      ? `На уровне ${next.level} откроется: ${next.items.join(', ')}. До следующего уровня — ${pr.need - pr.done} из ${pr.need} убийств.`
-      : pr.need ? `Всё оружие и снаряжение открыто. До следующего уровня — ${pr.need - pr.done} из ${pr.need} убийств.`
-        : 'Всё открыто, уровень высший.'));
+    textEl('small', hasNext
+      ? `До уровня ${pr.level + 1} — ещё ${pr.need - pr.done} из ${pr.need} убийств.${nextItems.length ? ` Откроется: ${nextItems.join(', ')}.` : ''}`
+      : 'Высший уровень.'));
   const line = document.createElement('div');
-  line.className = 'timeline';
+  line.className = 'timeline two';
   const bar = document.createElement('div');
   bar.className = 'timeline-bar';
   const done = document.createElement('i');
-  done.style.width = `${fill * 100}%`;
+  done.style.width = `${(hasNext ? pr.part : 1) * 100}%`;
   bar.append(done);
   line.append(bar);
-  for (let lv = 1; lv <= last; lv++) {
-    const node = document.createElement('div');
-    node.className = 'node' + (lv <= pr.level ? ' done' : '') + (lv === pr.level ? ' now' : '');
-    node.style.left = `${last > 1 ? ((lv - 1) / (last - 1)) * 100 : 0}%`;
-    node.append(textEl('span', String(lv), 'dot'));
-    const items = steps.find((s) => s.level === lv)?.items ?? (lv === 1 ? FIRST_LEVEL : []);
+  const node = (lv: number, left: number, reached: boolean, items: string[]): void => {
+    const n = document.createElement('div');
+    n.className = 'node' + (reached ? ' done now' : '');
+    n.style.left = `${left}%`;
+    n.append(textEl('span', String(lv), 'dot'));
     const list = document.createElement('div');
     list.className = 'items';
-    for (const it of items) list.append(textEl('span', (lv <= pr.level ? '✓ ' : '🔒 ') + it, 'chip'));
-    node.append(list);
-    line.append(node);
-  }
+    for (const it of items) list.append(textEl('span', (reached ? '✓ ' : '🔒 ') + it, 'chip'));
+    n.append(list);
+    line.append(n);
+  };
+  // Текущий уровень: что на нём открылось (на первом ничего не пишем — базовое оружие игрок и так видит)
+  node(pr.level, 0, true, pr.level > 1 ? unlocksAt(pr.level) : []);
+  if (hasNext) node(pr.level + 1, 100, false, nextItems);
   root.append(line);
 }
 

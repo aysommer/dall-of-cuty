@@ -30,7 +30,10 @@ export function setWeapon(w: WeaponId): void {
   state.adsK = 0;
   me.weapon = w;
   me.reloadUntil = 0;
-  me.nextShot = Math.max(me.nextShot, performance.now() + 250);
+  // Оружие достают: пистолет — быстро, основное — дольше; пока достаёшь — не стреляешь
+  drawMs = DRAW_MS[w];
+  drawUntil = performance.now() + drawMs;
+  me.nextShot = Math.max(me.nextShot, drawUntil);
   viewModel.remove(viewGun.group);
   viewGun = buildGun(w);
   state.scopeOn = sightOn(w);
@@ -188,6 +191,28 @@ const ease = (x: number): number => x * x * (3 - 2 * x);
 /** 0 → 1 на отрезке [a, b] */
 const ramp = (p: number, a: number, b: number): number => ease(Math.max(0, Math.min(1, (p - a) / (b - a))));
 
+/** Сколько миллисекунд достаётся оружие: лёгкое — быстро, тяжёлое — долго */
+const DRAW_MS: Record<WeaponId, number> = {
+  knife: 240, grenade: 280, pistol: 280, smg: 380, shotgun: 540, rifle: 540, sniper: 680, lmg: 740, rocket: 680,
+};
+let drawUntil = 0, drawMs = 1;
+/** Сколько длится текущее (последнее) доставание оружия — для отладки и тестов */
+export const lastDrawMs = (): number => drawMs;
+
+const PLACE_MS = 360;
+let placeUntil = 0;
+/** Мину или растяжку кладут под ноги: рука с ней опускается вниз-вперёд и возвращается. */
+export function startPlace(now: number): void {
+  placeUntil = now + PLACE_MS;
+}
+
+/** Бросок свободной рукой (нож на G, когда в руках ствол): 0…1 — как далеко зашёл взмах; −1 — броска нет */
+let offThrowUntil = 0;
+export function startOffhandThrow(now: number): void {
+  offThrowUntil = now + THROW_MS;
+}
+export const offhandThrow = (now: number): number => now < offThrowUntil ? 1 - (offThrowUntil - now) / THROW_MS : -1;
+
 const THROW_MS = 320;
 let throwUntil = 0;
 /** Бросок гранаты: рука с ней идёт назад, потом резко вперёд и вверх. */
@@ -198,6 +223,19 @@ export function startThrow(now: number): void {
 /** Перезарядка всех стволов и затвор снайперки. */
 export function animateGun(now: number): void {
   const g = viewGun;
+  if (now < drawUntil) {
+    // Оружие поднимается снизу, стволом вниз, и встаёт на место
+    const k = 1 - ease(1 - (drawUntil - now) / drawMs);
+    viewModel.position.y -= 0.42 * k;
+    viewModel.rotation.x -= 1.0 * k;
+    viewModel.rotation.z += 0.35 * k * (settings.hand === 'left' ? -1 : 1);
+  }
+  if (now < placeUntil) {
+    const k = Math.sin(Math.PI * (1 - (placeUntil - now) / PLACE_MS));
+    viewModel.position.y -= 0.3 * k;
+    viewModel.position.z -= 0.12 * k;
+    viewModel.rotation.x -= 0.7 * k;
+  }
   if (now < throwUntil) {
     const p = 1 - (throwUntil - now) / THROW_MS;
     const back = ramp(p, 0, 0.3) * (1 - ramp(p, 0.3, 0.55)), fwd = ramp(p, 0.3, 0.75);

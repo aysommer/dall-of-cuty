@@ -30,7 +30,7 @@ import { cookStart, grenadeFx, updateGrenades } from './weapons/grenade.js';
 import { updateKnives } from './weapons/knife.js';
 import { updateRockets } from './weapons/rockets.js';
 import { updateShooting } from './weapons/shooting.js';
-import { aimPoint, animateGun, animateScope, poseGun, scopeAnim, sniperSway, SWING_MS, updateAim, viewGun, viewModel } from './weapons/viewmodel.js';
+import { aimPoint, lastDrawMs, animateGun, animateScope, poseGun, scopeAnim, sniperSway, SWING_MS, updateAim, viewGun, viewModel } from './weapons/viewmodel.js';
 import { brokenIds, currentMap, openDoors, updateDoors } from './world/map.js';
 import { move, touchingLadder } from './world/physics.js';
 import { sinking, updateSinking, updateUnderground } from './world/underground.js';
@@ -41,7 +41,7 @@ let last = performance.now(), sendAcc = 0;
 /** Когда последний раз стояли на земле: «в воздухе» — только если оторвались дольше чем на мгновение */
 let groundedAt = 0, airFrames = 0;
 /** Покачивание камеры на ходу: фаза шага, сглаженный размах, текущие сдвиг по высоте и наклон */
-let bobPhase = 0, bobAmp = 0, bobY = 0, bobRoll = 0;
+let bobPhase = 0, bobAmp = 0, bobY = 0, bobRoll = 0, bobGun = 0;
 function frame(now: number): void {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - last) / 1000);
@@ -59,11 +59,14 @@ function frame(now: number): void {
       bobAmp += (walking - bobAmp) * Math.min(1, dt * 8);
       bobPhase += ground * dt * 1.75;
       const calm = 1 - 0.8 * state.adsK;
-      bobY = Math.abs(Math.sin(bobPhase)) * -0.045 * bobAmp * calm;
-      bobRoll = Math.sin(bobPhase) * 0.006 * bobAmp * calm;
+      // На бегу качает заметно сильнее, чем на шаге
+      const hard = 0.6 + 0.9 * Math.max(0, Math.min(1, (ground - 6.5) / 1.6));
+      bobY = Math.abs(Math.sin(bobPhase)) * -0.05 * bobAmp * calm * hard;
+      bobRoll = Math.sin(bobPhase) * 0.009 * bobAmp * calm * hard;
+      bobGun = bobAmp * calm * hard;
       camera.position.set(me.pos.x, me.pos.y + state.eyeH + bobY, me.pos.z);
     } else {
-      bobAmp = 0; bobY = 0; bobRoll = 0;
+      bobAmp = 0; bobY = 0; bobRoll = 0; bobGun = 0;
       // После смерти камера смотрит на место гибели сверху
       camera.position.set(me.pos.x, me.pos.y + 6, me.pos.z + 4);
       const left = Math.max(0, Math.ceil((state.respawnAt - now) / 1000));
@@ -95,6 +98,11 @@ function frame(now: number): void {
     viewModel.rotation.z = sw >= 0 ? -Math.PI / 2 * swing * 0.6 : 0;
     viewModel.rotation.x = state.kick * 1.5;
     poseGun(dt);
+    // Оружие тоже ходит в такт шагам: из стороны в сторону, вверх-вниз и с лёгким креном
+    viewModel.position.x += Math.sin(bobPhase) * 0.02 * bobGun;
+    viewModel.position.y += Math.cos(bobPhase * 2) * 0.012 * bobGun;
+    viewModel.rotation.z += Math.sin(bobPhase) * 0.035 * bobGun;
+    viewModel.rotation.y += Math.sin(bobPhase) * 0.02 * bobGun;
     animateGun(now);
     animateScope(now);
 
@@ -179,7 +187,7 @@ export function initLoop(): void {
     },
     dbg: () => ({ openDoors: [...openDoors], sprintK: state.sprintK, wallK: state.wallK, broken: [...brokenIds], grenades: [...grenadeFx.values()].map((g) => g.mesh.position.toArray().map((v) => +v.toFixed(2))), myGrenades: state.myGrenades, cooking: cookStart > 0, scopeOn: state.scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground: state.underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
       kit: settings.kit, reserve: { ...me.reserve }, hotbar: hotbar().map((h) => `${h.key}:${h.label}`).join(' '),
-      missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, crouch: state.crouch, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, eyeH: state.eyeH, recoil: state.recoil, mines: [...mineFx.values()].map((m) => ({ kind: m.info.kind, armed: m.info.armed > 0, p: m.info.p, to: m.info.to })), blind: +blindK(performance.now()).toFixed(2), arms: viewArmsReady(), gear, bob: +bobY.toFixed(3),
+      missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, crouch: state.crouch, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, eyeH: state.eyeH, recoil: state.recoil, mines: [...mineFx.values()].map((m) => ({ kind: m.info.kind, armed: m.info.armed > 0, p: m.info.p, to: m.info.to })), blind: +blindK(performance.now()).toFixed(2), arms: viewArmsReady(), drawMs: lastDrawMs(), gear, gunBob: +bobGun.toFixed(2), bob: +bobY.toFixed(3),
       corpses: corpses.length, corpse: corpseDebug(), model: characterReady() ? 'ready' : characterFailed() ? 'failed' : 'loading',
       remoteAnim: [...remotes.values()].map((r) => r.char ? { walk: +r.char.walk.getEffectiveWeight().toFixed(2), run: +r.char.run.getEffectiveWeight().toFixed(2), air: +r.char.airK.toFixed(2), reload: r.reloading, speed: +r.char.speed.toFixed(1) } : null), sprays: sprays.length,
       steps: stepCount, medkits: medkitFx.size, boltUntil: state.boltUntil, menuClosed: state.menuClosed, armor: me.armor }),

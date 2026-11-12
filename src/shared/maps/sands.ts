@@ -72,8 +72,11 @@ const spawns: GameMap['spawns'] = {
   ],
 };
 
+// Лестница на серую крышу туннеля — снаружи на его северной стене
+const ladders: Ladder[] = [
+  { min: [16.4, 0, -10.45], max: [17.6, 4.1 + 0.4, -10], normal: [0, -1] },
+];
 // Канализация: под центральной улицей, от базы красных к базе зелёных
-const ladders: Ladder[] = [];
 const { lamps } = addGroundAndSewer(boxes, ladders, { x: WORLD.half, z: WORLD.half },
   { axis: 'z', from: -21, to: 21, at: 0 }, '#c9a86a', '#55524c');
 

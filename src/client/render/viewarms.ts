@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { camera } from '../core/scene.js';
 import { settings } from '../core/settings.js';
 import { me, state } from '../core/state.js';
-import { BOLT_MS, scopeHandPos, viewGun, viewModel } from '../weapons/viewmodel.js';
+import { BOLT_MS, offhandThrow, scopeHandPos, viewGun, viewModel } from '../weapons/viewmodel.js';
 import { type Character, characterReady, createCharacter, setCharacterLook, solveLimb } from './character.js';
 import { grips } from './players.js';
 
@@ -25,14 +25,35 @@ function build(): void {
   c.mixer.stopAllAction(); // руками управляет только код
   c.root.position.copy(ROOT);
   c.root.scale.setScalar(ARM_SCALE);
-  camera.add(c.root);
   const B = c.bones;
-  rest = [B.LeftArm, B.LeftForeArm, B.LeftHand, B.RightArm, B.RightForeArm, B.RightHand].map((b) => [b, b.quaternion.clone()]);
-  // Пальцы согнуты в хват: каждая фаланга поворачивается к ладони
-  for (const b of c.allBones) {
-    const m = /^mixamorig:?(Left|Right)Hand(Index|Middle|Ring|Pinky)([123])$/.exec(b.name);
-    if (m) b.rotation.z += (m[1] === 'Left' ? -1 : 1) * (m[3] === '1' ? 1.1 : 0.9);
+  // Пальцы согнуты в хват: каждая фаланга доворачивается в сторону ладони вокруг оси, перпендикулярной пальцу.
+  // Где у кисти ладонь, определяется по ней самой: нормаль к плоскости оснований пальцев, с той стороны, где большой палец.
+  c.root.updateMatrixWorld(true);
+  const bone = (name: string): THREE.Bone | undefined => c.allBones.find((x) => x.name.replace(/^mixamorig:?/, '') === name);
+  const curl = (b: THREE.Bone, child: THREE.Object3D, toward: THREE.Vector3, angle: number): void => {
+    const dir = child.getWorldPosition(new THREE.Vector3()).sub(b.getWorldPosition(new THREE.Vector3())).normalize();
+    const axis = new THREE.Vector3().crossVectors(dir, toward);
+    if (axis.lengthSq() < 1e-6) return;
+    const world = b.getWorldQuaternion(new THREE.Quaternion()).premultiply(new THREE.Quaternion().setFromAxisAngle(axis.normalize(), angle));
+    b.quaternion.copy(b.parent!.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(world));
+    b.updateMatrixWorld(true);
+  };
+  for (const side of ['Left', 'Right']) {
+    const hand = bone(`${side}Hand`), index = bone(`${side}HandIndex1`), pinky = bone(`${side}HandPinky1`), thumb = bone(`${side}HandThumb1`);
+    if (!hand || !index || !pinky || !thumb) continue;
+    const at = (o: THREE.Object3D): THREE.Vector3 => o.getWorldPosition(new THREE.Vector3()).sub(hand.getWorldPosition(new THREE.Vector3()));
+    const palm = new THREE.Vector3().crossVectors(at(index), at(pinky)).normalize();
+    if (at(thumb).dot(palm) < 0) palm.negate();
+    for (const [finger, angles] of [['Index', [0.9, 1.2, 0.8]], ['Middle', [1.0, 1.25, 0.8]], ['Ring', [1.05, 1.25, 0.8]], ['Pinky', [1.1, 1.2, 0.8]], ['Thumb', [0.3, 0.4, 0.3]]] as const) {
+      for (let i = 1; i <= 3; i++) {
+        const b = bone(`${side}Hand${finger}${i}`), child = bone(`${side}Hand${finger}${i + 1}`);
+        if (b && child) curl(b, child, palm, angles[i - 1]!);
+      }
+    }
   }
+  // Поза покоя рук запоминается уже с согнутыми пальцами
+  rest = [B.LeftArm, B.LeftForeArm, B.LeftHand, B.RightArm, B.RightForeArm, B.RightHand].map((b) => [b, b.quaternion.clone()]);
+  camera.add(c.root);
   arms = c;
 }
 
@@ -67,12 +88,35 @@ export function updateViewArms(now: number): void {
   else if (me.reloadUntil && (g.shell?.visible || g.mag)) (g.shell?.visible ? g.shell : g.mag!).getWorldPosition(_l);
   else if (grip.left) g.group.localToWorld(_l.copy(grip.left));
   else { free = true; camVec(-0.3 * side, -0.62, -0.18, _l).add(camera.getWorldPosition(new THREE.Vector3())); }
+  // Бросок свободной рукой (нож на G со стволом в руках): рука идёт из-за плеча вперёд и вверх
+  const toss = offhandThrow(now);
+  if (toss >= 0) {
+    const fwd = Math.sin(Math.PI * Math.min(1, toss * 1.15));
+    camVec(-0.28 * side, -0.25 + 0.2 * fwd, 0.05 - 0.75 * fwd, _l).add(camera.getWorldPosition(new THREE.Vector3()));
+    free = true;
+  }
 
   const main = side > 0 ? [B.RightArm, B.RightForeArm, B.RightHand] as const : [B.LeftArm, B.LeftForeArm, B.LeftHand] as const;
   const off = side > 0 ? [B.LeftArm, B.LeftForeArm, B.LeftHand] as const : [B.RightArm, B.RightForeArm, B.RightHand] as const;
   // Локти — вниз и наружу
   solveLimb(main[0], main[1], main[2], _r, camVec(0.7 * side, -1, 0.25, _pole));
   solveLimb(off[0], off[1], off[2], _l, camVec(-0.7 * side, -1, free ? 0.6 : 0.25, _pole));
+  // Кисти довёрнуты вокруг предплечья так, чтобы ладонь смотрела на предмет: основная обхватывает рукоять
+  // (или гранату, нож), вторая ложится под цевьё или на магазин
+  twist(main[2], main[1], TWIST_MAIN * side);
+  // У пистолета вторая кисть тоже обхватывает рукоять — поверх основной, а не ложится ладонью под цевьё
+  twist(off[2], off[1], (free || me.weapon === 'pistol' ? TWIST_MAIN : TWIST_OFF) * -side);
+}
+
+const TWIST_MAIN = -Math.PI / 2, TWIST_OFF = -0.6;
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _qw = new THREE.Quaternion(), _qp = new THREE.Quaternion(), _qt = new THREE.Quaternion();
+/** Повернуть кисть вокруг оси предплечья на angle радиан. */
+function twist(hand: THREE.Bone, forearm: THREE.Bone, angle: number): void {
+  hand.getWorldPosition(_a).sub(forearm.getWorldPosition(_b));
+  if (_a.lengthSq() < 1e-8) return;
+  hand.getWorldQuaternion(_qw).premultiply(_qt.setFromAxisAngle(_a.normalize(), angle));
+  hand.quaternion.copy(hand.parent!.getWorldQuaternion(_qp).invert().multiply(_qw));
+  hand.updateMatrixWorld(true);
 }
 
 /** Для отладки и тестов */

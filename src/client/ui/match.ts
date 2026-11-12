@@ -1,6 +1,6 @@
 // Время матча и голосование за следующую карту.
 import type { VoteMsg } from '../../shared/protocol.js';
-import { MAP_ORDER, type MapId, MAPS } from '../../shared/map.js';
+import { MAP_SECTIONS, type MapId, MAPS } from '../../shared/map.js';
 import { overText, sendMsg } from '../core/net.js';
 import { unlock } from '../core/input.js';
 import { syncMenu } from './shell.js';
@@ -36,13 +36,16 @@ export function onVote(m: VoteMsg): void {
   $('vote-title').textContent = overText || 'Матч окончен';
   const list = $('vote-maps');
   list.textContent = '';
-  for (const id of MAP_ORDER) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = id === m.mine ? 'active' : '';
-    b.append(textEl('span', MAPS[id].name), textEl('small', ` · голосов: ${m.counts[id]}`));
-    b.addEventListener('click', () => sendMsg({ t: 'vote', map: id }));
-    list.append(b);
+  for (const section of MAP_SECTIONS) {
+    list.append(textEl('small', section.title, 'vote-section'));
+    for (const id of section.maps) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = id === m.mine ? 'active' : '';
+      b.append(textEl('span', MAPS[id].name), textEl('small', ` · голосов: ${m.counts[id]}`));
+      b.addEventListener('click', () => sendMsg({ t: 'vote', map: id }));
+      list.append(b);
+    }
   }
 }
 
