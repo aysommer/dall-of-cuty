@@ -34,6 +34,7 @@ export interface Character {
   vest: THREE.SkinnedMesh[];
   /** Сглаженные веса: 0 — стоит, 1 — в воздухе; фаза перезарядки */
   airK: number;
+  crouchK: number;
   reloadT: number;
   /** Сглаженная скорость по земле, м/с (со знаком: назад — отрицательная) */
   speed: number;
@@ -59,7 +60,7 @@ export function loadCharacterModel(): void {
   });
 }
 
-export function createCharacter(team: Team): Character | null {
+export function createCharacter(team: Team, opts: { armsOnly?: boolean } = {}): Character | null {
   if (!template) return null;
   const model = cloneSkinned(template.scene);
   // Модель смотрит на +Z, а игрок в игре — на −Z
@@ -79,6 +80,7 @@ export function createCharacter(team: Team): Character | null {
       const src = o.material as THREE.MeshStandardMaterial;
       const joints = /Joints/i.test(src.name);
       const mat = new THREE.MeshLambertMaterial({ color: joints ? 0x23262c : TEAM_COLOR[team] });
+      if (opts.armsOnly) keepArmsOnly(mat);
       o.material = mat;
       materials.push(mat);
       skinned.push(o);
@@ -115,7 +117,20 @@ export function createCharacter(team: Team): Character | null {
     m.parent!.add(v);
     return v;
   });
-  return { root, bones, allBones, mixer, idle, walk, run, materials, skin: skin!, team, vest, airK: 0, reloadT: 0, speed: 0 };
+  return { root, bones, allBones, mixer, idle, walk, run, materials, skin: skin!, team, vest, airK: 0, crouchK: 0, reloadT: 0, speed: 0 };
+}
+
+/** От первого лица видны только руки: всё, что в позе покоя ближе ARMS_FROM метров к оси тела, отбрасывается. */
+const ARMS_FROM = 0.2;
+function keepArmsOnly(mat: THREE.MeshLambertMaterial): void {
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRest;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRest = position;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRest;')
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\nif (abs(vRest.x) < ${ARMS_FROM.toFixed(3)}) discard;`);
+  };
 }
 
 /** Туловище в позе покоя модели: от пояса до плеч, без рук (метры) */
@@ -206,6 +221,8 @@ export interface CharacterInput {
   forward: number;
   /** В воздухе (прыжок или падение) */
   air: boolean;
+  /** Присел: таз опускается, колени сгибаются, стопы остаются на земле */
+  crouch?: boolean;
   reloading: boolean;
   /** Точки хвата оружия в мировых координатах: правая рука и левая (null — рука свободна) */
   rightHand: THREE.Vector3 | null;
@@ -217,6 +234,8 @@ export interface CharacterInput {
 /** Естественные скорости анимаций модели, м/с: при них ноги не «скользят» */
 const WALK_SPEED = 1.7, RUN_SPEED = 4.6;
 const RELOAD_CYCLE = 1.4;
+/** На сколько опускается таз в приседе, в единицах костей модели (сантиметры) */
+const CROUCH_HIPS = 45;
 const _right = new THREE.Vector3(), _fwd = new THREE.Vector3(), _up = new THREE.Vector3(), _t = new THREE.Vector3(), _pole = new THREE.Vector3();
 
 /** Шаг анимации: готовые клипы по скорости, затем позы поверх них. Перед вызовом корень должен стоять на месте игрока. */
@@ -246,6 +265,16 @@ export function updateCharacter(c: Character, dt: number, input: CharacterInput)
   _fwd.set(-e[8]!, -e[9]!, -e[10]!).normalize();
   const scale = c.root.getWorldScale(_t).y;
   const B = c.bones;
+
+  // --- присед: таз вниз, стопы — где были, колени сгибаются вперёд ---
+  c.crouchK += ((input.crouch ? 1 : 0) - c.crouchK) * Math.min(1, dt * 12);
+  if (c.crouchK > 0.01) {
+    const lf = B.LeftFoot.getWorldPosition(new THREE.Vector3()), rf = B.RightFoot.getWorldPosition(new THREE.Vector3());
+    B.Hips.position.y -= CROUCH_HIPS * c.crouchK; // кости модели — в сантиметрах
+    B.Hips.updateMatrixWorld(true);
+    solveLimb(B.LeftUpLeg, B.LeftLeg, B.LeftFoot, lf, _fwd);
+    solveLimb(B.RightUpLeg, B.RightLeg, B.RightFoot, rf, _fwd);
+  }
 
   // --- наклон корпуса и головы за взглядом ---
   const lean = THREE.MathUtils.clamp(input.pitch, -1.2, 1.2);

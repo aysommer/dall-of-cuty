@@ -3,6 +3,7 @@ import type { VoteMsg } from '../../shared/protocol.js';
 import { MAP_ORDER, type MapId, MAPS } from '../../shared/map.js';
 import { overText, sendMsg } from '../core/net.js';
 import { unlock } from '../core/input.js';
+import { syncMenu } from './shell.js';
 import { state } from '../core/state.js';
 import { $, textEl } from '../core/util.js';
 import { feedNote } from './hud.js';
@@ -29,7 +30,7 @@ export function onVote(m: VoteMsg): void {
     voting = true;
     voteEndsAt = performance.now() + m.ms;
     unlock();
-    $('pause').classList.add('hidden');
+    syncMenu();
     $('vote').classList.remove('hidden');
   }
   $('vote-title').textContent = overText || 'Матч окончен';
@@ -59,5 +60,5 @@ export function onNewMap(id: MapId): void {
   applyFog(); // туман и небо — под текущую погоду
   feedNote(`🗺 Новый матч: ${MAPS[id].name}`);
   // Мышь отпущена на время голосования — вернуть её можно кликом по «ИГРАТЬ»
-  if (!state.locked) $('pause').classList.remove('hidden');
+  syncMenu();
 }

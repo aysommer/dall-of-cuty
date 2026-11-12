@@ -1,7 +1,7 @@
 // Бой: выстрелы, урон, смерть, взрывы и рисунки на стенах.
 import type { KillWeapon, Vec3 } from '../../shared/protocol.js';
 import { rankOf } from '../../shared/ranks.js';
-import { bodyPoints, HEAD, isWeapon, lineOfSight, PLAYER, playerBox, SLIDE, STREAK, WEAPONS } from '../../shared/map.js';
+import { CROUCH, type Low, bodyPoints, HEAD, isWeapon, lineOfSight, PLAYER, playerBox, SLIDE, STREAK, WEAPONS } from '../../shared/map.js';
 import { EMOJIS, SPRAY } from '../../shared/emoji.js';
 import { checkWin, spawn } from './match.js';
 import { broadcast, broadcastPlayers, isVec3, send, sendProfile } from './net.js';
@@ -61,7 +61,7 @@ export function blast(room: Room, owner: Player, at: Vec3, radius: number, w: Ki
   for (const v of room.players.values()) {
     if (!v.alive || (v !== owner && !isEnemy(room, owner, v))) continue;
     if (distToPlayer(v, at) > radius) continue;
-    if (bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt))) continue;
+    if (bodyPoints(v.pos, lowOf(v), scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt))) continue;
     killPlayer(room, owner, v, w);
     killed = true;
   }
@@ -80,12 +80,15 @@ export function scaleOf(p: Player): number {
 }
 
 export function eyeOf(p: Player): Vec3 {
-  return [p.pos[0], p.pos[1] + (p.slide ? SLIDE.eye : PLAYER.eye) * scaleOf(p), p.pos[2]];
+  return [p.pos[0], p.pos[1] + (p.slide ? SLIDE.eye : p.crouch ? CROUCH.eye : PLAYER.eye) * scaleOf(p), p.pos[2]];
 }
 
 /** Расстояние от точки до ближайшей точки хитбокса игрока. */
+/** Насколько игрок низкий — для хитбокса и точек тела */
+export const lowOf = (p: Player): Low => p.slide ? true : p.crouch ? 'crouch' : false;
+
 export function distToPlayer(v: Player, at: Vec3): number {
-  const [min, max] = playerBox(v.pos, v.yaw, v.slide, scaleOf(v));
+  const [min, max] = playerBox(v.pos, v.yaw, lowOf(v), scaleOf(v));
   return Math.hypot(...([0, 1, 2] as const).map((i) => Math.max(min[i] - at[i], 0, at[i] - max[i])));
 }
 
@@ -149,7 +152,7 @@ export function handleShoot(room: Room, p: Player, msg: Incoming): void {
     // Нож бьёт только вплотную (с запасом на задержку сети) и только если он не брошен
     if (w.melee && (!p.hasKnife || distToPlayer(v, eye) > w.melee + 0.75)) continue;
     // Проверка, что между стрелком и целью нет стены
-    if (bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, eye, pt))) continue;
+    if (bodyPoints(v.pos, lowOf(v), scaleOf(v)).every((pt) => !lineOfSight(walls, eye, pt))) continue;
 
     const [rawBody, rawHead] = Array.isArray(raw) ? raw : [raw, 0];
     let head = Math.min(count(rawHead), budget);
@@ -158,7 +161,7 @@ export function handleShoot(room: Room, p: Player, msg: Incoming): void {
     budget -= body;
     if (head + body === 0) continue;
     // Голову засчитываем, только если её видно и игрок стоит (в подкате головы как зоны нет)
-    const headPt: Vec3 = [v.pos[0], v.pos[1] + (PLAYER.h - 0.1) * scaleOf(v), v.pos[2]];
+    const headPt: Vec3 = [v.pos[0], v.pos[1] + ((v.crouch ? CROUCH.height : PLAYER.h) - 0.1) * scaleOf(v), v.pos[2]];
     if (head && (v.slide || !lineOfSight(walls, eye, headPt))) { body += head; head = 0; }
     // Шлем Джаггернаута: выстрел в голову урона не наносит, а только сбивает шлем (одно попадание за выстрел)
     if (head && v.helmet > 0) {

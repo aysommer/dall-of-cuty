@@ -1,7 +1,7 @@
 // Подбираемое: ящик с неба (ракетница, броня, ловушка), аптечки и патроны с погибших.
 import type { CrateState, ServerMsg, Vec3 } from '../../shared/protocol.js';
 import { AMMO_PACK, ARMOR, bodyPoints, CRATE, lineOfSight, MAPS, MEDKIT, playerBox } from '../../shared/map.js';
-import { killPlayer, scaleOf } from './combat.js';
+import { killPlayer, scaleOf, lowOf } from './combat.js';
 import { broadcast, broadcastPlayers, send } from './net.js';
 import type { Medkit, Player, Room } from './state.js';
 import { blastBreakables, worldBoxes } from './world.js';
@@ -123,10 +123,10 @@ export function explodeCrate(room: Room, [cx, cy, cz]: Vec3): void {
   blastBreakables(room, at, CRATE.trapRadius);
   for (const v of room.players.values()) {
     if (!v.alive) continue;
-    const [min, max] = playerBox(v.pos, v.yaw, v.slide, scaleOf(v));
+    const [min, max] = playerBox(v.pos, v.yaw, lowOf(v), scaleOf(v));
     const d = Math.hypot(...([0, 1, 2] as const).map((i) => Math.max(min[i] - at[i], 0, at[i] - max[i])));
     if (d > CRATE.trapRadius) continue;
-    const covered = bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(worldBoxes(room), at, pt));
+    const covered = bodyPoints(v.pos, lowOf(v), scaleOf(v)).every((pt) => !lineOfSight(worldBoxes(room), at, pt));
     if (!covered) killPlayer(room, null, v, 'crate');
   }
   broadcastPlayers(room);

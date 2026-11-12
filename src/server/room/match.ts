@@ -23,6 +23,7 @@ export function spawn(room: Room, p: Player): void {
   p.big = false;
   p.helmet = 0;
   p.slide = false;
+  p.crouch = false;
   // Нож или граната возвращаются после смерти — смотря что выбрано
   p.gear = fitGear(p.melee, p.profile.kills);
   p.hasKnife = p.gear === 'knife';

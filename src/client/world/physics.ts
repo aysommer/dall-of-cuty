@@ -1,6 +1,6 @@
 // Движение и столкновения: ходьба, бег, прыжок, подкат, лестницы, трамплины.
 import * as THREE from 'three';
-import { type Box, type Ladder, PLAYER, SLIDE, WORLD_BOTTOM } from '../../shared/map.js';
+import { type Box, CROUCH, type Ladder, PLAYER, PRONE, SLIDE, WORLD_BOTTOM } from '../../shared/map.js';
 import { beep, shotSound } from '../core/audio.js';
 import { keys, me, state } from '../core/state.js';
 import { CLIMB, GRAVITY, JUMP, SPEED, SPRINT_K } from '../core/util.js';
@@ -22,7 +22,10 @@ function overlaps(p: THREE.Vector3, h: number, b: Box): boolean {
     p.z + r > b.min[2] && p.z - r < b.max[2];
 }
 
-function hitBox(p: THREE.Vector3, h: number = state.low ? SLIDE.height : PLAYER.h): Box | null {
+/** Рост сейчас: лёжа, в приседе или стоя */
+const bodyH = (): number => state.low ? SLIDE.height : state.crouch ? CROUCH.height : PLAYER.h;
+
+function hitBox(p: THREE.Vector3, h: number = bodyH()): Box | null {
   for (const b of solids) if (overlaps(p, h, b)) return b;
   // Невидимые стены по краю карты — только для движения игрока
   for (const b of clips) if (overlaps(p, h, b)) return b;
@@ -97,8 +100,21 @@ export const sprintKey = (): boolean => !!(keys.ShiftLeft || keys.ShiftRight);
 
 const sprintSpeed = (): number => SPEED * SPRINT_K;
 
+/** C: в спринте — подкат, иначе — присесть или встать. */
+export function pressCrouch(now: number): void {
+  if (!me.alive) return;
+  if (sprintKey() && keys.KeyW && !state.aimHeld && state.stance === 0 && !state.low) { trySlide(now); return; }
+  state.stance = state.stance === 1 ? 0 : 1;
+}
+
+/** Ctrl: лечь или встать. */
+export function pressProne(): void {
+  if (!me.alive || performance.now() < state.slideUntil) return;
+  state.stance = state.stance === 2 ? 0 : 2;
+}
+
 /** C в спринте: ложимся и скользим по инерции SLIDE.ms, управлять движением нельзя. */
-export function trySlide(now: number): void {
+function trySlide(now: number): void {
   const sprinting = sprintKey() && keys.KeyW && !state.aimHeld;
   if (!me.alive || !me.grounded || !sprinting || state.low || openingUntil || now < state.slideCooldownUntil) return;
   if (touchingLadder(me.pos)) return;
@@ -120,7 +136,10 @@ export function move(dt: number): void {
   const s = frozen ? 0 : (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
   const len = Math.hypot(f, s) || 1;
   const sin = Math.sin(me.yaw), cos = Math.cos(me.yaw);
-  let speed = SPEED;
+  // Shift с W из приседа или лёжа — встаём и бежим; прыжок тоже сначала поднимает на ноги
+  if (!sliding && state.stance !== 0 && ((sprintKey() && keys.KeyW) || (keys.Space && !jumpHeld))) state.stance = 0;
+  const standing = !state.low && !state.crouch;
+  let speed = SPEED * (state.low && !sliding ? PRONE.speed : state.crouch ? CROUCH.speed : 1);
   // В прицеле не бегаем
   // Бег — пока не целишься и не стреляешь (как в Call of Duty: выстрел прерывает спринт)
   if (isSprinting()) speed *= SPRINT_K;
@@ -143,7 +162,7 @@ export function move(dt: number): void {
     const k = Math.min(1, accel * dt);
     me.vel.x += (wish.x - me.vel.x) * k;
     me.vel.z += (wish.z - me.vel.z) * k;
-    if (keys.Space && me.grounded && !frozen) { me.vel.y = JUMP; me.grounded = false; }
+    if (keys.Space && me.grounded && !frozen && standing) { me.vel.y = JUMP; me.grounded = false; }
     me.vel.y -= GRAVITY * dt;
   }
   jumpHeld = !!keys.Space;
@@ -162,7 +181,7 @@ export function move(dt: number): void {
     const b = hitBox(p);
     if (b) {
       if (me.vel.y <= 0) { p.y = b.max[1]; me.grounded = true; }
-      else p.y = b.min[1] - (state.low ? SLIDE.height : PLAYER.h) - 0.001;
+      else p.y = b.min[1] - bodyH() - 0.001;
       me.vel.y = 0;
     }
   }
@@ -183,9 +202,21 @@ export function move(dt: number): void {
     }
   }
 
-  // Подкат закончился — встаём, если над головой есть место
-  if (state.low && !sliding && !hitBox(p, PLAYER.h)) {
-    state.low = false;
-    state.slideCooldownUntil = now + SLIDE.cooldownMs;
+  // Поза: ниже — сразу; выше (из подката, лёжа или приседа) — только если над головой есть место
+  const wantLow = sliding || state.stance === 2, wantCrouch = !wantLow && state.stance === 1;
+  if (wantLow) {
+    state.low = true; state.crouch = false;
+  } else if (wantCrouch) {
+    if (!state.low || !hitBox(p, CROUCH.height)) {
+      if (state.low) state.slideCooldownUntil = now + SLIDE.cooldownMs;
+      state.low = false; state.crouch = true;
+    }
+  } else if (state.low || state.crouch) {
+    if (!hitBox(p, PLAYER.h)) {
+      if (state.low) state.slideCooldownUntil = now + SLIDE.cooldownMs;
+      state.low = false; state.crouch = false;
+    } else if (state.low && !hitBox(p, CROUCH.height)) {
+      state.low = false; state.crouch = true; // в полный рост не встать — хотя бы присед
+    }
   }
 }

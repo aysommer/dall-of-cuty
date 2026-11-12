@@ -9,7 +9,7 @@ import { me, remotes, state } from '../core/state.js';
 import { $ } from '../core/util.js';
 import { fireworks } from '../fx/fireworks.js';
 import { addTracer } from '../fx/tracers.js';
-import { scaleOfRemote } from '../render/players.js';
+import { scaleOfRemote, lowOfRemote } from '../render/players.js';
 import { feedNote, showHit, toast } from '../ui/hud.js';
 import { _dir } from '../weapons/shooting.js';
 import { currentMap, solids } from '../world/map.js';
@@ -109,7 +109,7 @@ function gunnerFire(now: number): void {
   let victim: number | null = null;
   for (const [id, r] of remotes) {
     if (!r.info.alive || (state.mode === 'tdm' && r.info.team === me.team)) continue;
-    const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, r.slide, scaleOfRemote(r));
+    const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, lowOfRemote(r), scaleOfRemote(r));
     const tp = rayBox(eye, dv, min, max);
     if (tp < t) { t = tp; victim = id; }
   }

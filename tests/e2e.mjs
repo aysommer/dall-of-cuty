@@ -198,28 +198,32 @@ if (!chromium) {
 } else {
   const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
   const errors = [];
-  async function open({ w = 960, h = 640, kills } = {}) {
+  /** Открыть игру: ник и прогресс кладём в хранилище браузера до загрузки, как после прошлого захода. */
+  async function open({ w = 960, h = 640, kills, name = 'Игрок' } = {}) {
     const p = await (await browser.newContext({ viewport: { width: w, height: h } })).newPage();
     p.on('pageerror', (e) => errors.push(e.message));
+    await p.addInitScript(([t, k, n]) => {
+      if (sessionStorage.getItem('seeded')) return; // только при первом открытии: дальше игра хранит своё
+      sessionStorage.setItem('seeded', '1');
+      localStorage.setItem('doc-name', n);
+      if (t) { localStorage.setItem('doc-progress', t); localStorage.setItem('doc-kills', String(k)); }
+    }, [kills !== undefined ? token(kills) : null, kills ?? 0, name]);
     await p.goto(URL);
-    if (kills !== undefined) {
-      await p.evaluate((t) => localStorage.setItem('doc-progress', t), token(kills));
-      await p.reload();
-    }
     await p.waitForFunction(() => !document.getElementById('play').disabled);
     return p;
   }
-  /** Создать комнату (или войти в выбранную) и закрыть меню паузы. */
-  async function play(p, { name = 'Игрок', map, ffa = true, pass } = {}) {
-    await p.fill('#name', name);
+  /** Через «Обзор комнат» создать комнату (или войти в выбранную). В бой попадаешь сразу, без паузы. */
+  async function play(p, { map, ffa = true, pass } = {}) {
+    await p.click('#nav-rooms');
     if (map) await p.selectOption('#map-choice', map);
     if (ffa && await p.isVisible('#mode-choice')) await p.click('#mode-choice [data-mode=ffa]');
     if (pass) await p.fill(await p.isVisible('#room-pass') ? '#room-pass' : '#room-pass-new', pass);
     await p.click('#play');
-    await p.waitForFunction(() => document.getElementById('menu').classList.contains('hidden'));
-    await p.click('#resume');
+    await p.waitForFunction(() => document.body.classList.contains('in-game') && document.getElementById('menu').classList.contains('hidden'));
     await p.waitForTimeout(300);
   }
+  /** Открыть меню в бою (как по Esc) и вернуться обратно. */
+  const openMenu = async (p) => { await p.evaluate(() => document.exitPointerLock()); await p.waitForFunction(() => !document.getElementById('menu').classList.contains('hidden')); };
   /** shooter стреляет в упор, пока target не умрёт (или пока не выйдет время). */
   async function kill(shooter, target) {
     for (let i = 0; i < 60; i++) {
@@ -234,18 +238,28 @@ if (!chromium) {
   }
 
   console.log('Меню и комната (браузер)');
-  const A = await open({ kills: 19 });
+  const A = await open({ kills: 19, name: 'Волк' });
   check('меню: лучшего игрока пока нет', /никто не играет/.test(await A.textContent('#best')));
+  check('главный экран: кольцо уровня, звание и ник', /1/.test(await A.textContent('#home-ring')) && /Рядовой/.test(await A.textContent('#home-rank')) && (await A.textContent('#home-nick')) === 'Волк');
+  check('списка всех званий в меню нет', !/Все звания|Генерал/.test(await A.textContent('#menu')));
+  await A.click('#nick-edit'); await A.fill('#name', 'Волк'); await A.click('#nick-edit');
+  check('ник меняется кнопкой «Изменить»', (await A.textContent('#home-nick')) === 'Волк' && await A.evaluate(() => localStorage.getItem('doc-name')) === 'Волк');
+  await A.click('#nav-progress');
+  check('прогресс: шкала уровней с открытиями', /Piz/.test(await A.textContent('#progress')) && /🔒/.test(await A.textContent('#progress')) && (await A.locator('#progress .node').count()) >= 5);
+  await A.click('#nav-settings');
+  check('настройки: FOV и разложенный по клавишам список управления', /FOV/.test(await A.textContent('#view-settings')) && (await A.locator('#keys .key-row').count()) > 15);
+  await A.click('#nav-rooms');
   await A.fill('#room-pass-new', '12'); await A.click('#play'); await A.waitForTimeout(200);
   check('меню не пускает с коротким паролем', /от 4 до 16/.test(await A.textContent('#status')));
-  await play(A, { name: 'Волк', pass: 'tiger42' });
-  check('A создал комнату и в игре', await A.isVisible('#hud'));
+  await play(A, { pass: 'tiger42' });
+  check('A создал комнату и сразу в бою, без паузы', await A.isVisible('#hud') && !(await A.isVisible('#menu')));
 
-  const B = await open();
+  const B = await open({ name: 'Лиса' });
+  await B.click('#nav-rooms');
   check('B видит комнату с замком', /🔒/.test(await B.textContent('#room-list')));
-  await B.fill('#name', 'Лиса'); await B.fill('#room-pass', 'nope'); await B.click('#play'); await B.waitForTimeout(300);
+  await B.fill('#room-pass', 'nope'); await B.click('#play'); await B.waitForTimeout(300);
   check('B: неверный пароль', (await B.textContent('#status')) === 'Неверный пароль');
-  await play(B, { name: 'Лиса', pass: 'tiger42', ffa: false });
+  await play(B, { pass: 'tiger42', ffa: false });
   await A.waitForTimeout(300);
   check('чат у A: Лиса заходит', /Лиса заходит/.test(await A.textContent('#chat')));
 
@@ -297,9 +311,12 @@ if (!chromium) {
   check('повышение до 2-го уровня (19 → 20 убийств)', await A.isVisible('#promo') && /ПОВЫСИЛИ/.test(await A.textContent('#promo')));
   check('B после смерти возродился', await B.waitForFunction(() => game.me.alive, null, { timeout: 6000 }).then(() => true, () => false));
 
-  const C = await open();
+  const C = await open({ name: 'Третий' });
   await C.waitForTimeout(1300);
   check('лучший игрок в меню — Волк', /Волк/.test(await C.textContent('#best')) && /Ночная|Комната/.test(await C.textContent('#best')));
+  // Случайный матч: единственная комната с паролем — значит, открывается своя, и игрок сразу в бою
+  await C.click('#nav-random');
+  check('«Найти случайный матч» сразу отправляет в бой', await C.waitForFunction(() => document.body.classList.contains('in-game') && document.getElementById('menu').classList.contains('hidden'), null, { timeout: 8000 }).then(() => true, () => false));
   await C.close();
 
   console.log('Движение');
@@ -326,6 +343,36 @@ if (!chromium) {
   check('ходьба 6.5', Math.abs(walk - 6.5) < 0.05, walk.toFixed(2));
   check('бег 8.125', Math.abs(run - 8.125) < 0.05, run.toFixed(2));
 
+  console.log('Присед, лёжа, руки, разброс');
+  {
+    const pose = () => A.evaluate(() => { const d = game.dbg(); return { crouch: d.crouch, low: d.low, eye: d.eyeH }; });
+    const settle = (fn) => A.waitForFunction(fn, null, { timeout: 8000 }).then(() => true, () => false);
+    await A.evaluate(() => { game.me.pos.set(0, 0, 10); game.me.vel.set(0, 0, 0); game.me.yaw = 0; });
+    await A.keyboard.press('KeyC');
+    check('C — присед: взгляд опускается до 1,05 м', await settle(() => game.dbg().crouch && Math.abs(game.dbg().eyeH - 1.05) < 0.03), JSON.stringify(await pose()));
+    await A.keyboard.down('KeyW'); await A.waitForTimeout(900);
+    let v = 0; for (let i = 0; i < 6; i++) { v = Math.max(v, await A.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z))); await A.waitForTimeout(120); }
+    await A.keyboard.up('KeyW');
+    check('в приседе скорость вдвое ниже (3,25)', Math.abs(v - 3.25) < 0.1, v.toFixed(2));
+    await A.keyboard.press('ControlLeft');
+    check('Ctrl — лёжа: взгляд у земли', await settle(() => game.dbg().low && Math.abs(game.dbg().eyeH - 0.6) < 0.03), JSON.stringify(await pose()));
+    await A.keyboard.down('KeyW'); await A.waitForTimeout(900);
+    v = 0; for (let i = 0; i < 6; i++) { v = Math.max(v, await A.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z))); await A.waitForTimeout(120); }
+    await A.keyboard.up('KeyW');
+    check('ползком — четверть скорости (1,63)', Math.abs(v - 1.625) < 0.1, v.toFixed(2));
+    // Чужой игрок видит позу: сервер передаёт «присел» и «лежит»
+    await A.waitForTimeout(300);
+    check('лежащего видят лежащим другие', await B.evaluate(() => [...game.remotes.values()][0].slide === true));
+    await A.keyboard.press('Space');
+    check('пробел поднимает на ноги', await settle(() => !game.dbg().low && !game.dbg().crouch));
+    check('руки от первого лица — руки модели, кубика нет', (await A.evaluate(() => game.dbg())).arms === true);
+    // Разброс от бедра: 40 выстрелов в стену с 30 м — пятно намного шире, чем в прицел
+    const { WEAPONS, hipSpread } = await import(path.join(ROOT, 'dist/shared/map.js'));
+    check('от бедра разброс в 5,5 раза больше прицельного (у дробовика — в 2,4)', hipSpread(WEAPONS.rifle) === 5.5 && hipSpread(WEAPONS.shotgun) === 2.4);
+    check('названия и баланс: UZE90 — 13 урона и 42 патрона', WEAPONS.smg.name === 'UZE90' && WEAPONS.smg.dmg === 13 && WEAPONS.smg.mag === 42 &&
+      ['Jecov', 'Chester', 'AK49', 'Z700', 'Piz'].join() === ['pistol', 'shotgun', 'rifle', 'lmg', 'sniper'].map((w) => WEAPONS[w].name).join());
+  }
+
   console.log('Съёмный прицел');
   {
     await A.keyboard.press('Digit2'); await A.waitForTimeout(500);
@@ -344,31 +391,28 @@ if (!chromium) {
     check('V надевает обратно', (await A.evaluate(() => game.dbg())).scopeOn === true);
   }
 
-  console.log('Меню паузы');
-  await A.evaluate(() => document.exitPointerLock()); await A.waitForTimeout(300);
-  await A.evaluate(() => document.getElementById('pause').classList.remove('hidden'));
-  check('плитка профиля: ник и звание', /Волк/.test(await A.textContent('#tile-profile')) && /PV2/.test(await A.textContent('#tile-profile')));
-  await A.click('.t-classes');
+  console.log('Меню в бою');
+  await openMenu(A);
+  check('в бою меню называется меню: «Вернуться в бой», без комнат и случайного матча', await A.isVisible('#resume') && !(await A.isVisible('#nav-rooms')) && !(await A.isVisible('#nav-random')) && !/Пауза/.test(await A.textContent('#menu')));
+  check('главный экран в бою: ник, звание и счёт матча', (await A.textContent('#home-nick')) === 'Волк' && /PV2/.test(await A.textContent('#home-ring')) && /в этом матче/.test(await A.textContent('#home-stats')));
+  await A.click('#nav-classes');
   await A.click('.class-tile >> nth=1'); await A.waitForTimeout(200);
-  check('класс «Ближний бой» меняет набор', /2:Дробовик/.test((await A.evaluate(() => game.dbg())).hotbar));
-  check('закрытое по уровню подписано замком', /🔒.*Снайперка.*ур\. 5/.test(await A.textContent('#class-edit .kit')) && /🔒.*Растяжка.*ур\. 3/.test(await A.textContent('#class-edit .melee')));
+  check('класс «Ближний бой» меняет набор', /2:Chester/.test((await A.evaluate(() => game.dbg())).hotbar));
+  check('стволы разложены по типам', /Пистолеты/.test(await A.textContent('#class-edit .kit')) && /Снайперские винтовки/.test(await A.textContent('#class-edit .kit')) && (await A.locator('#class-edit .gun-type').count()) === 6);
+  check('закрытое по уровню подписано замком', /🔒.*Piz.*ур\. 5/.test(await A.textContent('#class-edit .kit')) && /🔒.*Растяжка.*ур\. 3/.test(await A.textContent('#class-edit .melee')));
   check('на 2-м уровне мина уже открыта', await A.isEnabled('#class-edit .melee [data-melee=mine]'));
   await A.click('.class-tile.add'); await A.fill('#class-name', 'Тест'); await A.waitForTimeout(100);
   check('новый класс сохранён', JSON.parse(await A.evaluate(() => localStorage.getItem('doc-classes'))).list.some((c) => c.name === 'Тест'));
-  await A.click('#pause-back');
-  await A.click('.t-settings');
-  check('настройки: громкость есть, прокачки нет', /Громкость/.test(await A.textContent('#pv-settings')) && !/Прокачка/.test(await A.textContent('#pv-settings')));
-  await A.click('#pause-back');
-  await A.click('#tile-exit');
-  await A.waitForFunction(() => !document.getElementById('menu').classList.contains('hidden') && !document.getElementById('play').disabled);
-  check('«Выйти» возвращает в главное меню', true);
+  await A.click('#nav-exit');
+  await A.waitForFunction(() => !document.body.classList.contains('in-game') && !document.getElementById('play').disabled);
+  check('«Выход» в бою возвращает в главное меню', await A.isVisible('#nav-random'));
   await B.waitForTimeout(400);
   check('чат у B: Волк выходит', /Волк выходит/.test(await B.textContent('#chat')));
   await B.close(); await A.close();
 
   console.log('Карта «Дом»');
   const H = await open();
-  await play(H, { name: 'Дом', map: 'house' });
+  await play(H, { map: 'house' });
   await H.evaluate(() => { game.me.pos.set(-4.6, 0, 0); game.me.yaw = Math.PI / 2; game.me.pitch = 0; game.me.vel.set(0, 0, 0); });
   await H.waitForTimeout(300);
   check('у двери подсказка F', /F — открыть дверь/.test(await H.textContent('#crate-text')));
@@ -391,11 +435,12 @@ if (!chromium) {
     const centre = async (sel) => { const r = await T.locator(sel).boundingBox(); return [r.x + r.width / 2, r.y + r.height / 2]; };
     await T.goto(URL);
     await T.waitForFunction(() => !document.getElementById('play').disabled);
+    await T.tap('#nav-rooms');
     await T.locator('#play').scrollIntoViewIfNeeded();
     await T.tap('#play');
     await T.waitForFunction(() => document.getElementById('menu').classList.contains('hidden'));
-    await T.tap('#resume'); await T.waitForTimeout(400);
-    check('«ИГРАТЬ» пальцем запускает игру без захвата мыши', await T.evaluate(() => document.body.classList.contains('playing') && document.getElementById('pause').classList.contains('hidden')));
+    await T.waitForTimeout(400);
+    check('вход пальцем запускает игру без захвата мыши', await T.evaluate(() => document.body.classList.contains('playing') && document.getElementById('menu').classList.contains('hidden')));
     await T.evaluate(() => { game.me.pos.set(0, 0, 10); game.me.vel.set(0, 0, 0); game.me.yaw = 0; game.me.pitch = 0; });
     await touch('touchStart', [[150, 260, 1]]);
     await touch('touchMove', [[150, 230, 1]]); await T.waitForTimeout(1000);
@@ -420,7 +465,7 @@ if (!chromium) {
     await T.tap('#hotbar .slot >> nth=2'); await T.waitForTimeout(200);
     check('слот оружия нажимается', await T.evaluate(() => game.me.weapon) === 'pistol');
     await T.tap('#t-menu'); await T.waitForTimeout(200);
-    check('кнопка меню открывает паузу', await T.isVisible('#tile-profile'));
+    check('кнопка меню открывает меню', await T.isVisible('#resume'));
     await ctx.close();
   }
 

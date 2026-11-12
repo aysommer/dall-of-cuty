@@ -12,8 +12,21 @@ import type { Box, GameMap, MapId } from './maps/types.js';
 
 export type { Box, Breakable, GameMap, JumpPad, Ladder, MapId, SpawnPoint } from './maps/types.js';
 
+/** Типы огнестрельного оружия — по ним оно сгруппировано в классах */
+export type GunType = 'pistol' | 'smg' | 'shotgun' | 'rifle' | 'lmg' | 'sniper';
+export const GUN_TYPES: Array<{ id: GunType; name: string }> = [
+  { id: 'pistol', name: 'Пистолеты' },
+  { id: 'smg', name: 'Пистолеты-пулемёты' },
+  { id: 'shotgun', name: 'Дробовики' },
+  { id: 'rifle', name: 'Автоматы' },
+  { id: 'lmg', name: 'Пулемёты' },
+  { id: 'sniper', name: 'Снайперские винтовки' },
+];
+
 export interface Weapon {
   name: string;
+  /** Тип огнестрела (у ножа, гранаты и ракетницы типа нет) */
+  type?: GunType;
   dmg: number;
   pellets: number;
   /** Пауза между выстрелами, мс */
@@ -22,8 +35,9 @@ export interface Weapon {
   /** Запас патронов сверх магазина (всего патронов = mag + reserve) */
   reserve: number;
   reload: number;
-  /** Разброс при прицеливании (ПКМ), радианы. От бедра — в HIP_SPREAD раз больше. */
+  /** Разброс при прицеливании (ПКМ), радианы. От бедра — в HIP_SPREAD раз больше (или в hip раз, если задано). */
   spread: number;
+  hip?: number;
   auto: boolean;
   /** Угол обзора камеры при прицеливании; null — прицелиться нельзя */
   zoom: number | null;
@@ -35,8 +49,12 @@ export interface Weapon {
 
 export const PLAYER = { w: 0.8, h: 1.8, eye: 1.6 };
 
-/** Стрельба от бедра в два раза менее точная, чем прицельная. */
-export const HIP_SPREAD = 2;
+/**
+ * Стрельба от бедра намного менее точная, чем прицельная: издалека попасть трудно — нужно целиться.
+ * У дробовика свой множитель (hip): дробь и так разлетается широко.
+ */
+export const HIP_SPREAD = 5.5;
+export const hipSpread = (w: Weapon): number => w.hip ?? HIP_SPREAD;
 
 /**
  * Распределение урона: голова — верхняя часть стоящего прямоугольника (от HEAD.from метров над ногами).
@@ -54,14 +72,14 @@ export const MEDKIT = {
 };
 
 export const WEAPONS: Record<WeaponId, Weapon> = {
-  pistol:  { name: 'Пистолет', dmg: 25, pellets: 1, rate: 280, mag: 12, reserve: 24, reload: 1200, spread: 0.006, auto: false, zoom: 60 },
-  shotgun: { name: 'Дробовик', dmg: 15, pellets: 8, rate: 900, mag: 6, reserve: 18, reload: 2200, spread: 0.045, auto: false, zoom: 62 },
+  pistol:  { name: 'Jecov', type: 'pistol', dmg: 25, pellets: 1, rate: 280, mag: 12, reserve: 24, reload: 1200, spread: 0.006, auto: false, zoom: 60 },
+  shotgun: { name: 'Chester', type: 'shotgun', dmg: 15, pellets: 8, rate: 900, mag: 6, reserve: 18, reload: 2200, spread: 0.045, hip: 2.4, auto: false, zoom: 62 },
   // Пулемёт: лента на 100 патронов, отдача вдвое сильнее, чем у автомата
-  lmg:     { name: 'Пулемёт', dmg: 22, pellets: 1, rate: 95, mag: 100, reserve: 0, reload: 4200, spread: 0.014, auto: true, zoom: 58 },
+  lmg:     { name: 'Z700', type: 'lmg', dmg: 22, pellets: 1, rate: 95, mag: 100, reserve: 0, reload: 4200, spread: 0.014, auto: true, zoom: 58 },
   // Пистолет-пулемёт: урон ниже, скорострельность выше, чем у автомата
-  smg:     { name: 'Пистолет-пулемёт', dmg: 15, pellets: 1, rate: 70, mag: 32, reserve: 64, reload: 1700, spread: 0.012, auto: true, zoom: 60 },
-  rifle:   { name: 'Автомат', dmg: 21, pellets: 1, rate: 125, mag: 30, reserve: 60, reload: 2000, spread: 0.009, auto: true, zoom: 55 },
-  sniper:  { name: 'Снайперка', dmg: 80, pellets: 1, rate: 1300, mag: 5, reserve: 19, reload: 2800, spread: 0.0015, auto: false, zoom: 20, headKill: true },
+  smg:     { name: 'UZE90', type: 'smg', dmg: 13, pellets: 1, rate: 70, mag: 42, reserve: 64, reload: 1700, spread: 0.012, auto: true, zoom: 60 },
+  rifle:   { name: 'AK49', type: 'rifle', dmg: 21, pellets: 1, rate: 125, mag: 30, reserve: 60, reload: 2000, spread: 0.009, auto: true, zoom: 55 },
+  sniper:  { name: 'Piz', type: 'sniper', dmg: 80, pellets: 1, rate: 1300, mag: 5, reserve: 19, reload: 2800, spread: 0.0015, auto: false, zoom: 20, headKill: true },
   knife:   { name: 'Нож', dmg: 100, pellets: 1, rate: 650, mag: 0, reserve: 0, reload: 0, spread: 0, auto: false, zoom: null, melee: 2 },
   // Ракетница достаётся только из ящика: 6 ракет, без перезарядки
   grenade: { name: 'Граната', dmg: 0, pellets: 1, rate: 600, mag: 0, reserve: 0, reload: 0, spread: 0, auto: false, zoom: null },
@@ -230,14 +248,21 @@ export const AMMO_PACK = { share: 0.5, lifeMs: 30_000, reach: 1.1 };
 
 /** Подкат: из спринта по C, игрок ложится и скользит ms миллисекунд. */
 export const SLIDE = { ms: 1000, height: 0.8, eye: 0.6, boost: 1.35, endSpeed: 0.35, cooldownMs: 500 };
+/** Присед (C): ниже ростом и медленнее. Лёжа (Ctrl): хитбокс и взгляд как в подкате, ползком совсем медленно. */
+export const CROUCH = { height: 1.2, eye: 1.05, speed: 0.5 };
+export const PRONE = { speed: 0.25 };
+/** Насколько игрок «низкий»: false — стоит, 'crouch' — присел, true — лежит (подкат или лёжа) */
+export type Low = boolean | 'crouch';
+/** С какой высоты над ногами начинается голова; null — у лежащего головы как зоны нет */
+export const headFrom = (low: Low): number | null => low === true ? null : low === 'crouch' ? CROUCH.height - (PLAYER.h - HEAD.from) : HEAD.from;
 
 /**
  * Хитбокс игрока. Стоя — столб PLAYER.w × PLAYER.h. В подкате — лежащий прямоугольник
  * длиной PLAYER.h вдоль взгляда и высотой SLIDE.height (берём охватывающий его AABB).
  */
-export function playerBox(pos: Vec3, yaw: number, sliding: boolean, scale = 1): [Vec3, Vec3] {
-  let hx = PLAYER.w / 2, hz = PLAYER.w / 2, h = PLAYER.h;
-  if (sliding) {
+export function playerBox(pos: Vec3, yaw: number, sliding: Low, scale = 1): [Vec3, Vec3] {
+  let hx = PLAYER.w / 2, hz = PLAYER.w / 2, h = sliding === 'crouch' ? CROUCH.height : PLAYER.h;
+  if (sliding === true) {
     const s = Math.abs(Math.sin(yaw)), c = Math.abs(Math.cos(yaw));
     hx = (PLAYER.h / 2) * s + (PLAYER.w / 2) * c;
     hz = (PLAYER.h / 2) * c + (PLAYER.w / 2) * s;
@@ -248,8 +273,8 @@ export function playerBox(pos: Vec3, yaw: number, sliding: boolean, scale = 1): 
 }
 
 /** Точки тела для проверки прямой видимости: низ, середина и верх. */
-export function bodyPoints(pos: Vec3, sliding: boolean, scale = 1): Vec3[] {
-  const h = (sliding ? SLIDE.height : PLAYER.h) * scale;
+export function bodyPoints(pos: Vec3, sliding: Low, scale = 1): Vec3[] {
+  const h = (sliding === true ? SLIDE.height : sliding === 'crouch' ? CROUCH.height : PLAYER.h) * scale;
   return [0.2, h / 2, h - 0.1].map((y) => [pos[0], pos[1] + y, pos[2]] as Vec3);
 }
 

@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import type { Vec3, WeaponId } from '../../shared/protocol.js';
 import { GUNS, rayWorld, WEAPONS } from '../../shared/map.js';
 import { beep } from '../core/audio.js';
-import { box, camera } from '../core/scene.js';
+import { camera } from '../core/scene.js';
 import { settings } from '../core/settings.js';
 import { keys, me, state } from '../core/state.js';
 import { BASE_FOV, SPEED } from '../core/util.js';
@@ -48,8 +48,9 @@ export function updateAim(dt: number): void {
   state.adsK += ((aiming ? 1 : 0) - state.adsK) * Math.min(1, dt * (bare ? ADS_SPEED_BARE : ADS_SPEED));
   if (state.adsK < 0.001) state.adsK = 0;
   // Снайперка без оптики — по мушке, с небольшим приближением
-  const zoom = me.weapon === 'sniper' && !state.scopeOn ? IRON_ZOOM : w.zoom ?? BASE_FOV;
-  const fov = BASE_FOV + (zoom - BASE_FOV) * state.adsK;
+  // Приближение задано для обзора 75°; при другом обзоре из настроек оно меняется в той же пропорции
+  const zoom = (me.weapon === 'sniper' && !state.scopeOn ? IRON_ZOOM : w.zoom ?? BASE_FOV) * (settings.fov / BASE_FOV);
+  const fov = settings.fov + (zoom - settings.fov) * state.adsK;
   if (Math.abs(camera.fov - fov) > 0.01) {
     camera.fov = fov;
     camera.updateProjectionMatrix();
@@ -63,7 +64,7 @@ export function updateAim(dt: number): void {
 }
 
 export function isSprinting(): boolean {
-  return sprintKey() && !!keys.KeyW && !state.aimHeld && !state.mouseDown && me.grounded && !state.low;
+  return sprintKey() && !!keys.KeyW && !state.aimHeld && !state.mouseDown && me.grounded && !state.low && !state.crouch;
 }
 
 /**
@@ -116,7 +117,8 @@ const SCOPE_ANIM_MS = 700;
 /** Приближение по мушке, без оптики */
 const IRON_ZOOM = 50;
 
-let scopeHand: THREE.Mesh | null = null;
+/** Куда тянется рука, когда снимает или надевает прицел (в координатах viewModel); null — рука свободна */
+export let scopeHandPos: THREE.Vector3 | null = null;
 
 /** V: снять или надеть прицел на оружии в руках — оптику снайперки или коллиматор остальных стволов. */
 export function toggleScope(now: number): void {
@@ -127,18 +129,14 @@ export function toggleScope(now: number): void {
 }
 
 /**
- * Квадратная рука тянется к оптике: при снятии — забирает её и уносит вниз,
+ * Рука тянется к прицелу: при снятии — забирает её и уносит вниз,
  * при надевании — приносит снизу и ставит на место.
  */
 export function animateScope(now: number): void {
   const g = viewGun;
-  if (!g.scope) { if (scopeHand) scopeHand.visible = false; return; }
-  if (!scopeHand) {
-    scopeHand = box(0.11, 0.07, 0.13, 0xd9a07a); // квадратная ладонь
-    viewModel.add(scopeHand);
-  }
+  scopeHandPos = null;
+  if (!g.scope) return;
   if (!scopeAnim) {
-    scopeHand.visible = false;
     g.scope.visible = state.scopeOn;
     g.scope.position.set(0, g.scopeY, g.scopeZ);
     return;
@@ -149,8 +147,7 @@ export function animateScope(now: number): void {
   // Рука: снизу к оптике (0…0.45) и обратно вниз (0.55…1)
   const up = ramp(p, 0, 0.45), down = ramp(p, 0.55, 1);
   const hand = below.clone().lerp(mount, up).lerp(below, down);
-  scopeHand.visible = true;
-  scopeHand.position.copy(hand);
+  scopeHandPos = hand.clone();
   if (scopeAnim.to) {
     // Надеваем: оптика в руке поднимается и встаёт на место
     g.scope.visible = true;
@@ -191,9 +188,23 @@ const ease = (x: number): number => x * x * (3 - 2 * x);
 /** 0 → 1 на отрезке [a, b] */
 const ramp = (p: number, a: number, b: number): number => ease(Math.max(0, Math.min(1, (p - a) / (b - a))));
 
+const THROW_MS = 320;
+let throwUntil = 0;
+/** Бросок гранаты: рука с ней идёт назад, потом резко вперёд и вверх. */
+export function startThrow(now: number): void {
+  throwUntil = now + THROW_MS;
+}
+
 /** Перезарядка всех стволов и затвор снайперки. */
 export function animateGun(now: number): void {
   const g = viewGun;
+  if (now < throwUntil) {
+    const p = 1 - (throwUntil - now) / THROW_MS;
+    const back = ramp(p, 0, 0.3) * (1 - ramp(p, 0.3, 0.55)), fwd = ramp(p, 0.3, 0.75);
+    viewModel.position.z += 0.16 * back - 0.42 * fwd;
+    viewModel.position.y += 0.1 * back + 0.2 * fwd;
+    viewModel.rotation.x += 0.7 * back - 0.9 * fwd;
+  }
   if (g.mag) g.mag.position.y = g.magY;
   if (g.shell) g.shell.visible = false;
   if (g.bolt) { g.bolt.position.z = g.boltZ; g.bolt.rotation.z = 0; }

@@ -1,4 +1,4 @@
-// Главное меню: комнаты, создание и вход (с паролем), лучший игрок.
+// Обзор комнат: список, создание своей и вход (с паролем), случайный матч, лучший игрок.
 import type { BestPlayer, LobbyMsg, Mode, Team } from '../../shared/protocol.js';
 import { type LimitKind, MAP_ORDER, type MapId, MAPS, MATCH, ROOMS } from '../../shared/map.js';
 import { levelOf, rankProgress, RANKS } from '../../shared/ranks.js';
@@ -46,7 +46,8 @@ export function onLobby(m: LobbyMsg): void {
   if (chosenRoom !== 'new' && !m.rooms.some((r) => r.id === chosenRoom)) roomPicked = false;
   if (!roomPicked) chosenRoom = open[0]?.id ?? 'new';
   if (chosenRoom === 'new' && m.rooms.length >= m.maxRooms) chosenRoom = open[0]?.id ?? 'new';
-  $('rooms-note').textContent = `${m.rooms.length} из ${m.maxRooms} · можно войти: ${open.length}`;
+  $('rooms-note').textContent = String(open.length);
+  $('rooms-note').title = `Комнат: ${m.rooms.length} из ${m.maxRooms}, можно войти: ${open.length}`;
   renderMenu();
 }
 
@@ -173,9 +174,33 @@ function pickedButton(e: MouseEvent): HTMLButtonElement | null {
   return b && !b.disabled ? b : null;
 }
 
+function join(room: number | 'new', extra: { roomName?: string; password?: string; map?: MapId } = {}): void {
+  initAudio();
+  $('status').textContent = '';
+  playBtn.disabled = true;
+  sendMsg({
+    t: 'join', room, roomName: extra.roomName ?? '', password: extra.password ?? '',
+    name: nameInput.value.trim(), team: chosenTeam, mode: chosenMode, map: extra.map ?? chosenMap,
+    limitKind: chosenLimitKind, limitValue: chosenLimitValue,
+    kit: settings.kit, melee: settings.melee, token: localStorage.getItem(TOKEN_KEY) ?? undefined,
+  });
+}
+
+/**
+ * Случайный матч: любая открытая комната без пароля, где уже есть игроки.
+ * Если таких нет — открываем свою на случайной карте, чтобы к ней могли присоединиться.
+ */
+export function joinRandom(): void {
+  const m = lobbyState;
+  if (!m) { $('status').textContent = 'Нет связи с сервером'; return; }
+  const open = m.rooms.filter((r) => !r.locked && r.count > 0 && r.count < r.max);
+  if (open.length) { join(open[Math.floor(Math.random() * open.length)]!.id); return; }
+  if (m.rooms.length >= m.maxRooms) { $('status').textContent = 'Свободных комнат нет — загляни в «Обзор комнат»'; return; }
+  join('new', { map: MAP_ORDER[Math.floor(Math.random() * MAP_ORDER.length)]! });
+}
+
 /** Запуск модуля: подписки на события и начальная отрисовка (вызывается из main.ts). */
 export function initMenu(): void {
-  nameInput.value = localStorage.getItem('doc-name') ?? '';
   $('room-list').addEventListener('click', (e) => {
     const b = pickedButton(e);
     if (!b) return;
@@ -222,9 +247,6 @@ export function initMenu(): void {
   });
   $('join-form').addEventListener('submit', (e) => {
     e.preventDefault();
-    initAudio();
-    const name = nameInput.value.trim();
-    localStorage.setItem('doc-name', name);
     const creating = chosenRoom === 'new';
     const password = $<HTMLInputElement>(creating ? 'room-pass-new' : 'room-pass').value;
     if (creating && password && (password.length < ROOMS.passMin || password.length > ROOMS.passMax)) {
@@ -236,12 +258,6 @@ export function initMenu(): void {
       $('status').textContent = 'У комнаты есть пароль — введи его';
       return;
     }
-    $('status').textContent = '';
-    playBtn.disabled = true;
-    sendMsg({
-      t: 'join', room: chosenRoom, roomName: $<HTMLInputElement>('room-name').value.trim(), password,
-      name, team: chosenTeam, mode: chosenMode, map: chosenMap, limitKind: chosenLimitKind, limitValue: chosenLimitValue,
-      kit: settings.kit, melee: settings.melee, token: localStorage.getItem(TOKEN_KEY) ?? undefined,
-    });
+    join(chosenRoom, { roomName: $<HTMLInputElement>('room-name').value.trim(), password });
   });
 }

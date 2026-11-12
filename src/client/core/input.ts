@@ -6,20 +6,19 @@ import { sendMsg } from './net.js';
 import { camera, canvas } from './scene.js';
 import { settings } from './settings.js';
 import { keys, me, state } from './state.js';
-import { $, BASE_FOV, MOUSE_SENS } from './util.js';
+import { $, MOUSE_SENS } from './util.js';
 import { trySpray } from '../fx/sprays.js';
 import { nearCrate, openingUntil } from '../pickups/crate.js';
 import { gunner, gunnerRocket } from '../streaks/gunship.js';
 import { missileCtl } from '../streaks/missile.js';
 import { hotbar, useSlot } from '../ui/hotbar.js';
 import { renderScoreboard } from '../ui/hud.js';
-import { voting } from '../ui/match.js';
-import { pauseView, showPauseView } from '../ui/pause.js';
+import { showView, syncMenu, view } from '../ui/shell.js';
 import { throwKnife } from '../weapons/knife.js';
 import { startReload } from '../weapons/shooting.js';
 import { setWeapon, toggleScope } from '../weapons/viewmodel.js';
 import { nearDoor } from '../world/map.js';
-import { trySlide } from '../world/physics.js';
+import { pressCrouch, pressProne } from '../world/physics.js';
 
 /** Сенсорный режим: мышь не захватывается, игра управляется кнопками на экране */
 let touchMode = false;
@@ -35,8 +34,8 @@ function setLocked(locked: boolean): void {
   if (!locked) unlockedAt = performance.now();
   state.menuClosed = false;
   document.body.classList.toggle('playing', locked);
-  $('pause').classList.toggle('hidden', locked || !state.joined || voting);
-  if (!locked) showPauseView('home');
+  if (!locked) showView('home');
+  syncMenu();
   if (!locked) { state.mouseDown = false; state.aimHeld = false; for (const k in keys) keys[k] = false; }
 }
 
@@ -71,7 +70,7 @@ let unlockedAt = 0;
 /** Поворот взгляда на dx, dy «пикселей мыши». В самолёте и ракете с неба поворачивается их камера. */
 export function look(dx: number, dy: number): void {
   // В прицеле чувствительность падает вместе с углом обзора, чтобы прицел не «улетал»
-  const sens = MOUSE_SENS * settings.sens * (camera.fov / BASE_FOV);
+  const sens = MOUSE_SENS * settings.sens * (camera.fov / settings.fov);
   if (gunner) {
     // В самолёте поворачивается орудие (смотреть можно только вниз)
     gunner.yaw -= dx * sens;
@@ -119,7 +118,8 @@ export function pressKey(code: string, repeat = false): void {
   if (slot && !repeat) useSlot(slot.id);
   if (code === 'KeyG' && !repeat) throwKnife();
   if (code === 'KeyV' && !repeat) toggleScope(performance.now());
-  if (code === 'KeyC' && !repeat) trySlide(performance.now());
+  if (code === 'KeyC' && !repeat) pressCrouch(performance.now());
+  if ((code === 'ControlLeft' || code === 'ControlRight') && !repeat) pressProne();
   if (code === 'KeyT' && !repeat) trySpray(performance.now());
   if (code === 'KeyF' && !repeat) {
     // F — начать открывать ящик; повторное нажатие отменяет и сбрасывает прогресс
@@ -170,14 +170,14 @@ export function initInput(): void {
     if (e.code === 'Escape') {
       for (const d of document.querySelectorAll<HTMLDetailsElement>('details[open]')) d.open = false;
       // Esc в разделе меню — назад к плиткам
-      if (state.joined && !state.locked && !state.menuClosed && pauseView !== 'home' && performance.now() - unlockedAt > 300) {
-        showPauseView('home');
+      if (state.joined && !state.locked && !state.menuClosed && view !== 'home' && performance.now() - unlockedAt > 300) {
+        showView('home');
         return;
       }
       // Esc при открытом меню — сразу обратно в игру (то же нажатие, что открыло меню, не считается)
       if (state.joined && !state.locked && !state.menuClosed && performance.now() - unlockedAt > 300) {
-        $('pause').classList.add('hidden');
         state.menuClosed = true;
+        syncMenu();
         lock(); // где браузер разрешает — мышь захватится сразу
       }
       return;

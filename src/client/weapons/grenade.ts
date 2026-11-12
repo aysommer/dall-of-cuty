@@ -12,7 +12,7 @@ import { openingUntil } from '../pickups/crate.js';
 import { gear } from '../ui/hotbar.js';
 import { toast } from '../ui/hud.js';
 import { _dir } from './shooting.js';
-import { setWeapon, viewGun } from './viewmodel.js';
+import { setWeapon, startThrow, viewGun } from './viewmodel.js';
 
 /** Когда сорвана чека гранаты в руке (0 — не держу) */
 export let cookStart = 0;
@@ -70,7 +70,8 @@ export function updateGrenadeHand(now: number): void {
     cookStart = 0;
     $('cook').classList.add('hidden');
     shotSound('knife', 0.8);
-    setTimeout(() => { if (me.weapon === 'grenade' && !cookStart) setWeapon(settings.kit[0]!); }, 300);
+    startThrow(now);
+    setTimeout(() => { if (me.weapon === 'grenade' && !cookStart) setWeapon(settings.kit[0]!); }, 340);
   }
 }
 

@@ -1,5 +1,5 @@
 // Главный цикл: движение, эффекты, отрисовка; отладочный доступ window.game.
-import { PLAYER, SLIDE, STREAK } from '../shared/map.js';
+import { CROUCH, PLAYER, SLIDE, STREAK } from '../shared/map.js';
 import { sendMsg } from './core/net.js';
 import { camera, fog, renderer, scene } from './core/scene.js';
 import { settings } from './core/settings.js';
@@ -16,6 +16,7 @@ import { packFx, updateAmmoPacks } from './pickups/ammo.js';
 import { updateCrate } from './pickups/crate.js';
 import { medkitFx, updateMedkits } from './pickups/medkits.js';
 import { applyLook, updateRemote } from './render/players.js';
+import { updateViewArms, viewArmsReady } from './render/viewarms.js';
 import { characterFailed, characterReady, loadCharacterModel } from './render/character.js';
 import { gunner, gunshipFx, markerEls, updateGunship } from './streaks/gunship.js';
 import { missileCtl, remoteMissiles, updateMissile } from './streaks/missile.js';
@@ -50,7 +51,7 @@ function frame(now: number): void {
     if (me.alive) {
       move(dt);
       if (me.grounded) { groundedAt = now; airFrames = 0; } else airFrames++;
-      const eyeTarget = (state.low ? SLIDE.eye : PLAYER.eye) * (me.big ? STREAK.bigScale : 1);
+      const eyeTarget = (state.low ? SLIDE.eye : state.crouch ? CROUCH.eye : PLAYER.eye) * (me.big ? STREAK.bigScale : 1);
       state.eyeH += (eyeTarget - state.eyeH) * Math.min(1, dt * 14);
       // Покачивание при ходьбе и беге: шаг задаёт пройденный путь, размах — скорость; в прицеле почти гаснет
       const ground = Math.hypot(me.vel.x, me.vel.z);
@@ -103,7 +104,7 @@ function frame(now: number): void {
       sendMsg({
         t: 'state',
         p: [+me.pos.x.toFixed(2), +me.pos.y.toFixed(2), +me.pos.z.toFixed(2)],
-        yaw: +me.yaw.toFixed(3), pitch: +me.pitch.toFixed(3), w: me.weapon, sl: state.low,
+        yaw: +me.yaw.toFixed(3), pitch: +me.pitch.toFixed(3), w: me.weapon, sl: state.low, cr: state.crouch,
         air: airFrames >= 2 && now - groundedAt > 120 && !touchingLadder(me.pos), rl: performance.now() < me.reloadUntil,
       });
     }
@@ -116,6 +117,7 @@ function frame(now: number): void {
   }
   const scoped = me.weapon === 'sniper' && state.scopeOn && state.adsK > 0.85;
   viewModel.visible = state.joined && me.alive && !scoped && !missileCtl && !gunner;
+  updateViewArms(now);
   $('scope').classList.toggle('hidden', !(state.joined && me.alive && scoped));
   $('crosshair').classList.toggle('ads', state.adsK > 0.5);
   // С коллиматором своя красная точка, крест в прицеле не нужен
@@ -177,7 +179,7 @@ export function initLoop(): void {
     },
     dbg: () => ({ openDoors: [...openDoors], sprintK: state.sprintK, wallK: state.wallK, broken: [...brokenIds], grenades: [...grenadeFx.values()].map((g) => g.mesh.position.toArray().map((v) => +v.toFixed(2))), myGrenades: state.myGrenades, cooking: cookStart > 0, scopeOn: state.scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground: state.underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
       kit: settings.kit, reserve: { ...me.reserve }, hotbar: hotbar().map((h) => `${h.key}:${h.label}`).join(' '),
-      missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, eyeH: state.eyeH, recoil: state.recoil, mines: [...mineFx.values()].map((m) => ({ kind: m.info.kind, armed: m.info.armed > 0, p: m.info.p, to: m.info.to })), blind: +blindK(performance.now()).toFixed(2), gear, bob: +bobY.toFixed(3),
+      missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, crouch: state.crouch, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, eyeH: state.eyeH, recoil: state.recoil, mines: [...mineFx.values()].map((m) => ({ kind: m.info.kind, armed: m.info.armed > 0, p: m.info.p, to: m.info.to })), blind: +blindK(performance.now()).toFixed(2), arms: viewArmsReady(), gear, bob: +bobY.toFixed(3),
       corpses: corpses.length, corpse: corpseDebug(), model: characterReady() ? 'ready' : characterFailed() ? 'failed' : 'loading',
       remoteAnim: [...remotes.values()].map((r) => r.char ? { walk: +r.char.walk.getEffectiveWeight().toFixed(2), run: +r.char.run.getEffectiveWeight().toFixed(2), air: +r.char.airK.toFixed(2), reload: r.reloading, speed: +r.char.speed.toFixed(1) } : null), sprays: sprays.length,
       steps: stepCount, medkits: medkitFx.size, boltUntil: state.boltUntil, menuClosed: state.menuClosed, armor: me.armor }),
