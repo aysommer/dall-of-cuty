@@ -33,7 +33,7 @@ import { updateShooting } from './weapons/shooting.js';
 import { aimPoint, lastDrawMs, animateGun, animateScope, poseGun, scopeAnim, sniperSway, SWING_MS, updateAim, viewGun, viewModel } from './weapons/viewmodel.js';
 import { brokenIds, currentMap, openDoors, updateDoors } from './world/map.js';
 import { move, touchingLadder } from './world/physics.js';
-import { sinking, updateSinking, updateUnderground } from './world/underground.js';
+import { sinking, updateSinking } from './world/underground.js';
 import { updateWeather, weatherKind } from './world/weather.js';
 
 let last = performance.now(), sendAcc = 0;
@@ -154,7 +154,6 @@ function frame(now: number): void {
   updateMines(now);
   updateBlind(now);
   updateAmmoPacks(now);
-  updateUnderground();
   updateWeather(dt);
   updateMinimap(now);
   updateNuke(now);
@@ -185,7 +184,7 @@ export function initLoop(): void {
       if (missileCtl) { missileCtl.yaw = yaw; missileCtl.pitch = pitch; }
       if (gunner) { gunner.yaw = yaw; gunner.pitch = pitch; }
     },
-    dbg: () => ({ openDoors: [...openDoors], sprintK: state.sprintK, wallK: state.wallK, broken: [...brokenIds], grenades: [...grenadeFx.values()].map((g) => g.mesh.position.toArray().map((v) => +v.toFixed(2))), myGrenades: state.myGrenades, cooking: cookStart > 0, scopeOn: state.scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, underground: state.underground, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
+    dbg: () => ({ openDoors: [...openDoors], sprintK: state.sprintK, wallK: state.wallK, broken: [...brokenIds], grenades: [...grenadeFx.values()].map((g) => g.mesh.position.toArray().map((v) => +v.toFixed(2))), myGrenades: state.myGrenades, cooking: cookStart > 0, scopeOn: state.scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
       kit: settings.kit, reserve: { ...me.reserve }, hotbar: hotbar().map((h) => `${h.key}:${h.label}`).join(' '),
       missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, crouch: state.crouch, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, eyeH: state.eyeH, recoil: state.recoil, mines: [...mineFx.values()].map((m) => ({ kind: m.info.kind, armed: m.info.armed > 0, p: m.info.p, to: m.info.to })), blind: +blindK(performance.now()).toFixed(2), arms: viewArmsReady(), drawMs: lastDrawMs(), gear, gunBob: +bobGun.toFixed(2), bob: +bobY.toFixed(3),
       corpses: corpses.length, corpse: corpseDebug(), model: characterReady() ? 'ready' : characterFailed() ? 'failed' : 'loading',

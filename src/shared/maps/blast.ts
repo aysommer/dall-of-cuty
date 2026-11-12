@@ -4,7 +4,7 @@
 // Сверху и снизу вдоль заборов — обходные пути. Стороны зеркальны по X, чтобы командам было поровну.
 // Планировка своя, по описанию схемы.
 import { builder, type Breakable, type GameMap, type Ladder, type SpawnPoint } from './types.js';
-import { addGroundAndSewer, subtract } from './sewer.js';
+import { addGround, subtract } from './ground.js';
 
 const HALF = { x: 30, z: 20 };
 const FENCE_H = 2.4;
@@ -188,9 +188,9 @@ breakable('glass', HX2 - 0.2, 1, 5, HX2 - 0.1, 2.2, 7);           // окна ф
 breakable('glass', HX2 - 0.2, F2 + 1, 0.5, HX2 - 0.1, F2 + 2.2, 2.5);
 breakable('glass', HX2 - 0.2, F2 + 1, 5, HX2 - 0.1, F2 + 2.2, 7);
 
-// Канализация: под верхним обходом, люки у живых изгородей
+// Земля под всей ареной; лестниц на карте нет (на крыши гаражей ведут ступени)
 const ladders: Ladder[] = [];
-const { lamps } = addGroundAndSewer(boxes, ladders, HALF, { axis: 'x', from: -19, to: 19, at: 16.8 }, GRASS);
+addGround(boxes, HALF, GRASS);
 
 // Зелёные — во дворе зелёного дома (взгляд на восток), красные — во дворе жёлтого
 const E = -Math.PI / 2, W = Math.PI / 2;
@@ -206,7 +206,6 @@ export const BLAST: GameMap = {
   sky: '#f0c9a0',
   boxes,
   ladders,
-  lamps,
   breakables,
   // Ящик падает на въезд, в верхний обход или на крыши гаражей
   crateDrops: [[0, ROAD, -17], [-14, 0, 15], [14, 0, 15], [-20.5, GH + 0.3, -6], [20.5, GH + 0.3, -6]],

@@ -56,7 +56,6 @@ export function onWeather(m: WeatherMsg): void {
 export function updateWeather(dt: number): void {
   if (!weatherFx || !weatherKind) return;
   // Под землёй не идёт; наверху «коробка» с осадками ездит за камерой, частицы падают и возвращаются наверх
-  weatherFx.visible = !state.underground;
   weatherFx.position.set(camera.position.x, camera.position.y - 6, camera.position.z);
   const pos = weatherFx.geometry.getAttribute('position') as THREE.BufferAttribute;
   const speed = weatherKind === 'rain' ? 26 : 2.2;

@@ -25,8 +25,6 @@ const doorHinges = new Map<number, { pivot: THREE.Group; angle: number }>();
 /** Невидимые стены по краю текущей карты */
 export let clips: Box[] = clipWalls(MAPS.sands.half);
 
-/** Свет фонарей канализации — включается, когда камера под землёй */
-export const lampLights: THREE.PointLight[] = [];
 
 let loadedMap: MapId | null = null;
 
@@ -80,20 +78,6 @@ export function loadMap(id: MapId): void {
 
   sky.set(currentMap.sky);
   fog.color.set(currentMap.sky);
-  // Пол — плита из блоков с люками (она в boxes), под ней канализация
-  lampLights.length = 0;
-  for (const [x, y, z] of currentMap.lamps) {
-    // Фонарь: корпус, светящееся стекло и тёплый свет на весь коридор
-    const body = box(0.3, 0.12, 0.3, 0x222222);
-    body.position.set(x, y + 0.3, z);
-    const glass = box(0.22, 0.3, 0.22, 0xffd27a, false);
-    glass.position.set(x, y + 0.1, z);
-    const light = new THREE.PointLight(0xffd9a0, 14, 30, 1);
-    light.position.set(x, y, z);
-    light.visible = false;
-    lampLights.push(light);
-    mapGroup.add(body, glass, light);
-  }
   for (const b of currentMap.boxes) {
     const w = b.max[0] - b.min[0], h = b.max[1] - b.min[1], d = b.max[2] - b.min[2];
     const m = box(w, h, d, b.color);

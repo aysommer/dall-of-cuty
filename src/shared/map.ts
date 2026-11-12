@@ -347,7 +347,7 @@ export function rayBox(o: Vec3, d: Vec3, min: Vec3, max: Vec3): number {
 }
 
 // Ближайшее пересечение луча с геометрией карты (включая пол).
-/** Дно мира: ниже ничего нет (пол карты — плита из блоков, под ней канализация). */
+/** Дно мира: ниже ничего нет (пол карты — плита из блоков толщиной 1 м). */
 export const WORLD_BOTTOM = -6;
 
 export function rayWorld(boxes: Box[], o: Vec3, d: Vec3, maxDist = 200): number {

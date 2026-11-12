@@ -2,7 +2,7 @@
 // только трамплинами, и двумя угловыми вышками с лестницами. Базы — на севере и юге.
 // Планировка своя; всё симметрично относительно центра, чтобы стороны были в равных условиях.
 import { builder, type GameMap, type JumpPad, type Ladder, type SpawnPoint } from './types.js';
-import { addGroundAndSewer } from './sewer.js';
+import { addGround } from './ground.js';
 
 const HALF = { x: 26, z: 26 };
 const WALL_H = 7;
@@ -69,8 +69,8 @@ sym(-25.5, -22, -22.5, -21.3, 2.6, BLUE);
 sym(16, 4, 18, 6.5, 1.2, ORANGE);
 sym(-8, -14, -6, -12, 2.6, TEAL_DARK);
 
-// Канализация: под островом, с запада на восток
-const { lamps } = addGroundAndSewer(boxes, ladders, HALF, { axis: 'x', from: -22, to: 22, at: -3 }, '#b9b3c9');
+// Земля под всей ареной
+addGround(boxes, HALF, '#b9b3c9');
 
 const S = Math.PI; // взгляд на юг (+z)
 const green: SpawnPoint[] = [[-12, 23.5, 0], [-7, 24.5, 0], [-4.5, 23, 0], [4.5, 23, 0], [7, 24.5, 0], [12, 23.5, 0]];
@@ -84,7 +84,6 @@ export const JUMPS: GameMap = {
   sky: '#a9d6ff',
   boxes,
   ladders,
-  lamps,
   pads,
   // Ящик падает на остров или в один из двух открытых углов середины
   crateDrops: [[0, ISLAND, 2.5], [-17, 0, 0], [17, 0, 0]],

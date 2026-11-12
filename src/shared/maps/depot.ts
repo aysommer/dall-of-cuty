@@ -3,7 +3,7 @@
 // а поперёк всей карты идёт мост, на который с обоих концов ведут лестницы.
 // Под мостом можно пройти, с моста — спрыгнуть через разрыв в перилах.
 import { builder, type GameMap, type Ladder, type SpawnPoint } from './types.js';
-import { addGroundAndSewer } from './sewer.js';
+import { addGround } from './ground.js';
 
 const HALF = { x: 14, z: 18 };
 const WALL_H = 6;
@@ -54,8 +54,8 @@ const S = Math.PI; // взгляд на юг (+z)
 const green: SpawnPoint[] = [[-11, 15.5, 0], [-8, 15.5, 0], [0, 15.5, 0], [3, 15.5, 0], [10, 15.5, 0], [12.5, 15.5, 0]];
 const red: SpawnPoint[] = green.map(([x, z]) => [-x, -z, S]);
 
-// Канализация: под мостом, с севера на юг
-const { lamps } = addGroundAndSewer(boxes, ladders, HALF, { axis: 'z', from: -9, to: 9, at: 0 }, '#7d8187', '#4d5157');
+// Земля под всей ареной
+addGround(boxes, HALF, '#7d8187');
 
 export const DEPOT: GameMap = {
   id: 'depot',
@@ -65,7 +65,6 @@ export const DEPOT: GameMap = {
   sky: '#cfd8e3',
   boxes,
   ladders,
-  lamps,
   // Ящик падает с неба: на мост или в одну из двух симметричных точек у контейнеров
   crateDrops: [[0, DECK, 0], [-8, 0, 8.5], [8, 0, -8.5]],
   medkitDrops: [[0, 0, 6], [0, 0, -6], [-11, 0, 3], [11, 0, -3]],
