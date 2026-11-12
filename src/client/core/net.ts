@@ -24,7 +24,7 @@ import { feedNote, flashDamage, onChat, showHit, toast, updateHud } from '../ui/
 import { onNewMap, onVote } from '../ui/match.js';
 import { unlock } from './input.js';
 import { onLobby } from '../ui/menu.js';
-import { pauseView, renderProfileTile } from '../ui/pause.js';
+import { enterGame, leaveGame, renderHome, view } from '../ui/shell.js';
 import { onProfile, showPromotion } from '../ui/ranks.js';
 import { onGrenades } from '../weapons/grenade.js';
 import { onBlind, onFlash, onMines } from '../weapons/mines.js';
@@ -44,7 +44,7 @@ export const playBtn = $<HTMLButtonElement>('play');
 
 function onPlayers(m: PlayersMsg): void {
   state.mode = m.mode; state.limit = m.limit; state.scores = m.scores; state.roster = m.list;
-  if (pauseView === 'home' && !$('pause').classList.contains('hidden')) renderProfileTile();
+  if (view === 'home' && !$('menu').classList.contains('hidden')) renderHome();
   if (m.left > 0) state.matchEndsAt = performance.now() + m.left;
   const seen = new Set<number>();
   for (const p of state.roster) {
@@ -97,6 +97,8 @@ function onSpawn(m: SpawnMsg): void {
     if (me.ammo.rocket === 0 && me.weapon === 'rocket') setWeapon('pistol');
     me.reloadUntil = 0;
     state.low = false;
+    state.crouch = false;
+    state.stance = 0;
     state.slideUntil = 0;
     if (!state.roundOver) $('center-msg').textContent = '';
     updateHud();
@@ -111,10 +113,11 @@ function onSpawn(m: SpawnMsg): void {
 }
 
 function onSnap(m: SnapMsg): void {
-  for (const [id, x, y, z, yaw, pitch, w, sl, air, rl] of m.ps) {
+  for (const [id, x, y, z, yaw, pitch, w, sl, air, rl, cr] of m.ps) {
     const r = remotes.get(id);
     if (!r) continue;
     r.slide = sl === 1;
+    r.crouch = cr === 1;
     r.air = air === 1;
     r.reloading = rl === 1;
     r.target.set(x, y, z);
@@ -215,9 +218,7 @@ export function initNet(): void {
     playBtn.disabled = true;
     if (state.joined) {
       unlock();
-      $('hud').classList.add('hidden');
-      $('pause').classList.add('hidden');
-      $('menu').classList.remove('hidden');
+      leaveGame();
     }
   });
   ws.addEventListener('message', (e: MessageEvent<string>) => {
@@ -231,11 +232,8 @@ export function initNet(): void {
         state.mode = m.mode;
         loadMap(m.map);
         applyFog();
-        state.joined = true;
         setWeapon(settings.kit[0]!);
-        $('menu').classList.add('hidden');
-        $('hud').classList.remove('hidden');
-        $('pause').classList.remove('hidden');
+        enterGame(); // сразу в бой, без паузы
         break;
       case 'players': onPlayers(m); break;
       case 'spawn': onSpawn(m); break;

@@ -1,7 +1,7 @@
 // Снаряды: гранаты, метательные ножи и ракеты — полёт, попадания, взрывы.
 import type { Vec3 } from '../../shared/protocol.js';
 import { bodyPoints, clipWalls, FLASH, GRENADE, isThrown, stepSticky, GUNSHIP, lineOfSight, MAPS, playerBox, rayBox, rayWorld, ROCKET, stepGrenade, THROW, WEAPONS } from '../../shared/map.js';
-import { distToPlayer, eyeOf, hurt, isEnemy, killPlayer, scaleOf } from './combat.js';
+import { distToPlayer, eyeOf, hurt, isEnemy, killPlayer, scaleOf, lowOf } from './combat.js';
 import { checkWin } from './match.js';
 import { placeMine } from './mines.js';
 import { broadcast, broadcastPlayers, isVec3, send } from './net.js';
@@ -56,7 +56,7 @@ export function explodeGrenade(room: Room, ownerId: number, at: Vec3, id: number
     if (!v.alive || (v !== owner && !isEnemy(room, owner, v))) continue;
     const d = distToPlayer(v, at);
     if (d > GRENADE.maxR) continue;
-    if (bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt))) continue;
+    if (bodyPoints(v.pos, lowOf(v), scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt))) continue;
     if (d <= GRENADE.killR) killPlayer(room, owner, v, 'grenade');
     else hurt(room, owner, v, GRENADE.maxDmg * (1 - (d - GRENADE.killR) / (GRENADE.maxR - GRENADE.killR)), 'grenade', false);
   }
@@ -75,7 +75,7 @@ export function flashBang(room: Room, at: Vec3): void {
   const from: Vec3 = [at[0], at[1] + 0.2, at[2]];
   for (const v of room.players.values()) {
     if (!v.alive || distToPlayer(v, at) > FLASH.radius) continue;
-    if (bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt))) continue;
+    if (bodyPoints(v.pos, lowOf(v), scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt))) continue;
     send(v.ws, { t: 'blind', ms: FLASH.ms });
   }
 }
@@ -143,7 +143,7 @@ export function stepKnives(room: Room, dt: number): void {
     for (const v of room.players.values()) {
       if (!v.alive || !isEnemy(room, owner, v)) continue;
       // Хитбокс для ножа чуть шире, чтобы бросок «впритирку» по краю засчитывался
-      const [min, max] = playerBox(v.pos, v.yaw, v.slide, scaleOf(v));
+      const [min, max] = playerBox(v.pos, v.yaw, lowOf(v), scaleOf(v));
       const pad = THROW.pad;
       const tv = rayBox(k.pos, dir, [min[0] - pad, min[1] - pad, min[2] - pad], [max[0] + pad, max[1] + pad, max[2] + pad]);
       if (tv < t) { t = tv; victim = v; }
@@ -193,7 +193,7 @@ export function explode(room: Room, r: Rocket, at: Vec3): void {
     if (!v.alive || (v !== owner && !isEnemy(room, owner, v)) || (r.fromGunship && v === owner)) continue;
     // Расстояние от взрыва до ближайшей точки игрока
     if (distToPlayer(v, at) > (r.fromGunship ? GUNSHIP.rocketRadius : ROCKET.radius)) continue;
-    const covered = bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt));
+    const covered = bodyPoints(v.pos, lowOf(v), scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt));
     if (covered) continue; // за стеной взрыв не достаёт
     killPlayer(room, owner, v, r.fromGunship ? 'gunship' : 'rocket');
     killed = true;
@@ -216,7 +216,7 @@ export function stepRockets(room: Room, dt: number): void {
     let t = rayWorld(walls, r.pos, r.dir, step);
     for (const v of room.players.values()) {
       if (!v.alive || !isEnemy(room, owner, v)) continue;
-      const [min, max] = playerBox(v.pos, v.yaw, v.slide, scaleOf(v));
+      const [min, max] = playerBox(v.pos, v.yaw, lowOf(v), scaleOf(v));
       t = Math.min(t, rayBox(r.pos, r.dir, min, max));
     }
     // Ракета из ракетницы может попасть в чужой самолёт

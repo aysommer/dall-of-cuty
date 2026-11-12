@@ -1,7 +1,7 @@
 // Награды за серию убийств: БПЛА, ракета с неба, самолёт, бомба.
 import { bodyPoints, GUNSHIP, gunshipPos, lineOfSight, MAPS, STREAK, type StreakKind } from '../../shared/map.js';
 import type { ServerMsg, Vec3 } from '../../shared/protocol.js';
-import { blast, hurt, isEnemy, killPlayer, scaleOf } from './combat.js';
+import { blast, hurt, isEnemy, killPlayer, scaleOf, lowOf } from './combat.js';
 import { checkWin } from './match.js';
 import { broadcast, broadcastPlayers, isVec3, send } from './net.js';
 import { setRockets } from './pickups.js';
@@ -148,7 +148,7 @@ export function gunshipFire(room: Room, p: Player, msg: Incoming): void {
   for (const idStr of Object.keys(msg.hits)) {
     const v = room.players.get(Number(idStr));
     if (!v || !v.alive || budget <= 0 || !isEnemy(room, p, v)) continue;
-    if (bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt))) continue;
+    if (bodyPoints(v.pos, lowOf(v), scaleOf(v)).every((pt) => !lineOfSight(walls, from, pt))) continue;
     budget--;
     hurt(room, p, v, GUNSHIP.gunDmg, 'gunship', false);
   }

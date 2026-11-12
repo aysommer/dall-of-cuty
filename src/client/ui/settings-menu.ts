@@ -35,6 +35,8 @@ function buildSettings(root: HTMLElement): void {
       (v) => `${Math.round(v * 100)}%`),
     slider('Чувствительность мыши', 0.2, 3, 0.05, () => settings.sens, (v) => { settings.sens = v; },
       (v) => `×${v.toFixed(2)}`),
+    slider('Угол обзора (FOV)', 70, 100, 1, () => settings.fov, (v) => { settings.fov = v; },
+      (v) => `${v}°`),
   );
   const row = document.createElement('div');
   row.className = 'setting';

@@ -7,7 +7,7 @@ import { sendMsg } from '../core/net.js';
 import { box, camera, canvas, scene } from '../core/scene.js';
 import { me, remotes, state } from '../core/state.js';
 import { $ } from '../core/util.js';
-import { scaleOfRemote } from '../render/players.js';
+import { scaleOfRemote, lowOfRemote } from '../render/players.js';
 import { feedNote } from '../ui/hud.js';
 import { solids } from '../world/map.js';
 
@@ -48,7 +48,7 @@ export function updateMissile(now: number, dt: number): void {
   let t = rayWorld(solids, from, d, step);
   for (const r of remotes.values()) {
     if (!r.info.alive) continue;
-    const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, r.slide, scaleOfRemote(r));
+    const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, lowOfRemote(r), scaleOfRemote(r));
     t = Math.min(t, rayBox(from, d, min, max));
   }
   const expired = now - m.born > STREAK.missileMaxMs - 500;

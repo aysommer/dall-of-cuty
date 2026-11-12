@@ -1,11 +1,11 @@
 // Звание и уровень: прогресс с сервера, окно звания, всплывающее «Вас повысили».
 import type { ProfileMsg, WeaponId } from '../../shared/protocol.js';
 import { killsForRank, levelOf, rankProgress, RANKS, UNLOCK_LEVEL } from '../../shared/ranks.js';
-import { GEAR, isGear, WEAPONS } from '../../shared/map.js';
+import { GEAR, GEAR_ORDER, GUNS, isGear, WEAPONS } from '../../shared/map.js';
 import { TOKEN_KEY } from '../core/settings.js';
 import { $, textEl } from '../core/util.js';
 import { enforceUnlocks } from './classes.js';
-import { renderProfileTile } from './pause.js';
+import { renderHome } from './shell.js';
 
 export function onProfile(m: ProfileMsg): void {
   knownKills = m.kills;
@@ -15,8 +15,8 @@ export function onProfile(m: ProfileMsg): void {
     localStorage.setItem(KILLS_KEY, String(m.kills));
     localStorage.setItem(DEATHS_KEY, String(m.deaths));
   } catch { /* хранилище недоступно */ }
-  renderRankCards();
-  renderProfileTile();
+  renderHome();
+  renderProgress();
   enforceUnlocks();
 }
 
@@ -68,54 +68,61 @@ export function rankRing(level: number, abbr: string, part: number): HTMLElement
   return wrap;
 }
 
-/** Окно звания в настройках: кольцо прогресса, сколько убийств до повышения и таблица всех званий. */
-function renderRankCards(): void {
-  const pr = rankProgress(knownKills);
-  const r = RANKS[pr.rank]!;
-  const next = RANKS[pr.rank + 1];
-  for (const card of document.querySelectorAll<HTMLElement>('.rank-card')) {
-    const open = card.querySelector('details')?.open ?? false;
-    card.textContent = '';
-    const info = document.createElement('div');
-    info.className = 'rank-info';
-    info.append(
-      textEl('span', r.name, 'rank-name'),
-      textEl('small', `Уровень ${pr.level} из ${RANKS.length} · убийств за всё время: ${knownKills}`),
-    );
-    if (next) {
-      const bar = document.createElement('div');
-      bar.className = 'rank-next';
-      bar.append(
-        textEl('span', `${pr.done} / ${pr.need}`, 'cnt'),
-        textEl('small', ` до «${next.name}» — ещё ${killsWord(pr.need - pr.done)}`),
-      );
-      info.append(bar);
-    } else info.append(textEl('small', 'Высшее звание — дальше некуда 🎖'));
-    // Таблица: уровень, звание, сколько убийств всего нужно и сколько — с предыдущего уровня
-    const all = document.createElement('details');
-    all.open = open;
-    const sum = document.createElement('summary');
-    sum.textContent = 'Все звания';
-    const table = document.createElement('table');
-    const head = table.insertRow();
-    for (const t of ['Ур.', 'Звание', 'Убийств', '+']) {
-      const th = document.createElement('th');
-      th.textContent = t;
-      head.append(th);
-    }
-    RANKS.forEach((rk, i) => {
-      const row = table.insertRow();
-      if (i === pr.rank) row.className = 'now';
-      else if (i < pr.rank) row.className = 'done';
-      row.insertCell().textContent = String(levelOf(i));
-      row.insertCell().textContent = `${rk.abbr} · ${rk.name}`;
-      row.insertCell().textContent = String(killsForRank(i));
-      row.insertCell().textContent = i ? `+${killsForRank(i) - killsForRank(i - 1)}` : '—';
-    });
-    all.append(sum, table);
-    info.append(all);
-    card.append(rankRing(pr.level, r.abbr, pr.part), info);
+/** Доступно сразу, с первого уровня: всё, чего нет в списке открытий */
+const FIRST_LEVEL = [
+  ...GUNS.filter((w) => !(w in UNLOCK_LEVEL)).map((w) => WEAPONS[w].name),
+  ...GEAR_ORDER.filter((g) => !(g in UNLOCK_LEVEL)).map((g) => `${GEAR[g].icon} ${GEAR[g].name}`),
+];
+
+/** Что открывается на каком уровне: оружие и устройства по порядку уровней. */
+function unlocksByLevel(): Array<{ level: number; items: string[] }> {
+  const levels = new Map<number, string[]>();
+  for (const [id, lv] of Object.entries(UNLOCK_LEVEL)) {
+    const title = isGear(id) ? `${GEAR[id].icon} ${GEAR[id].name}` : WEAPONS[id as WeaponId].name;
+    levels.set(lv, [...(levels.get(lv) ?? []), title]);
   }
+  return [...levels].sort((a, b) => a[0] - b[0]).map(([level, items]) => ({ level, items }));
+}
+
+/**
+ * Прогресс: горизонтальная шкала уровней, под отметками — что на них открывается.
+ * Шкала заполнена до текущего уровня и дальше — на долю пути к следующему. Названий будущих званий здесь нет.
+ */
+export function renderProgress(): void {
+  const root = $('progress');
+  root.textContent = '';
+  const pr = rankProgress(knownKills);
+  const steps = unlocksByLevel();
+  const last = Math.max(...steps.map((s) => s.level), pr.level + (pr.need ? 1 : 0));
+  // Отметки шкалы: все уровни от первого до последнего с открытиями (или до следующего после текущего)
+  const fill = last > 1 ? Math.min(1, (pr.level - 1 + pr.part) / (last - 1)) : 1;
+  const next = steps.find((s) => s.level > pr.level);
+  root.append(textEl('span', `Уровень ${pr.level}`, 'prog-now'),
+    textEl('small', next
+      ? `На уровне ${next.level} откроется: ${next.items.join(', ')}. До следующего уровня — ${pr.need - pr.done} из ${pr.need} убийств.`
+      : pr.need ? `Всё оружие и снаряжение открыто. До следующего уровня — ${pr.need - pr.done} из ${pr.need} убийств.`
+        : 'Всё открыто, уровень высший.'));
+  const line = document.createElement('div');
+  line.className = 'timeline';
+  const bar = document.createElement('div');
+  bar.className = 'timeline-bar';
+  const done = document.createElement('i');
+  done.style.width = `${fill * 100}%`;
+  bar.append(done);
+  line.append(bar);
+  for (let lv = 1; lv <= last; lv++) {
+    const node = document.createElement('div');
+    node.className = 'node' + (lv <= pr.level ? ' done' : '') + (lv === pr.level ? ' now' : '');
+    node.style.left = `${last > 1 ? ((lv - 1) / (last - 1)) * 100 : 0}%`;
+    node.append(textEl('span', String(lv), 'dot'));
+    const items = steps.find((s) => s.level === lv)?.items ?? (lv === 1 ? FIRST_LEVEL : []);
+    const list = document.createElement('div');
+    list.className = 'items';
+    for (const it of items) list.append(textEl('span', (lv <= pr.level ? '✓ ' : '🔒 ') + it, 'chip'));
+    node.append(list);
+    line.append(node);
+  }
+  root.append(line);
 }
 
 let promoTimer = 0;
@@ -147,5 +154,5 @@ export function showPromotion(rank: number): void {
 
 /** Запуск модуля: подписки на события и начальная отрисовка (вызывается из main.ts). */
 export function initRanks(): void {
-  renderRankCards();
+  renderProgress();
 }

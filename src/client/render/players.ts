@@ -1,7 +1,7 @@
 // Чужие игроки: человекоподобная модель (или прямоугольник, пока она грузится), оружие в руках,
 // шлем Джаггернаута, бронежилет и корона лидера.
 import * as THREE from 'three';
-import { PLAYER, STREAK } from '../../shared/map.js';
+import { type Low, PLAYER, STREAK } from '../../shared/map.js';
 import type { PlayerInfo, WeaponId } from '../../shared/protocol.js';
 import { box, scene } from '../core/scene.js';
 import { state } from '../core/state.js';
@@ -11,6 +11,9 @@ import { buildGun, type Gun, nameSprite } from './models.js';
 
 /** Высота центра головы модели над землёй, м */
 const HEAD_Y = 1.66;
+/** Высота оружия у плеча и насколько опускается таз в приседе, м */
+const HAND_Y = 1.38;
+export const CROUCH_DROP = 0.45;
 
 /**
  * Шлем Джаггернаута: округлый стальной купол с назатыльником и козырьком.
@@ -104,8 +107,11 @@ export interface Remote {
   char: Character | null;
   body: THREE.Mesh;
   slide: boolean;
+  /** Присел */
+  crouch: boolean;
   /** 0 — стоит, 1 — лежит */
   poseK: number;
+  crouchK: number;
   labelY: number;
   crown: THREE.Group;
   /** Бронежилет на прямоугольнике (пока нет модели); у модели жилет свой — чёрное утолщённое туловище */
@@ -139,7 +145,7 @@ function remoteGun(w: WeaponId): Gun {
 }
 
 /** Где на оружии руки (в координатах оружия): правая на рукояти, левая на цевье; null — рука свободна. */
-function grips(w: WeaponId): { right: THREE.Vector3; left: THREE.Vector3 | null } {
+export function grips(w: WeaponId): { right: THREE.Vector3; left: THREE.Vector3 | null } {
   if (w === 'knife' || w === 'grenade') return { right: new THREE.Vector3(0, -0.04, 0), left: null };
   if (w === 'pistol') return { right: new THREE.Vector3(0, -0.1, -0.02), left: new THREE.Vector3(-0.03, -0.12, -0.03) };
   if (w === 'rocket') return { right: new THREE.Vector3(0, -0.1, -0.05), left: new THREE.Vector3(0, -0.08, -0.4) };
@@ -156,7 +162,7 @@ export function buildPlayer(info: PlayerInfo): Remote {
   pose.add(body);
   // Оружие — у правого плеча, стволом вперёд; руки модели тянутся к нему сами
   const hand = new THREE.Group();
-  hand.position.set(0.15, 1.38, -0.24);
+  hand.position.set(0.15, HAND_Y, -0.24);
   pose.add(hand);
   const label = nameSprite(info.name, info.team);
   label.position.y = PLAYER.h + 0.35;
@@ -175,7 +181,7 @@ export function buildPlayer(info: PlayerInfo): Remote {
   const gun = remoteGun('pistol');
   hand.add(gun.group);
   const r: Remote = {
-    info, g, pose, char: null, body, slide: false, poseK: 0, labelY: PLAYER.h + 0.35, crown, armor, helmet, label, hand, gun, w: 'pistol',
+    info, g, pose, char: null, body, slide: false, crouch: false, poseK: 0, crouchK: 0, labelY: PLAYER.h + 0.35, crown, armor, helmet, label, hand, gun, w: 'pistol',
     stepAcc: 0, lastPos: new THREE.Vector3(),
     pos: new THREE.Vector3(), target: new THREE.Vector3(), vel: new THREE.Vector3(),
     yaw: 0, targetYaw: 0, pitch: 0, air: false, reloading: false, flashUntil: 0,
@@ -234,6 +240,9 @@ export function setRemoteWeapon(r: Remote, w: WeaponId): void {
   r.w = w;
 }
 
+/** Насколько игрок низкий — для хитбокса: лежит, присел или стоит */
+export const lowOfRemote = (r: Remote): Low => r.slide ? true : r.crouch ? 'crouch' : false;
+
 export function scaleOfRemote(r: Remote): number {
   return r.info.big ? STREAK.bigScale : 1;
 }
@@ -254,6 +263,9 @@ export function updateRemote(r: Remote, dt: number, now: number, k: number): voi
   r.g.position.copy(r.pos);
   r.g.rotation.y = r.yaw;
   r.hand.rotation.x = r.pitch;
+  // В приседе оружие опускается вместе с плечами
+  r.crouchK += ((r.crouch && !r.slide ? 1 : 0) - r.crouchK) * Math.min(1, dt * 12);
+  r.hand.position.y = HAND_Y - CROUCH_DROP * r.crouchK;
   r.gun.flash.visible = now < r.flashUntil;
   // Подкат: тело ложится вдоль взгляда и встаёт обратно
   r.poseK += ((r.slide ? 1 : 0) - r.poseK) * Math.min(1, dt * 12);
@@ -269,7 +281,7 @@ export function updateRemote(r: Remote, dt: number, now: number, k: number): voi
   // Вперёд или назад идёт игрок относительно взгляда (взгляд — на (−sin yaw, −cos yaw))
   const forward = speed > 0.2 ? (-Math.sin(r.yaw) * r.vel.x - Math.cos(r.yaw) * r.vel.z) / speed : 1;
   updateCharacter(r.char, dt, {
-    speed: r.slide ? 0 : speed, forward, air: r.air && !r.slide, reloading: r.reloading,
+    speed: r.slide ? 0 : speed, forward, air: r.air && !r.slide, reloading: r.reloading, crouch: r.crouch && !r.slide,
     rightHand: r.gun.group.localToWorld(_rh.copy(grip.right)),
     leftHand: grip.left ? r.gun.group.localToWorld(_lh.copy(grip.left)) : null,
     pitch: r.pitch,

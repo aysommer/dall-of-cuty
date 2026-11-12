@@ -1,13 +1,13 @@
 // Классы — шаблоны снаряжения: стволы, нож или граната; выбор и правка в меню Esc.
 import type { MeleeKind, WeaponId } from '../../shared/protocol.js';
-import { fitGear, fitKit, GEAR, GEAR_ORDER, GUNS, isGear, isKit, KIT_SIZE, WEAPONS } from '../../shared/map.js';
+import { fitGear, fitKit, GEAR, GEAR_ORDER, GUN_TYPES, GUNS, isGear, isKit, KIT_SIZE, WEAPONS } from '../../shared/map.js';
 import { isUnlocked, UNLOCK_LEVEL, unlockLevel } from '../../shared/ranks.js';
 import { sendMsg } from '../core/net.js';
 import { settings } from '../core/settings.js';
 import { me } from '../core/state.js';
 import { $, textEl } from '../core/util.js';
 import { toast, updateHud } from './hud.js';
-import { pauseView, renderProfileTile } from './pause.js';
+import { renderHome, view } from './shell.js';
 import { knownKills } from './ranks.js';
 import { applySettings } from './settings-menu.js';
 import { setWeapon } from '../weapons/viewmodel.js';
@@ -79,18 +79,26 @@ function setKit(kit: WeaponId[]): void {
 function renderKit(): void {
   for (const root of document.querySelectorAll<HTMLElement>('.kit')) {
     if (!root.childElementCount) {
-      for (const w of GUNS) {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.dataset.w = w;
-        b.textContent = WEAPONS[w].name;
-        b.addEventListener('click', () => {
-          const kit = settings.kit.filter((k) => k !== w);
-          if (kit.length === settings.kit.length) kit.push(w);   // добавить
-          if (kit.length > KIT_SIZE) kit.shift();                 // вытеснить самый старый
-          if (kit.length) setKit(kit);
-        });
-        root.append(b);
+      // Стволы разложены по типам: пистолеты, пистолеты-пулемёты, дробовики, автоматы, пулемёты, снайперские винтовки
+      for (const type of GUN_TYPES) {
+        const group = document.createElement('div');
+        group.className = 'gun-type';
+        const row = document.createElement('div');
+        row.className = 'choice';
+        for (const w of GUNS.filter((g) => WEAPONS[g].type === type.id)) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.dataset.w = w;
+          b.addEventListener('click', () => {
+            const kit = settings.kit.filter((k) => k !== w);
+            if (kit.length === settings.kit.length) kit.push(w);   // добавить
+            if (kit.length > KIT_SIZE) kit.shift();                 // вытеснить самый старый
+            if (kit.length) setKit(kit);
+          });
+          row.append(b);
+        }
+        group.append(textEl('small', type.name), row);
+        root.append(group);
       }
     }
     for (const b of root.querySelectorAll<HTMLButtonElement>('button')) {
@@ -145,7 +153,7 @@ function saveActiveClass(): void {
   c.kit = [...settings.kit];
   c.melee = settings.melee;
   storeClasses();
-  if (pauseView === 'classes') renderClasses();
+  if (view === 'classes') renderClasses();
 }
 
 function selectClass(i: number): void {
@@ -194,7 +202,7 @@ export function renderClasses(): void {
   const del = $<HTMLButtonElement>('class-delete');
   del.disabled = classes.list.length <= 1;
   del.title = del.disabled ? 'Последний класс удалить нельзя' : '';
-  $('tile-class').textContent = c.name;
+  $('nav-class-name').textContent = c.name;
 }
 
 /** Запуск модуля: подписки на события и начальная отрисовка (вызывается из main.ts). */
@@ -228,5 +236,5 @@ export function initClasses(): void {
     selectClass(Math.min(classes.active, classes.list.length - 1));
   });
   renderClasses();
-  renderProfileTile();
+  renderHome();
 }

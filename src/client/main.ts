@@ -10,7 +10,7 @@ import { initTouch } from './core/touch.js';
 import { initSettingsMenu } from './ui/settings-menu.js';
 import { initRanks } from './ui/ranks.js';
 import { initClasses } from './ui/classes.js';
-import { initPause } from './ui/pause.js';
+import { initShell } from './ui/shell.js';
 import { initLoop } from './loop.js';
 
 initScene();
@@ -23,5 +23,5 @@ initTouch();
 initSettingsMenu();
 initRanks();
 initClasses();
-initPause();
+initShell();
 initLoop();

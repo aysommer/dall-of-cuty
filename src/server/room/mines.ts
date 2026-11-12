@@ -1,7 +1,7 @@
 // Мины и растяжки: ставятся под ноги, срабатывают от врага и взрываются через секунду.
 import { bodyPoints, lineOfSight, MINE, playerBox, rayBox, rayWorld } from '../../shared/map.js';
 import type { ServerMsg, Vec3 } from '../../shared/protocol.js';
-import { distToPlayer, hurt, isEnemy, killPlayer, scaleOf } from './combat.js';
+import { distToPlayer, hurt, isEnemy, killPlayer, scaleOf, lowOf } from './combat.js';
 import { checkWin } from './match.js';
 import { broadcast, broadcastPlayers } from './net.js';
 import type { Mine, Player, Room } from './state.js';
@@ -46,7 +46,7 @@ function touchesWire(v: Player, from: Vec3, to: Vec3): boolean {
   const d: Vec3 = [to[0] - from[0], to[1] - from[1], to[2] - from[2]];
   const len = Math.hypot(d[0], d[1], d[2]);
   if (len < 1e-6) return false;
-  const [min, max] = playerBox(v.pos, v.yaw, v.slide, scaleOf(v));
+  const [min, max] = playerBox(v.pos, v.yaw, lowOf(v), scaleOf(v));
   return rayBox(from, [d[0] / len, d[1] / len, d[2] / len], min, max) <= len;
 }
 
@@ -65,7 +65,7 @@ function explodeMine(room: Room, m: Mine): void {
     if (!v.alive || (v !== owner && !isEnemy(room, owner, v))) continue;
     const d = distToPlayer(v, at);
     if (d > MINE.hurtR) continue;
-    if (bodyPoints(v.pos, v.slide, scaleOf(v)).every((pt) => !lineOfSight(walls, at, pt))) continue;
+    if (bodyPoints(v.pos, lowOf(v), scaleOf(v)).every((pt) => !lineOfSight(walls, at, pt))) continue;
     if (d <= MINE.killR) killPlayer(room, owner, v, 'mine');
     else hurt(room, owner, v, MINE.dmg, 'mine', false);
   }

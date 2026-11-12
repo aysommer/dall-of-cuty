@@ -1,6 +1,6 @@
 // Стрельба: выстрелы, разброс, попадания, перезарядка, нож.
 import * as THREE from 'three';
-import { HEAD, HIP_SPREAD, playerBox, rayBox, rayWorld, WEAPONS } from '../../shared/map.js';
+import { headFrom, hipSpread, playerBox, rayBox, rayWorld, WEAPONS } from '../../shared/map.js';
 import type { Vec3, WeaponId } from '../../shared/protocol.js';
 import { beep, shotSound } from '../core/audio.js';
 import { sendMsg } from '../core/net.js';
@@ -8,7 +8,7 @@ import { camera } from '../core/scene.js';
 import { me, remotes, state } from '../core/state.js';
 import { addTracer } from '../fx/tracers.js';
 import { openingUntil } from '../pickups/crate.js';
-import { type Remote, scaleOfRemote } from '../render/players.js';
+import { type Remote, scaleOfRemote, lowOfRemote } from '../render/players.js';
 import { gunner } from '../streaks/gunship.js';
 import { missileCtl } from '../streaks/missile.js';
 import { showHit, toast, updateHud } from '../ui/hud.js';
@@ -47,7 +47,8 @@ function fire(now: number): void {
   let anyHead = false;
   let anyHit = false;
   // В прицеле — малый разброс (вес пули), от бедра — в HIP_SPREAD раз больше
-  const spread = w.spread * (HIP_SPREAD - (HIP_SPREAD - 1) * state.adsK);
+  const hip = hipSpread(w);
+  const spread = w.spread * (hip - (hip - 1) * state.adsK);
   for (let i = 0; i < w.pellets; i++) {
     const a = Math.random() * Math.PI * 2, rad = Math.sqrt(Math.random()) * spread;
     const d = _dir.clone().addScaledVector(_right, Math.cos(a) * rad).addScaledVector(_up, Math.sin(a) * rad).normalize();
@@ -58,7 +59,7 @@ function fire(now: number): void {
     for (const [id, r] of remotes) {
       if (!r.info.alive) continue;
       if (state.mode === 'tdm' && r.info.team === me.team) continue;
-      const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, r.slide, scaleOfRemote(r));
+      const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, lowOfRemote(r), scaleOfRemote(r));
       const tp = rayBox(eye, dv, min, max);
       if (tp < t) { t = tp; victim = id; victimR = r; }
     }
@@ -71,7 +72,8 @@ function fire(now: number): void {
     }
     if (victim !== null && victimR) {
       // Голова — верх стоящего прямоугольника; в подкате головы как зоны нет
-      const head = !victimR.slide && eye[1] + dv[1] * t - victimR.pos.y >= HEAD.from * scaleOfRemote(victimR);
+      const from = headFrom(lowOfRemote(victimR));
+      const head = from !== null && eye[1] + dv[1] * t - victimR.pos.y >= from * scaleOfRemote(victimR);
       const h = (hits[victim] ??= [0, 0]);
       h[head ? 1 : 0]++;
       anyHit = true;
@@ -114,7 +116,7 @@ function stab(now: number): void {
   let victim: number | null = null, best = Infinity;
   for (const [id, r] of remotes) {
     if (!r.info.alive || (state.mode === 'tdm' && r.info.team === me.team)) continue;
-    const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, r.slide, scaleOfRemote(r));
+    const [min, max] = playerBox([r.pos.x, r.pos.y, r.pos.z], r.yaw, lowOfRemote(r), scaleOfRemote(r));
     const near = ([0, 1, 2] as const).map((i) => Math.max(min[i]!, Math.min(eye[i], max[i]!)));
     const dist = Math.hypot(near[0]! - eye[0], near[1]! - eye[1], near[2]! - eye[2]);
     if (dist > reach || dist >= best) continue;

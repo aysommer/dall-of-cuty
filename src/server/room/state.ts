@@ -20,8 +20,10 @@ export interface Player {
   yaw: number;
   pitch: number;
   w: WeaponId;
-  /** Лежит ли в подкате (меняет хитбокс) */
+  /** Лежит: подкат или лёжа (меняет хитбокс) */
   slide: boolean;
+  /** Присел (хитбокс ниже) */
+  crouch: boolean;
   /** В воздухе и перезаряжается — только для анимации у других игроков */
   air: boolean;
   reloading: boolean;
