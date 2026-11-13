@@ -19,8 +19,8 @@ import { gunner, gunshipFx, onGunship, onGunshipEnd } from '../streaks/gunship.j
 import { endMissile, onMissile, startMissile } from '../streaks/missile.js';
 import { onNuke } from '../streaks/nuke.js';
 import { onPing } from '../streaks/uav.js';
-import { onLoadout } from '../ui/hotbar.js';
-import { feedNote, flashDamage, onChat, showHit, toast, updateHud } from '../ui/hud.js';
+import { onLoadout, weaponSlots } from '../ui/hotbar.js';
+import { feedNote, flashDamage, onChat, renderScoreboard, showHit, toast, updateHud } from '../ui/hud.js';
 import { onNewMap, onVote } from '../ui/match.js';
 import { unlock } from './input.js';
 import { onLobby } from '../ui/menu.js';
@@ -298,6 +298,13 @@ export function initNet(): void {
         toast('📡 БПЛА в воздухе: противники видны на карте');
         break;
       case 'ping': onPing(m); break;
+      case 'lat': {
+        // Замер задержки: сразу вернуть метку; пинг всех игроков — для таблицы счёта
+        sendMsg({ t: 'pong', at: m.at });
+        state.pings = new Map(m.list);
+        if (!$('scoreboard').classList.contains('hidden')) renderScoreboard();
+        break;
+      }
       case 'missile-go': startMissile(m.id, m.p); break;
       case 'missile': onMissile(m); break;
       case 'nuke': onNuke(m); break;
@@ -320,10 +327,9 @@ export function initNet(): void {
       case 'newmap': onNewMap(m.map); break;
       case 'reward': toast(`📦 В ящике: ${REWARD_NAMES[m.kind]}`); beep(1200, 0.3, 0.12); break;
       case 'rockets': {
-        const had = me.ammo.rocket;
         me.ammo.rocket = m.n;
-        if (m.n > 0 && had === 0) { setWeapon('rocket'); beep(990, 0.3); }
-        if (m.n === 0 && me.weapon === 'rocket') setWeapon(settings.kit[0]!);
+        // Ракетница — снаряжение на G: в руки сама не прыгает; кончились ракеты — в руках снова ствол
+        if (m.n === 0 && me.weapon === 'rocket') setWeapon(weaponSlots()[1] ?? weaponSlots()[0] ?? 'pistol');
         updateHud();
         break;
       }

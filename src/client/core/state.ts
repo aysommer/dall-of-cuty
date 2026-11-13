@@ -19,6 +19,8 @@ export const state = {
   limit: 20,
   scores: { green: 0, red: 0 } as Record<Team, number>,
   roster: [] as PlayerInfo[],
+  /** Пинг игроков (id → мс), приходит с сервера раз в 2 с */
+  pings: new Map<number, number>(),
   mouseDown: false,
   firedThisPress: false,
   locked: false,

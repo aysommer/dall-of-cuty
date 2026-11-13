@@ -99,10 +99,9 @@ export function setAim(on: boolean): void {
   else state.aimHeld = true;
 }
 
-/** Следующий или предыдущий ствол по кругу (колесо мыши, Q): пистолет, основной, ракетница, если есть ракеты. */
+/** Следующий или предыдущий ствол по кругу (колесо мыши, Q): пистолет и основной (ракетница — на G). */
 export function cycleWeapon(dir: 1 | -1): void {
-  const order = ([...weaponSlots(), 'rocket'] as Array<WeaponId | null>)
-    .filter((w): w is WeaponId => !!w && (w !== 'rocket' || me.ammo.rocket > 0));
+  const order = (weaponSlots() as Array<WeaponId | null>).filter((w): w is WeaponId => !!w);
   if (!order.length || me.weapon === 'grenade') return;
   const i = order.indexOf(me.weapon);
   const n = order.length;
@@ -115,6 +114,7 @@ export function pressKey(code: string, repeat = false): void {
   keys[code] = true;
   // 1 — пистолет, 2 — основной ствол, Q — сменить ствол, 5 — награда, G — снаряжение (нож, граната, мина…)
   if (!repeat && me.weapon !== 'grenade') {
+    // С ракетницей в руках 1, 2 и Q тоже работают: убирают её и дают ствол
     if (code === 'Digit1') useWeaponSlot(0);
     if (code === 'Digit2') useWeaponSlot(1);
     if (code === 'KeyQ') cycleWeapon(1);

@@ -173,6 +173,36 @@ console.log('Снаряжение и уровни (WebSocket)');
     check('световая не наносит урона', hpOf(a, 'Хозяин') === 100);
     await done(a, b);
   }
+  // Ракетница (уровень 6, на G): 2 ракеты на жизнь, на 5-м уровне закрыта
+  {
+    const [a5, b5] = await pair(140, 'launcher');
+    check('уровень 5: ракетница закрыта — нож', last(a5, 'loadout')?.gear === 'knife');
+    await done(a5, b5);
+    const [a, b] = await pair(200, 'launcher');
+    check('уровень 6: ракетница открыта, 2 заряда', last(a, 'loadout')?.gear === 'launcher' && last(a, 'rockets')?.n === 2);
+    state(a, [0, 0, 10]); state(b, [20, 0, -20]); await wait(120);
+    // Между выстрелами — не чаще скорострельности ракетницы
+    for (let i = 0; i < 3; i++) { a.ws.send(JSON.stringify({ t: 'rocket', d: [0, 0, -1] })); await wait(1300); }
+    check('ракет вылетело ровно две', a.msgs.filter((m) => m.t === 'rocket').length === 2 && last(a, 'rockets')?.n === 0);
+    await done(a, b);
+  }
+  // Ракета с неба: 4 убийства подряд — награда в ячейке; 5 — ракета вылетает
+  {
+    const a = await wsClient(), b = await wsClient();
+    join(a, { room: 'new', roomName: 'Серия', name: 'Снайпер', map: 'sands', kit: ['sniper', 'pistol'], token: token(200) }); await wait(250);
+    join(b, { room: await roomId(a), name: 'Цель' }); await wait(300);
+    const bid = last(b, 'welcome').id;
+    const waitFor = async (f, ms) => { const t = Date.now(); while (!f() && Date.now() - t < ms) await wait(100); };
+    for (let k = 0; k < 4; k++) {
+      await waitFor(() => last(b, 'players')?.list.find((p) => p.name === 'Цель')?.alive !== false, 6000);
+      state(a, [0, 0, 20], 0); state(b, [0, 0, 14]); await wait(200);
+      a.ws.send(JSON.stringify({ t: 'shoot', w: 'sniper', ends: [[0, 1.7, 14]], hits: { [bid]: [0, 1] } })); await wait(1400);
+    }
+    check('серия 4 — в ячейке ракета с неба', last(a, 'loadout')?.reward === 'missile', JSON.stringify(last(a, 'loadout')));
+    a.ws.send(JSON.stringify({ t: 'use' })); await wait(300);
+    check('5 — ракета с неба вылетает', a.msgs.some((m) => m.t === 'missile-go') && last(a, 'loadout')?.reward === null);
+    await done(a, b);
+  }
   // Липучка (уровень 4): прилипает к стене, а не падает
   {
     const [a, b] = await pair(90, 'sticky', 'house');
@@ -191,9 +221,9 @@ console.log('Ящик и карты (сервер)');
 {
   const { CRATE_ODDS, crateReward, MAPS, MAP_SECTIONS } = await import(path.join(ROOT, 'dist/shared/map.js'));
   const odds = Object.fromEntries(CRATE_ODDS.map((o) => [o.kind, o.chance]));
-  check('в ящике — любая награда за серию, без ловушки', CRATE_ODDS.length === 6 && Math.abs(CRATE_ODDS.reduce((s, o) => s + o.chance, 0) - 1) < 1e-9);
-  check('чем дороже награда, тем реже: БПЛА чаще всех, бомба — меньше 2%',
-    odds.uav > odds.missile && odds.missile > odds.launcher && odds.launcher > odds.juggernaut && odds.juggernaut > odds.gunship && odds.gunship > odds.nuke && odds.nuke < 0.02,
+  check('в ящике — любая награда за серию (ракетницы среди них нет), без ловушки', CRATE_ODDS.length === 5 && Math.abs(CRATE_ODDS.reduce((s, o) => s + o.chance, 0) - 1) < 1e-9);
+  check('чем дороже награда, тем реже: БПЛА чаще всех, бомба — около 2%',
+    odds.uav > odds.missile && odds.missile > odds.juggernaut && odds.juggernaut > odds.gunship && odds.gunship > odds.nuke && odds.nuke < 0.025 && !('launcher' in odds),
     CRATE_ODDS.map((o) => `${o.kind} ${(o.chance * 100).toFixed(1)}%`).join(', '));
   check('жребий раскладывается по шансам', crateReward(0) === 'uav' && crateReward(0.999) === 'nuke');
   // Награда одна: новая (за серию или из ящика) заменяет неиспользованную; Джаггернаут действует сразу и ячейку не трогает
@@ -266,6 +296,8 @@ if (!chromium) {
     for (let i = 0; i < 60; i++) {
       // О смерти судим по данным стрелка: страница жертвы в тестовом браузере может отставать на секунды
       if (await shooter.evaluate(() => [...game.remotes.values()].some((r) => !r.info.alive))) return true;
+      // Жертва уже знает, что погибла, — не стреляем дальше (иначе после возрождения она погибнет второй раз)
+      if (!(await target.evaluate(() => game.me.alive))) return true;
       const at = await shooter.evaluate(() => game.me.pos.toArray());
       await target.evaluate(([x, y, z]) => { game.me.pos.set(x, y, z - 2); game.me.vel.set(0, 0, 0); }, at);
       await shooter.evaluate(() => { game.me.yaw = 0; game.me.pitch = -0.05; });
@@ -419,7 +451,7 @@ if (!chromium) {
     check('руки от первого лица — руки модели, кубика нет', (await A.evaluate(() => game.dbg())).arms === true);
     // Разброс от бедра: 40 выстрелов в стену с 30 м — пятно намного шире, чем в прицел
     const { WEAPONS, hipSpread } = await import(path.join(ROOT, 'dist/shared/map.js'));
-    check('от бедра разброс в 5,5 раза больше прицельного (у дробовика — в 2,4)', hipSpread(WEAPONS.rifle) === 5.5 && hipSpread(WEAPONS.shotgun) === 2.4);
+    check('от бедра разброс на 30 % больше прежнего: в 7,15 раза больше прицельного (у дробовика — в 3,12)', hipSpread(WEAPONS.rifle) === 7.15 && hipSpread(WEAPONS.shotgun) === 3.12);
     check('названия и баланс: UZE90 — 13 урона и 42 патрона', WEAPONS.smg.name === 'UZE90' && WEAPONS.smg.dmg === 13 && WEAPONS.smg.mag === 42 &&
       ['Jecov', 'Chester', 'AK49', 'Z700', 'Piz'].join() === ['pistol', 'shotgun', 'rifle', 'lmg', 'sniper'].map((w) => WEAPONS[w].name).join());
   }
@@ -585,6 +617,19 @@ if (!chromium) {
       fit[w] = await V.evaluate(() => game.dbg().armsFit);
     }
     check('руки держат оружие: ладони на рукояти и цевье (ближе 4 см)', Object.values(fit).every((f) => f && f.main < 0.01 && f.off < 0.04), JSON.stringify(fit));
+    // Отдельный раздел «Графика»: тени, свечение и затенение — там, а не в общих настройках
+    const gfx = await V.evaluate(() => ({
+      inGraphics: ['shadows', 'bloom', 'ssao'].every((n) => document.querySelector(`#view-settings .graphics [data-setting=${n}]`)),
+      inCommon: !!document.querySelector('#view-settings .settings [data-setting=bloom]'),
+      title: [...document.querySelectorAll('#view-settings h2')].map((h) => h.textContent).join(','),
+    }));
+    check('настройки графики — отдельным разделом', gfx.inGraphics && !gfx.inCommon && /Графика/.test(gfx.title), JSON.stringify(gfx));
+    // Пинг в таблице счёта: замер раз в 2 секунды
+    await V.waitForFunction(() => game.dbg().pingMe > 0, null, { timeout: 8000 }).catch(() => {});
+    await V.keyboard.down('Tab'); await V.waitForTimeout(200);
+    const sb = await V.evaluate(() => ({ head: [...document.querySelectorAll('#scoreboard th')].map((t) => t.textContent).join(','), ping: document.querySelector('#scoreboard tr.me td.ping')?.textContent }));
+    await V.keyboard.up('Tab');
+    check('в таблице счёта есть пинг', /Пинг/.test(sb.head) && /^\d+$/.test(sb.ping ?? ''), JSON.stringify(sb));
     // Свечение и затенение углов: включаются в настройках, кадр рисуется через пост-обработку без ошибок
     const post0 = await V.evaluate(() => game.dbg().post);
     for (const n of ['bloom', 'ssao']) await V.evaluate((n) => document.querySelector(`[data-setting=${n}] button:nth-child(1)`).click(), n);
@@ -592,6 +637,9 @@ if (!chromium) {
     const post1 = await V.evaluate(() => game.dbg().post);
     for (const n of ['bloom', 'ssao']) await V.evaluate((n) => document.querySelector(`[data-setting=${n}] button:nth-child(2)`).click(), n);
     check('свечение и затенение углов включаются в настройках', !post0.bloom && !post0.ssao && post1.bloom && post1.ssao && post1.composer, JSON.stringify([post0, post1]));
+    // Запечённое небесное освещение: посчитано в фоне за пару секунд
+    const bake = await V.waitForFunction(() => { const b = game.dbg().skyBake; return b.pending === 0 && b.ms > 0 ? b : null; }, null, { timeout: 30000 }).then((h) => h.jsonValue(), () => null);
+    check('освещение неба запечено при загрузке карты', !!bake && bake.vertices > 10000, JSON.stringify(bake));
     // Солнце на открытой карте ходит по кругу: оборот за 10 минут — за 2 секунды сдвиг ~1,2°
     const sunA = await V.evaluate(() => game.dbg().sunDir);
     await V.waitForTimeout(2000);
@@ -627,6 +675,30 @@ if (!chromium) {
     await G.waitForTimeout(800);
     check('G отпустили — граната брошена, в руках снова ствол', thrown && await G.evaluate(() => game.me.weapon) === 'rifle');
     await G.close();
+  }
+  {
+    console.log('Ракетница на G (браузер)');
+    const R = await open({ name: 'Ракетчик', kills: 200 });
+    await R.evaluate(() => localStorage.setItem('doc-settings', JSON.stringify({ melee: 'launcher', bloom: false, ssao: false })));
+    await R.reload();
+    await R.waitForFunction(() => !document.getElementById('play').disabled);
+    await play(R, { map: 'sands' });
+    await R.waitForFunction(() => game.dbg().gear === 'launcher' && game.me.ammo.rocket === 2, null, { timeout: 5000 }).catch(() => {});
+    check('ракетница в руки сама не прыгает', await R.evaluate(() => game.me.weapon) !== 'rocket');
+    await R.evaluate(() => { game.me.pos.set(0, 0, 25); game.me.yaw = 0; game.me.pitch = 0.2; });
+    await R.keyboard.press('KeyG'); await R.waitForTimeout(700);
+    check('G — ракетница в руках', await R.evaluate(() => game.me.weapon) === 'rocket');
+    await R.mouse.down(); await R.waitForTimeout(150); await R.mouse.up();
+    const fired = await R.waitForFunction(() => game.me.ammo.rocket === 1, null, { timeout: 4000 }).then(() => true, () => false);
+    check('ЛКМ — выстрел, осталась одна ракета', fired);
+    await R.keyboard.press('KeyG'); await R.waitForTimeout(500);
+    check('ещё раз G — ракетница убрана', await R.evaluate(() => game.me.weapon) !== 'rocket');
+    await R.evaluate(() => localStorage.removeItem('doc-settings'));
+    await R.reload();
+    await R.waitForFunction(() => !document.getElementById('play').disabled);
+    const post = await R.evaluate(() => game.dbg().post);
+    check('свечение и затенение углов по умолчанию выключены', !post.bloom && !post.ssao, JSON.stringify(post));
+    await R.close();
   }
 
   {

@@ -55,7 +55,7 @@ export function handleJoin(room: Room, ws: WebSocket, msg: Incoming): Player | n
     hp: 100, armor: 0, alive: false, kills: 0, deaths: 0, lastShot: 0, lastSpray: 0,
     profile: decodeProfile(msg.token),
     rockets: 0,
-    hasKnife: true, streak: 0, reward: null, uavUntil: 0, big: false, helmet: 0,
+    hasKnife: true, streak: 0, reward: null, uavUntil: 0, ping: 0, big: false, helmet: 0,
     kit: isKit(msg.kit) ? msg.kit : [...DEFAULT_KIT],
     melee: 'knife', gear: 'knife', grenades: 0, cookStart: 0,
   };
@@ -90,6 +90,12 @@ export function handleJoin(room: Room, ws: WebSocket, msg: Incoming): Player | n
 
 /** Сообщение от игрока этой комнаты */
 export function handle(room: Room, me: Player, msg: Incoming): void {
+  if (msg.t === 'pong') {
+    // Ответ на замер задержки: сколько шла метка туда и обратно (сглаживаем, чтобы цифра не прыгала)
+    const rtt = Date.now() - Number(msg.at);
+    if (rtt >= 0 && rtt < 10_000) me.ping = me.ping ? Math.round(me.ping * 0.6 + rtt * 0.4) : rtt;
+    return;
+  }
   if (msg.t === 'state') {
     if (me.alive && isVec3(msg.p)) me.pos = msg.p;
     me.slide = me.alive && msg.sl === true;
@@ -182,6 +188,11 @@ export function tick(room: Room): void {
   const now = Date.now();
   if (room.players.size) {
     sendPings(room, now);
+    // Раз в 2 секунды — замер задержки: метка времени и пинг всех игроков (для таблицы счёта)
+    if (now - room.lastLatency >= 2000) {
+      room.lastLatency = now;
+      broadcast(room, { t: 'lat', at: now, list: [...room.players.values()].map((p) => [p.id, p.ping] as [number, number]) });
+    }
     expireAmmoPacks(room, now);
     if (room.gunship && now - room.gunship.start >= GUNSHIP.ms) endGunship(room, null); // облетел карту — улетает
     stepWeather(room, now);

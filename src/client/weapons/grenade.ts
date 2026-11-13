@@ -66,6 +66,14 @@ function place(now: number): void {
 export function pressGear(now: number): void {
   if (!canUseGear()) return;
   if (gear === 'knife') { throwKnife(); return; }
+  if (gear === 'launcher') {
+    // Ракетница: G — взять в руки (стреляют ЛКМ), ещё раз G — убрать обратно
+    if (me.weapon === 'rocket') { setWeapon(backTo && backTo !== 'rocket' && backTo !== 'grenade' ? backTo : weaponSlots()[1] ?? 'pistol'); return; }
+    if (me.ammo.rocket <= 0) { toast('🚀 Ракетница: ракет нет — 2 новые после возрождения'); return; }
+    backTo = me.weapon;
+    setWeapon('rocket');
+    return;
+  }
   if (state.myGrenades <= 0 && !cookStart) { toast(`${GEAR[gear].icon} ${GEAR[gear].name}: больше нет — пополнится после возрождения`); return; }
   if (gear === 'mine') { takeInHand(); place(now); return; }
   if (gear === 'tripwire') { takeInHand(); tripHoldAt = now; return; }
@@ -132,6 +140,7 @@ const HAND_LOOK: Record<Exclude<MeleeKind, 'knife'>, { color: number; wide: numb
   sticky: { color: 0x3fae4a, wide: 1, flat: 1 },
   mine: { color: 0x3d4a2e, wide: 1.9, flat: 0.4 },
   tripwire: { color: 0x5a4a32, wide: 1.1, flat: 1.3 },
+  launcher: { color: 0x4c5a3a, wide: 1, flat: 1 },   // в руках — сама ракетница, эта запись не используется
 };
 /** Цвета летящих гранат: осколочная, световая, липучка — тёмный и яркий (мигает между ними) */
 const FLY_COLORS = [[0xff1020, 0x440000, 0xff3030], [0xdfe6ee, 0x55606c, 0xffffff], [0x3fae4a, 0x0e3a14, 0x7dff8a]] as const;

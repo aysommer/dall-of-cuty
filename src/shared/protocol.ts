@@ -7,7 +7,7 @@ export type Team = 'green' | 'red';
 export type Mode = 'tdm' | 'ffa';
 export type WeaponId = 'pistol' | 'smg' | 'shotgun' | 'rifle' | 'lmg' | 'sniper' | 'knife' | 'grenade' | 'rocket';
 /** Что в слоте 1 вместо огнестрела: нож или граната */
-export type MeleeKind = 'knife' | 'grenade' | 'flash' | 'sticky' | 'mine' | 'tripwire';
+export type MeleeKind = 'knife' | 'grenade' | 'flash' | 'sticky' | 'mine' | 'tripwire' | 'launcher';
 /** falling — летит с неба, idle — лежит, opening — его открывают, gone — ящика нет */
 export type CrateState = 'falling' | 'idle' | 'opening' | 'gone';
 export type Vec3 = [number, number, number];
@@ -89,6 +89,8 @@ export type ThrowMsg = { t: 'throw'; id: number; by: number; o: Vec3; d: Vec3 };
 export type ThrowEndMsg = { t: 'thrown'; id: number; p: Vec3; hit: boolean };
 /** Отметки противников от БПЛА (x, z) */
 export type PingMsg = { t: 'ping'; list: Array<[number, number, number]> };
+/** Замер задержки: сервер шлёт метку времени, игрок сразу возвращает её (pong); list — пинг всех игроков, мс */
+export type LatencyMsg = { t: 'lat'; at: number; list: Array<[id: number, ms: number]> };
 /** Ракета с неба: положение для остальных игроков */
 export type MissileMsg = { t: 'missile'; id: number; by: number; p: Vec3 };
 /** Бомба: через ms упадёт и убьёт всех */
@@ -134,6 +136,7 @@ export type ServerMsg =
   | ThrowMsg
   | ThrowEndMsg
   | PingMsg
+  | LatencyMsg
   | MissileMsg
   | NukeMsg
   | GunshipMsg
@@ -179,6 +182,7 @@ export type ClientMsg =
   | { t: 'kit'; guns: WeaponId[] }
   | { t: 'throw'; d: Vec3 }
   | { t: 'use' }
+  | { t: 'pong'; at: number }
   | { t: 'mpos'; id: number; p: Vec3 }
   | { t: 'mhit'; id: number; p: Vec3 }
   | { t: 'gsfire'; ends: Vec3[]; hits: Record<number, number> }
