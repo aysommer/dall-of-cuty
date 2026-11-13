@@ -556,6 +556,15 @@ if (!chromium) {
     check('тени включены и считаются один раз на карту', sh0.on && sh0.cast && sh0.map && !sh0.pending, JSON.stringify(sh0));
     check('тени выключаются в настройках и включаются обратно', !sh1.on && !sh1.cast && saved === false && sh2.on && sh2.cast, JSON.stringify([sh1, sh2]));
     check('блоки карты склеены: вызовов отрисовки меньше 120', (await V.evaluate(() => game.dbg().drawCalls)) < 120);
+    // Руки от первого лица: ладонь — на рукояти, вторая — на цевье (или поверх основной у пистолета), граната — в кулаке
+    await V.evaluate(() => game.vote && document.getElementById('vote').classList.add('hidden'));
+    const fit = {};
+    for (const w of ['rifle', 'pistol', 'smg', 'grenade']) {
+      await V.evaluate((w) => game.equip(w), w);
+      await V.waitForTimeout(1200);
+      fit[w] = await V.evaluate(() => game.dbg().armsFit);
+    }
+    check('руки держат оружие: ладони на рукояти и цевье (ближе 4 см)', Object.values(fit).every((f) => f && f.main < 0.01 && f.off < 0.04), JSON.stringify(fit));
     await V.context().close();
   }
 

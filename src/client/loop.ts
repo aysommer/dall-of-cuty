@@ -1,4 +1,6 @@
 // Главный цикл: движение, эффекты, отрисовка; отладочный доступ window.game.
+import type { WeaponId } from '../shared/protocol.js';
+import * as THREE from 'three';
 import { CROUCH, PLAYER, SLIDE, STREAK } from '../shared/map.js';
 import { sendMsg } from './core/net.js';
 import { camera, fog, renderer, scene, sun } from './core/scene.js';
@@ -16,7 +18,7 @@ import { packFx, updateAmmoPacks } from './pickups/ammo.js';
 import { updateCrate } from './pickups/crate.js';
 import { medkitFx, updateMedkits } from './pickups/medkits.js';
 import { applyLook, updateRemote } from './render/players.js';
-import { updateViewArms, viewArmsReady } from './render/viewarms.js';
+import { updateViewArms, viewArmsDebug, viewArmsReady } from './render/viewarms.js';
 import { characterFailed, characterReady, loadCharacterModel } from './render/character.js';
 import { gunner, gunshipFx, markerEls, updateGunship } from './streaks/gunship.js';
 import { missileCtl, remoteMissiles, updateMissile } from './streaks/missile.js';
@@ -30,7 +32,7 @@ import { cookStart, grenadeFx, updateGrenades } from './weapons/grenade.js';
 import { updateKnives } from './weapons/knife.js';
 import { updateRockets } from './weapons/rockets.js';
 import { updateShooting } from './weapons/shooting.js';
-import { aimPoint, lastDrawMs, animateGun, animateScope, poseGun, scopeAnim, sniperSway, SWING_MS, updateAim, viewGun, viewModel } from './weapons/viewmodel.js';
+import { aimPoint, lastDrawMs, animateGun, animateScope, poseGun, scopeAnim, setWeapon, sniperSway, SWING_MS, updateAim, viewGun, viewModel } from './weapons/viewmodel.js';
 import { brokenIds, currentMap, openDoors, updateDoors } from './world/map.js';
 import { move, touchingLadder } from './world/physics.js';
 import { sinking, updateSinking } from './world/underground.js';
@@ -161,15 +163,26 @@ function frame(now: number): void {
   updateVote(now);
   const timer = document.getElementById('match-timer');
   if (timer) timer.textContent = timerText();
-  renderer.render(scene, camera);
+  if (dbgView) {
+    // Отладочный вид со стороны: камера стоит рядом с глазами игрока (в его координатах) и смотрит на руки
+    camera.updateMatrixWorld(true);
+    dbgCam.aspect = camera.aspect; dbgCam.updateProjectionMatrix();
+    dbgCam.position.copy(camera.localToWorld(new THREE.Vector3(...dbgView.from)));
+    dbgCam.lookAt(camera.localToWorld(new THREE.Vector3(...dbgView.at)));
+    renderer.render(scene, dbgCam);
+  } else renderer.render(scene, camera);
 }
+
+/** Отладочный вид со стороны (game.view): откуда и куда смотрит камера, в координатах глаз игрока */
+let dbgView: { from: [number, number, number]; at: [number, number, number] } | null = null;
+const dbgCam = new THREE.PerspectiveCamera(50, 1, 0.01, 100);
 
 // Для отладки из консоли
 declare global {
   interface Window {
     game: {
       me: typeof me; remotes: typeof remotes; keys: typeof keys; applyLook: typeof applyLook;
-      steer: (yaw: number, pitch: number) => void; dbg: () => Record<string, unknown>; vote: typeof onVote;
+      steer: (yaw: number, pitch: number) => void; dbg: () => Record<string, unknown>; vote: typeof onVote; equip: (w: WeaponId) => void; view: (v: { from: [number, number, number]; at: [number, number, number] } | null) => void;
     };
   }
 }
@@ -181,13 +194,20 @@ export function initLoop(): void {
   requestAnimationFrame(frame);
   window.game = {
     me, remotes, keys, applyLook, vote: onVote,
+    view: (v: typeof dbgView) => { dbgView = v; },
+    // Для скриптов: взять любой ствол, даже не из набора (набор на это время подменяется)
+    equip: (w: WeaponId) => {
+      if (w !== 'knife' && w !== 'grenade' && w !== 'rocket' && !settings.kit.includes(w)) settings.kit = [w, settings.kit[1] ?? 'pistol'];
+      if (w === 'grenade') state.myGrenades = Math.max(1, state.myGrenades);
+      setWeapon(w);
+    },
     steer: (yaw: number, pitch: number) => {
       if (missileCtl) { missileCtl.yaw = yaw; missileCtl.pitch = pitch; }
       if (gunner) { gunner.yaw = yaw; gunner.pitch = pitch; }
     },
     dbg: () => ({ openDoors: [...openDoors], sprintK: state.sprintK, wallK: state.wallK, broken: [...brokenIds], grenades: [...grenadeFx.values()].map((g) => g.mesh.position.toArray().map((v) => +v.toFixed(2))), myGrenades: state.myGrenades, cooking: cookStart > 0, scopeOn: state.scopeOn, scopeAnim: !!scopeAnim, sway: sniperSway(performance.now()), fovNow: camera.fov, gunship: gunshipFx ? gunshipFx.mesh.position.toArray() : null, gunner: gunner ? { heat: gunner.heat, over: performance.now() < gunner.overheatUntil } : null, markers: markerEls.size, bursts: bursts.length, weather: weatherKind, fogFar: fog.far, sinking: sinking.length, remoteMissiles: remoteMissiles.size, packs: packFx.size,
       kit: settings.kit, reserve: { ...me.reserve }, hotbar: hotbar().map((h) => `${h.key}:${h.label}`).join(' '),
-      missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, crouch: state.crouch, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, eyeH: state.eyeH, recoil: state.recoil, mines: [...mineFx.values()].map((m) => ({ kind: m.info.kind, armed: m.info.armed > 0, p: m.info.p, to: m.info.to })), blind: +blindK(performance.now()).toFixed(2), arms: viewArmsReady(), drawMs: lastDrawMs(), gear, gunBob: +bobGun.toFixed(2), bob: +bobY.toFixed(3),
+      missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, crouch: state.crouch, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, eyeH: state.eyeH, recoil: state.recoil, mines: [...mineFx.values()].map((m) => ({ kind: m.info.kind, armed: m.info.armed > 0, p: m.info.p, to: m.info.to })), blind: +blindK(performance.now()).toFixed(2), arms: viewArmsReady(), armsFit: viewArmsDebug(), drawMs: lastDrawMs(), gear, gunBob: +bobGun.toFixed(2), bob: +bobY.toFixed(3),
       corpses: corpses.length, corpse: corpseDebug(), model: characterReady() ? 'ready' : characterFailed() ? 'failed' : 'loading',
       remoteAnim: [...remotes.values()].map((r) => r.char ? { walk: +r.char.walk.getEffectiveWeight().toFixed(2), run: +r.char.run.getEffectiveWeight().toFixed(2), air: +r.char.airK.toFixed(2), reload: r.reloading, speed: +r.char.speed.toFixed(1) } : null), sprays: sprays.length,
       shadow: { on: renderer.shadowMap.enabled, pending: renderer.shadowMap.needsUpdate, cast: sun.castShadow, map: !!sun.shadow.map, box: [sun.shadow.camera.left, sun.shadow.camera.right, sun.shadow.camera.near, sun.shadow.camera.far].map((v) => +v.toFixed(1)) }, drawCalls: renderer.info.render.calls,
