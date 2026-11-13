@@ -5,7 +5,7 @@ import { levelOf, RANKS } from '../../shared/ranks.js';
 import { me, state } from '../core/state.js';
 import { $, textEl } from '../core/util.js';
 import { leaderId } from '../render/players.js';
-import { gear, renderHotbar, renderStreak } from './hotbar.js';
+import { gear, renderStreak, reward } from './hotbar.js';
 import { timerEl } from './match.js';
 import { cookStart } from '../weapons/grenade.js';
 
@@ -55,11 +55,13 @@ export function updateHud(): void {
   $('helmet-val').textContent = String(myHelmet);
   $('health').classList.toggle('low', me.hp <= 30);
   $('weapon-name').textContent = me.weapon === 'grenade' ? GEAR[gear].name : WEAPONS[me.weapon].name;
+  // Кнопки на сенсорном экране: G — значок снаряжения этой жизни, 5 — видна, пока есть награда
+  $('t-throw').textContent = GEAR[gear].icon;
+  $('t-reward').classList.toggle('hidden', !reward);
   const melee = !!WEAPONS[me.weapon].melee;
   $('ammo-count').textContent = me.weapon === 'grenade' ? String(state.myGrenades + (cookStart ? 1 : 0))
     : melee ? '—' : me.reloadUntil ? '…' : String(me.ammo[me.weapon]);
   $('ammo-total').textContent = melee ? '' : me.weapon === 'grenade' ? ' шт.' : me.weapon === 'rocket' ? ' ракет' : ` / ${me.reserve[me.weapon]}`;
-  renderHotbar();
   renderStreak();
 
   const score = $('score');

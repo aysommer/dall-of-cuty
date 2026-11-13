@@ -6,7 +6,7 @@ import { beep, shotSound } from '../core/audio.js';
 import { bakeShadows, box, scene } from '../core/scene.js';
 import { me, state } from '../core/state.js';
 import { fireworks } from '../fx/fireworks.js';
-import { buildCrate } from '../pickups/crate.js';
+import { buildCrate, buildParachute } from '../pickups/crate.js';
 import { applyFog } from './weather.js';
 import { buildBlocks } from './blocks.js';
 
@@ -144,13 +144,9 @@ export function loadMap(id: MapId): void {
   state.crateMesh = buildCrate();
   state.crateMesh.visible = false;
   mapGroup.add(state.crateMesh);
-  state.crateBeam = box(0.3, 30, 0.3, 0xffd34d, false);
-  const beamMat = state.crateBeam.material as THREE.MeshBasicMaterial;
-  beamMat.transparent = true;
-  beamMat.opacity = 0.35;
-  beamMat.depthWrite = false;
-  state.crateBeam.visible = false;
-  mapGroup.add(state.crateBeam);
+  state.crateChute = buildParachute();
+  state.crateChute.visible = false;
+  mapGroup.add(state.crateChute);
 }
 
 export function rebuildSolids(): void {

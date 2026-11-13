@@ -29,7 +29,7 @@ const fingers: Record<'Left' | 'Right', Array<{ bone: THREE.Bone; fist: THREE.Qu
  * держится дальше, чем достаёт настоящая рука. Плечи оказываются чуть ниже и впереди глаз.
  */
 const ARM_SCALE = 1.15;
-const ROOT = new THREE.Vector3(0, -1.44 * ARM_SCALE - 0.13, -0.16);
+const ROOT = new THREE.Vector3(0, -1.44 * ARM_SCALE - 0.17, -0.2);
 /** Половина толщины ладони: от кости кисти до поверхности ладони */
 const PALM = 0.018 * ARM_SCALE;
 
@@ -129,12 +129,12 @@ const HOLDS: Record<WeaponId, { main: Hold; off: Hold | null }> = {
     // Вторая ладонь слева накрывает пальцы основной, большой палец смотрит вперёд вдоль затвора
     off: { at: v(0, -0.085, -0.03), finger: v(0, -0.35, -1), palm: v(1, 0, 0), r: 0.05, fist: true },
   },
-  rifle: { main: onGrip(-0.085, -0.01), off: underGuard(-0.005, -0.33, 0.045) },
+  rifle: { main: onGrip(-0.085, -0.01), off: underGuard(-0.005, -0.31, 0.045) },
   smg: { main: onGrip(-0.075, 0.0), off: underGuard(0, -0.27, 0.04) },
-  shotgun: { main: onGrip(-0.075, 0.0), off: underGuard(-0.055, -0.36, 0.03) },          // на цевье-помпе
-  sniper: { main: onGrip(-0.085, -0.05), off: underGuard(0, -0.37, 0.04) },
-  lmg: { main: onGrip(-0.095, 0.02), off: underGuard(0, -0.36, 0.055) },
-  rocket: { main: onGrip(-0.1, -0.2), off: underGuard(0.02, -0.46, 0.075) },
+  shotgun: { main: onGrip(-0.075, 0.0), off: underGuard(-0.055, -0.33, 0.03) },          // на цевье-помпе
+  sniper: { main: onGrip(-0.085, -0.05), off: underGuard(0, -0.32, 0.04) },
+  lmg: { main: onGrip(-0.095, 0.02), off: underGuard(0, -0.31, 0.055) },
+  rocket: { main: onGrip(-0.1, -0.2), off: underGuard(0.02, -0.4, 0.075) },
   // Граната в кулаке: ладонь влево-вверх, пальцы обхватывают её сбоку, запал торчит сверху
   grenade: { main: { at: v(0, -0.01, -0.1), finger: v(0, 0.3, -1), palm: v(-0.7, 0.7, 0), r: 0.045, fist: true }, off: null },
   // Нож: рукоять в кулаке, клинок вперёд

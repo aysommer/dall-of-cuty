@@ -78,7 +78,7 @@ export function stepWeather(room: Room, now: number): void {
   if (!room.lastWeatherRoll) room.lastWeatherRoll = now;
   if (now - room.lastWeatherRoll < WEATHER.everyMs) return;
   room.lastWeatherRoll = now;
-  if (room.weather || room.roundOver || Math.random() >= WEATHER.chance) return;
+  if (!WEATHER.enabled || room.weather || room.roundOver || Math.random() >= WEATHER.chance) return;
   room.weather = { kind: Math.random() < 0.5 ? 'rain' : 'snow', until: now + WEATHER.ms };
   broadcast(room, weatherMsg(room));
 }

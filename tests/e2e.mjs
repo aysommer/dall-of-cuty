@@ -196,6 +196,18 @@ console.log('Ящик и карты (сервер)');
     odds.uav > odds.missile && odds.missile > odds.launcher && odds.launcher > odds.juggernaut && odds.juggernaut > odds.gunship && odds.gunship > odds.nuke && odds.nuke < 0.02,
     CRATE_ODDS.map((o) => `${o.kind} ${(o.chance * 100).toFixed(1)}%`).join(', '));
   check('жребий раскладывается по шансам', crateReward(0) === 'uav' && crateReward(0.999) === 'nuke');
+  // Награда одна: новая (за серию или из ящика) заменяет неиспользованную; Джаггернаут действует сразу и ячейку не трогает
+  {
+    const { grantReward } = await import(path.join(ROOT, 'dist/server/room/streaks.js'));
+    const sent = [];
+    const p = { reward: null, armor: 0, big: false, helmet: 0, gear: 'knife', hasKnife: true, grenades: 0, streak: 0, ws: { OPEN: 1, readyState: 1, send: (d) => sent.push(JSON.parse(d)) } };
+    grantReward(p, 'uav');
+    grantReward(p, 'missile');
+    grantReward(p, 'juggernaut');
+    check('награды не копятся: ракета заменила БПЛА, Джаггернаут сразу', p.reward === 'missile' && p.armor > 0 && sent.at(-1).reward === 'missile' && !('uav' in sent.at(-1)));
+  }
+  const { WEATHER } = await import(path.join(ROOT, 'dist/shared/map.js'));
+  check('погода выключена на всех картах (механизм оставлен)', WEATHER.enabled === false && WEATHER.ms > 0);
   check('разделы карт: в «Новых» — «Падение» и «Магазин», остальные — в «Старых»; Explosion City нет',
     MAP_SECTIONS[0].title === 'Новые' && MAP_SECTIONS[0].maps.join() === 'fall,store' && MAPS.fall.name === 'Падение' && MAPS.store.name === 'Магазин' && MAP_SECTIONS[1].maps.length === 6 && !('blast' in MAPS));
   check('канализации нет ни на одной карте', Object.values(MAPS).every((m) => !m.boxes.some((b) => b.min[1] < -1.01) && !('lamps' in m)));
@@ -341,7 +353,8 @@ if (!chromium) {
     }
   }
   await A.waitForTimeout(500);
-  check('счёт A вырос', /Ты: 1/.test(await A.textContent('#score')));
+  const scoreText = await A.textContent('#score');
+  check('счёт A вырос', /Ты: 1/.test(scoreText), `${scoreText} | лента: ${await A.textContent('#feed')}`);
   check('лента убийств', feedOk);
   check('повышение до 2-го уровня (19 → 20 убийств)', promoted);
   check('B после смерти возродился', await B.waitForFunction(() => game.me.alive, null, { timeout: 6000 }).then(() => true, () => false));
@@ -413,9 +426,13 @@ if (!chromium) {
   {
     // Пистолет достаётся быстрее основного ствола; пока достаёшь — стрелять нельзя
     const draw = async (key) => { await A.keyboard.press(key); await A.waitForTimeout(100); return A.evaluate(() => game.dbg().drawMs); };
+    // 1 — пистолет, 2 — основной ствол
     await A.keyboard.press('Digit2'); await A.waitForTimeout(900);
-    const pistol = await draw('Digit3'); await A.waitForTimeout(900);
+    const pistol = await draw('Digit1'); await A.waitForTimeout(900);
+    check('на 1 — пистолет', await A.evaluate(() => game.me.weapon) === 'pistol');
     const rifle = await draw('Digit2'); await A.waitForTimeout(900);
+    check('на 2 — основной ствол', await A.evaluate(() => game.me.weapon) === 'rifle');
+    check('слотов внизу экрана больше нет', (await A.$('#hotbar')) === null);
     check('пистолет достаётся быстрее основного оружия', pistol === 280 && rifle >= 500, `${Math.round(pistol)} и ${Math.round(rifle)} мс`);
     await A.evaluate(() => { game.me.pos.set(0, 0, 10); game.me.vel.set(0, 0, 0); game.me.yaw = 0; });
     await A.keyboard.down('ShiftLeft'); await A.keyboard.down('KeyW'); await A.waitForTimeout(900);
@@ -434,7 +451,7 @@ if (!chromium) {
     const off = await A.waitForFunction(() => game.dbg().scopeOn === false && !game.dbg().scopeAnim, null, { timeout: 8000 }).then(() => true, () => false);
     check('V снимает коллиматор', off);
     check('выбор запомнен по стволу', JSON.parse(await A.evaluate(() => localStorage.getItem('doc-sights')))[gun] === false);
-    await A.keyboard.press('Digit3'); await A.waitForTimeout(500);
+    await A.keyboard.press('Digit1'); await A.waitForTimeout(500);
     check('на другом стволе прицел остался', (await A.evaluate(() => game.dbg())).scopeOn === true);
     await A.keyboard.press('Digit2'); await A.waitForTimeout(500);
     check('вернулся к первому — прицел по-прежнему снят', (await A.evaluate(() => game.dbg())).scopeOn === false);
@@ -522,8 +539,9 @@ if (!chromium) {
     await T.tap('#t-aim'); await T.waitForTimeout(700);
     check('кнопка прицела включает прицел', (await T.evaluate(() => game.dbg().adsK)) > 0.9);
     await T.tap('#t-aim');
-    await T.tap('#hotbar .slot >> nth=2'); await T.waitForTimeout(200);
-    check('слот оружия нажимается', await T.evaluate(() => game.me.weapon) === 'pistol');
+    await T.tap('#t-swap'); await T.waitForTimeout(200);
+    check('кнопка смены оружия меняет ствол', await T.evaluate(() => game.me.weapon) === 'pistol');
+    check('кнопка награды скрыта, пока награды нет; G — кнопка снаряжения', await T.isHidden('#t-reward') && (await T.textContent('#t-throw')) === '🔪');
     await T.tap('#t-menu'); await T.waitForTimeout(200);
     check('кнопка меню открывает меню', await T.isVisible('#resume'));
     await ctx.close();
@@ -565,7 +583,35 @@ if (!chromium) {
       fit[w] = await V.evaluate(() => game.dbg().armsFit);
     }
     check('руки держат оружие: ладони на рукояти и цевье (ближе 4 см)', Object.values(fit).every((f) => f && f.main < 0.01 && f.off < 0.04), JSON.stringify(fit));
+    // Ящик спускается на парашюте; лёг — парашют исчезает
+    await V.evaluate(() => game.crate({ t: 'crate', state: 'falling', at: [0, 0, 0], by: null, ms: 4000, left: 120000 }));
+    await V.waitForTimeout(400);
+    const falling = await V.evaluate(() => game.dbg().chute);
+    await V.evaluate(() => game.crate({ t: 'crate', state: 'idle', at: [0, 0, 0], by: null, ms: 0, left: 100000 }));
+    await V.waitForTimeout(400);
+    check('ящик падает на парашюте, лёг — парашюта нет', falling === true && (await V.evaluate(() => game.dbg().chute)) === false);
+    await V.evaluate(() => game.crate({ t: 'crate', state: 'gone', at: null, by: null, ms: 0, left: 0 }));
     await V.context().close();
+  }
+
+  {
+    console.log('Снаряжение на G (браузер)');
+    const G = await open({ name: 'Гренадёр' });
+    await G.evaluate(() => localStorage.setItem('doc-settings', JSON.stringify({ melee: 'grenade' })));
+    await G.reload();
+    await G.waitForFunction(() => !document.getElementById('play').disabled);
+    await play(G, { map: 'bricks' });
+    await G.waitForFunction(() => game.dbg().gear === 'grenade', null, { timeout: 5000 }).catch(() => {});
+    await G.evaluate(() => { game.me.pos.set(0, 0, 14); game.me.yaw = 0; game.me.pitch = 0.3; });
+    await G.keyboard.press('Digit2'); await G.waitForTimeout(600);
+    await G.keyboard.down('KeyG'); await G.waitForTimeout(700);
+    const held = await G.evaluate(() => ({ w: game.me.weapon, cook: game.dbg().cook }));
+    check('G зажата — граната в руке, идёт отсчёт', held.w === 'grenade' && held.cook, JSON.stringify(held));
+    await G.keyboard.up('KeyG');
+    const thrown = await G.waitForFunction(() => !game.dbg().cook && game.dbg().myGrenades === 0, null, { timeout: 4000 }).then(() => true, () => false);
+    await G.waitForTimeout(800);
+    check('G отпустили — граната брошена, в руках снова ствол', thrown && await G.evaluate(() => game.me.weapon) === 'rifle');
+    await G.close();
   }
 
   check('без ошибок на страницах', errors.length === 0, errors.join(' | '));

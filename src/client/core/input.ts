@@ -11,10 +11,10 @@ import { trySpray } from '../fx/sprays.js';
 import { nearCrate, openingUntil } from '../pickups/crate.js';
 import { gunner, gunnerRocket } from '../streaks/gunship.js';
 import { missileCtl } from '../streaks/missile.js';
-import { hotbar, useSlot } from '../ui/hotbar.js';
+import { useReward, useWeaponSlot, weaponSlots } from '../ui/hotbar.js';
 import { renderScoreboard } from '../ui/hud.js';
 import { showView, syncMenu, view } from '../ui/shell.js';
-import { throwKnife } from '../weapons/knife.js';
+import { pressGear, releaseGear } from '../weapons/grenade.js';
 import { startReload } from '../weapons/shooting.js';
 import { setWeapon, toggleScope } from '../weapons/viewmodel.js';
 import { nearDoor } from '../world/map.js';
@@ -92,18 +92,18 @@ export function setFire(on: boolean): void {
   if (on) { state.mouseDown = true; state.firedThisPress = false; } else state.mouseDown = false;
 }
 
-/** Второе действие (ПКМ): в самолёте — ракета, с ножом в руке — бросок, иначе — прицел. */
+/** Второе действие (ПКМ): в самолёте — ракета, иначе — прицел. */
 export function setAim(on: boolean): void {
   if (!on) { state.aimHeld = false; return; }
   if (gunner) gunnerRocket();
-  else if (me.weapon === 'knife') throwKnife();
   else state.aimHeld = true;
 }
 
-/** Следующее или предыдущее оружие по кругу (колесо мыши). */
+/** Следующий или предыдущий ствол по кругу (колесо мыши, Q): пистолет, основной, ракетница, если есть ракеты. */
 export function cycleWeapon(dir: 1 | -1): void {
-  const order = (['knife', ...settings.kit, 'rocket'] as WeaponId[])
-    .filter((w) => (w !== 'knife' || state.hasKnife) && (w !== 'rocket' || me.ammo.rocket > 0));
+  const order = ([...weaponSlots(), 'rocket'] as Array<WeaponId | null>)
+    .filter((w): w is WeaponId => !!w && (w !== 'rocket' || me.ammo.rocket > 0));
+  if (!order.length || me.weapon === 'grenade') return;
   const i = order.indexOf(me.weapon);
   const n = order.length;
   setWeapon(order[(i + (dir > 0 ? 1 : n - 1)) % n]!);
@@ -113,10 +113,14 @@ export function cycleWeapon(dir: 1 | -1): void {
 export function pressKey(code: string, repeat = false): void {
   if (!playing()) return;
   keys[code] = true;
-  // Слоты: 1 — нож или граната, 2 и 3 — стволы, 5–9 — награды за серию
-  const slot = hotbar().find((h) => `Digit${h.key}` === code);
-  if (slot && !repeat) useSlot(slot.id);
-  if (code === 'KeyG' && !repeat) throwKnife();
+  // 1 — пистолет, 2 — основной ствол, Q — сменить ствол, 5 — награда, G — снаряжение (нож, граната, мина…)
+  if (!repeat && me.weapon !== 'grenade') {
+    if (code === 'Digit1') useWeaponSlot(0);
+    if (code === 'Digit2') useWeaponSlot(1);
+    if (code === 'KeyQ') cycleWeapon(1);
+  }
+  if (code === 'Digit5' && !repeat) useReward();
+  if (code === 'KeyG' && !repeat) pressGear(performance.now());
   if (code === 'KeyV' && !repeat) toggleScope(performance.now());
   if (code === 'KeyC' && !repeat) pressCrouch(performance.now());
   if ((code === 'ControlLeft' || code === 'ControlRight') && !repeat) pressProne();
@@ -131,6 +135,7 @@ export function pressKey(code: string, repeat = false): void {
 }
 export function releaseKey(code: string): void {
   keys[code] = false;
+  if (code === 'KeyG') releaseGear();
 }
 
 /** Таблица счёта: показать или скрыть (Tab или кнопка на экране). */

@@ -1,7 +1,7 @@
 // Типы сетевого протокола — общие для клиента и сервера.
 
 import type { MapId } from './maps/types.js';
-import type { LimitKind, RewardKind, StreakKind, WeatherKind } from './map.js';
+import type { LimitKind, RewardKind, RewardSlot, WeatherKind } from './map.js';
 
 export type Team = 'green' | 'red';
 export type Mode = 'tdm' | 'ffa';
@@ -82,7 +82,7 @@ export type VoteMsg = { t: 'vote'; counts: Record<MapId, number>; ms: number; mi
 /** Своё снаряжение: есть ли нож, текущая серия и запас наград. */
 export type LoadoutMsg = {
   /** gear — что в слоте 1 в этой жизни; grenades — сколько штук осталось (у ножа — 0) */
-  t: 'loadout'; gear: MeleeKind; knife: boolean; grenades: number; streak: number; uav: number; missile: number; nuke: number; gunship: number;
+  t: 'loadout'; gear: MeleeKind; knife: boolean; grenades: number; streak: number; reward: RewardSlot | null;
 };
 /** Брошенный нож летит (o — откуда, d — направление) и где он остановился. */
 export type ThrowMsg = { t: 'throw'; id: number; by: number; o: Vec3; d: Vec3 };
@@ -178,7 +178,7 @@ export type ClientMsg =
   | { t: 'vote'; map: MapId }
   | { t: 'kit'; guns: WeaponId[] }
   | { t: 'throw'; d: Vec3 }
-  | { t: 'use'; kind: StreakKind }
+  | { t: 'use' }
   | { t: 'mpos'; id: number; p: Vec3 }
   | { t: 'mhit'; id: number; p: Vec3 }
   | { t: 'gsfire'; ends: Vec3[]; hits: Record<number, number> }

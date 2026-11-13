@@ -1,5 +1,5 @@
 // Награды за серию убийств: БПЛА, ракета с неба, самолёт, бомба.
-import { REWARD_KILLS, type RewardKind, bodyPoints, GUNSHIP, gunshipPos, lineOfSight, MAPS, STREAK, type StreakKind } from '../../shared/map.js';
+import { REWARD_KILLS, type RewardKind, bodyPoints, GUNSHIP, gunshipPos, lineOfSight, MAPS, STREAK } from '../../shared/map.js';
 import type { ServerMsg, Vec3 } from '../../shared/protocol.js';
 import { blast, hurt, isEnemy, killPlayer, scaleOf, lowOf } from './combat.js';
 import { checkWin } from './match.js';
@@ -10,20 +10,22 @@ import { blastBreakables, worldBoxes } from './world.js';
 
 export function sendLoadout(p: Player): void {
   send(p.ws, {
-    t: 'loadout', gear: p.gear, knife: p.hasKnife, grenades: p.grenades, streak: p.streak, uav: p.uav, missile: p.missile, nuke: p.nuke, gunship: p.gunship,
+    t: 'loadout', gear: p.gear, knife: p.hasKnife, grenades: p.grenades, streak: p.streak, reward: p.reward,
   });
 }
 
 /** Награды выдаются ровно на пороге серии: 3 — БПЛА, 4 — ракета с неба, 5 — ракетница, 7 — суперброня, 15 — бомба. */
-/** Выдать награду — за серию убийств или из ящика. */
+/**
+ * Выдать награду — за серию убийств или из ящика. Джаггернаут действует сразу, остальное ложится
+ * в единственную ячейку и заменяет то, что там лежало и не было применено.
+ */
 export function grantReward(p: Player, kind: RewardKind): void {
-  if (kind === 'launcher') setRockets(p, Math.max(p.rockets, 6));
-  else if (kind === 'juggernaut') {
+  if (kind === 'juggernaut') {
     // Джаггернаут: суперброня, чуть больший размер и шлем, который держит выстрелы в голову
     p.armor = STREAK.superArmorHp;
     p.big = true;
     p.helmet = STREAK.helmetHits;
-  } else p[kind]++;
+  } else p.reward = kind;
   sendLoadout(p);
 }
 
@@ -35,17 +37,19 @@ export function addStreak(p: Player): void {
   sendLoadout(p);
 }
 
-/** Применить награду из запаса. */
-export function useStreak(room: Room, p: Player, kind: unknown): void {
-  if (room.roundOver || (kind !== 'uav' && kind !== 'missile' && kind !== 'nuke' && kind !== 'gunship')) return;
-  const k = kind as StreakKind;
-  if (p[k] <= 0) return;
+/** Применить награду из ячейки (клавиша 5). */
+export function useStreak(room: Room, p: Player): void {
+  const k = p.reward;
+  if (room.roundOver || !k) return;
   if (k === 'missile' && [...room.missiles.values()].some((m) => m.owner === p.id)) return;
   if (k === 'nuke' && room.nukeTimer) return;
   if (k === 'gunship' && room.gunship) return; // в небе одновременно только один самолёт
-  p[k]--;
+  if (k === 'launcher' && !p.alive) return;      // ракетницу берут в руки — только живым
+  p.reward = null;
   sendLoadout(p);
-  if (k === 'uav') {
+  if (k === 'launcher') {
+    setRockets(p, Math.max(p.rockets, 6));
+  } else if (k === 'uav') {
     p.uavUntil = Math.max(p.uavUntil, Date.now()) + STREAK.uavMs;
     for (const r of uavViewers(room, p)) send(r.ws, { t: 'uav', ms: p.uavUntil - Date.now() });
   } else if (k === 'missile') {

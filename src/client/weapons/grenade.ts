@@ -1,15 +1,17 @@
 // Граната: чека, бросок, отскоки, писк и взрыв.
 import * as THREE from 'three';
-import { GEAR, GRENADE, isThrown } from '../../shared/map.js';
-import type { GrenadesMsg, MeleeKind } from '../../shared/protocol.js';
+import { GEAR, GRENADE } from '../../shared/map.js';
+import type { GrenadesMsg, MeleeKind, WeaponId } from '../../shared/protocol.js';
 import { beep, shotSound } from '../core/audio.js';
 import { sendMsg } from '../core/net.js';
 import { box, camera, scene } from '../core/scene.js';
-import { settings } from '../core/settings.js';
-import { me, state } from '../core/state.js';
+import { keys, me, state } from '../core/state.js';
 import { $ } from '../core/util.js';
 import { openingUntil } from '../pickups/crate.js';
-import { gear } from '../ui/hotbar.js';
+import { gear, weaponSlots } from '../ui/hotbar.js';
+import { gunner } from '../streaks/gunship.js';
+import { missileCtl } from '../streaks/missile.js';
+import { throwKnife } from './knife.js';
 import { toast } from '../ui/hud.js';
 import { _dir } from './shooting.js';
 import { setWeapon, startPlace, startThrow, viewGun } from './viewmodel.js';
@@ -24,7 +26,63 @@ function beepInterval(msLeft: number): number {
   return 120 + 560 * Math.max(0, Math.min(1, msLeft / GRENADE.fuseMs));
 }
 
-/** Зажал ЛКМ — чека сорвана (пищит в руке); отпустил — бросок; передержал — взрыв в руке (решает сервер). */
+/** Сколько держать G, чтобы поставить растяжку (короткое нажатие не ставит — чтобы не поставить случайно) */
+const TRIP_HOLD_MS = 600;
+/** Когда зажали G для растяжки (0 — не держат) */
+let tripHoldAt = 0;
+/** Что было в руках до G: туда и возвращаемся после броска */
+let backTo: WeaponId | null = null;
+
+const canUseGear = (): boolean => me.alive && !openingUntil && !missileCtl && !gunner && !state.roundOver;
+
+function backToWeapon(delay: number): void {
+  const w = backTo;
+  setTimeout(() => {
+    if (me.weapon !== 'grenade' || cookStart || tripHoldAt) return;
+    setWeapon(w && w !== 'grenade' ? w : weaponSlots()[1] ?? weaponSlots()[0] ?? 'pistol');
+  }, delay);
+}
+
+/** Взять устройство в руку (на время броска или установки). */
+function takeInHand(): void {
+  if (me.weapon !== 'grenade') backTo = me.weapon;
+  setWeapon('grenade');
+}
+
+/** Мина или растяжка ложится под ноги. */
+function place(now: number): void {
+  sendMsg({ t: 'pin' });
+  beep(500, 0.08, 0.12);
+  startPlace(now);
+  toast(gear === 'mine' ? '🔴 Мина поставлена' : '🪢 Растяжка поставлена');
+  backToWeapon(380);
+}
+
+/**
+ * G нажали. Нож — бросок свободной рукой. Граната, световая, липучка — в руку, чека сорвана, пошёл отсчёт;
+ * отпустил G — бросок (короткое нажатие — бросок сразу, зажал — держишь её в руке). Мина — ставится сразу,
+ * растяжка — если подержать G.
+ */
+export function pressGear(now: number): void {
+  if (!canUseGear()) return;
+  if (gear === 'knife') { throwKnife(); return; }
+  if (state.myGrenades <= 0 && !cookStart) { toast(`${GEAR[gear].icon} ${GEAR[gear].name}: больше нет — пополнится после возрождения`); return; }
+  if (gear === 'mine') { takeInHand(); place(now); return; }
+  if (gear === 'tripwire') { takeInHand(); tripHoldAt = now; return; }
+  if (cookStart) return;
+  takeInHand();
+  cookStart = now;
+  cookBeepAt = now;
+  sendMsg({ t: 'pin' });
+  beep(900, 0.06, 0.1); // щелчок чеки
+}
+
+/** G отпустили: брошенное летит (в updateGrenadeHand), растяжка, не додержанная до конца, не ставится. */
+export function releaseGear(): void {
+  if (tripHoldAt) { tripHoldAt = 0; $('cook').classList.add('hidden'); backToWeapon(0); }
+}
+
+/** Кадр: вид устройства в руке, отсчёт гранаты и бросок, когда G отпустили; растяжка — когда додержали. */
 export function updateGrenadeHand(now: number): void {
   const flash = viewGun.group.children[0] as THREE.Mesh | undefined;
   // В руке — то устройство, что выбрано на эту жизнь: свой цвет, а мина и растяжка — плоские
@@ -38,33 +96,22 @@ export function updateGrenadeHand(now: number): void {
     flash.userData.box ??= flash.geometry;
     flash.geometry = gear === 'mine' ? MINE_DISC : flash.userData.box as THREE.BufferGeometry;
   }
-  if (!cookStart) {
-    const press = state.mouseDown && state.locked && me.alive && me.weapon === 'grenade' && state.myGrenades > 0 && !openingUntil && !state.firedThisPress;
-    if (press && !isThrown(gear)) {
-      // Мину и растяжку ставят под ноги одним нажатием
-      state.firedThisPress = true;
-      sendMsg({ t: 'pin' });
-      beep(500, 0.08, 0.12);
-      startPlace(now);
-      toast(gear === 'mine' ? '🔴 Мина поставлена' : '🪢 Растяжка поставлена');
-      setTimeout(() => { if (me.weapon === 'grenade') setWeapon(settings.kit[0]!); }, 380);
-    } else if (press) {
-      cookStart = now;
-      cookBeepAt = now;
-      state.firedThisPress = true;
-      sendMsg({ t: 'pin' });
-      beep(900, 0.06, 0.1); // щелчок чеки
-    }
-    $('cook').classList.add('hidden');
+  if (tripHoldAt) {
+    const k = Math.min(1, (now - tripHoldAt) / TRIP_HOLD_MS);
+    $('cook').classList.remove('hidden');
+    $('cook').textContent = `🪢 Растяжка: держи G — ${Math.round(k * 100)}%`;
+    if (!keys.KeyG || !me.alive) { releaseGear(); return; }
+    if (k >= 1) { tripHoldAt = 0; $('cook').classList.add('hidden'); place(now); }
     return;
   }
+  if (!cookStart) { $('cook').classList.add('hidden'); return; }
   const left = GRENADE.fuseMs - (now - cookStart);
   if (now >= cookBeepAt) { beep(1800, 0.05, 0.1); cookBeepAt = now + beepInterval(left); }
   if (flash) (flash.material as THREE.MeshLambertMaterial).emissive.setHex(Math.floor(now / 120) % 2 ? 0xff2020 : 0x330000);
   $('cook').classList.remove('hidden');
-  $('cook').textContent = `${GEAR[gear].icon} ${Math.max(0, left / 1000).toFixed(1)} с — отпусти ЛКМ, чтобы бросить`;
-  if (left <= 0) { cookStart = 0; $('cook').classList.add('hidden'); return; } // взорвалась в руке
-  if (!state.mouseDown || !me.alive) {
+  $('cook').textContent = `${GEAR[gear].icon} ${Math.max(0, left / 1000).toFixed(1)} с — отпусти G, чтобы бросить`;
+  if (left <= 0) { cookStart = 0; $('cook').classList.add('hidden'); backToWeapon(300); return; } // взорвалась в руке
+  if (!keys.KeyG || !me.alive) {
     camera.updateMatrixWorld(true);
     camera.getWorldDirection(_dir);
     sendMsg({ t: 'gthrow', d: [+_dir.x.toFixed(4), +_dir.y.toFixed(4), +_dir.z.toFixed(4)] });
@@ -72,7 +119,7 @@ export function updateGrenadeHand(now: number): void {
     $('cook').classList.add('hidden');
     shotSound('knife', 0.8);
     startThrow(now);
-    setTimeout(() => { if (me.weapon === 'grenade' && !cookStart) setWeapon(settings.kit[0]!); }, 340);
+    backToWeapon(340);
   }
 }
 

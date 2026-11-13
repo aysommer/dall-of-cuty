@@ -1,6 +1,6 @@
 // Состояние комнаты: игроки, матч, снаряды, ящики, погода — и типы сущностей.
 // Все функции комнаты получают объект Room первым параметром.
-import { type Box, type LimitKind, type MapId, ROOMS, type WeatherKind } from '../../shared/map.js';
+import { type Box, type LimitKind, type MapId, type RewardSlot, ROOMS, type WeatherKind } from '../../shared/map.js';
 import type { WebSocket } from 'ws';
 import type { CrateState, MeleeKind, Mode, Team, Vec3, WeaponId } from '../../shared/protocol.js';
 import type { Profile } from '../../shared/progress.js';
@@ -50,12 +50,8 @@ export interface Player {
   hasKnife: boolean;
   /** Убийств подряд без смерти */
   streak: number;
-  /** Запас наград за серию: их можно применить и после смерти */
-  uav: number;
-  /** Самолёт в запасе */
-  gunship: number;
-  missile: number;
-  nuke: number;
+  /** Награда, ждущая применения (одна; новая заменяет неиспользованную), — её можно применить и после смерти */
+  reward: RewardSlot | null;
   /** До какого момента работает БПЛА этого игрока */
   uavUntil: number;
   /** Суперброня (Джаггернаут): игрок на 10% больше */
