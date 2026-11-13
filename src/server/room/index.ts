@@ -55,7 +55,7 @@ export function handleJoin(room: Room, ws: WebSocket, msg: Incoming): Player | n
     hp: 100, armor: 0, alive: false, kills: 0, deaths: 0, lastShot: 0, lastSpray: 0,
     profile: decodeProfile(msg.token),
     rockets: 0,
-    hasKnife: true, streak: 0, uav: 0, missile: 0, nuke: 0, gunship: 0, uavUntil: 0, big: false, helmet: 0,
+    hasKnife: true, streak: 0, reward: null, uavUntil: 0, big: false, helmet: 0,
     kit: isKit(msg.kit) ? msg.kit : [...DEFAULT_KIT],
     melee: 'knife', gear: 'knife', grenades: 0, cookStart: 0,
   };
@@ -117,7 +117,7 @@ export function handle(room: Room, me: Player, msg: Incoming): void {
   } else if (msg.t === 'throw') {
     handleThrow(room, me, msg);
   } else if (msg.t === 'use') {
-    useStreak(room, me, msg.kind);
+    useStreak(room, me);
   } else if (msg.t === 'mpos') {
     missilePos(room, me, msg);
   } else if (msg.t === 'gsfire') {

@@ -110,12 +110,13 @@ export function buildGun(type: WeaponId): Gun {
     mag = part(0.032, 0.05, 0.045, 0x111111, 0, -0.165, -0.03); // низ магазина торчит из рукояти
     sight = { y: 0.085, z: -0.1 };
     sightTop = 0.035;
-    aim = { ...sight, relief: 0.35 }; // пистолет держат на вытянутых руках
+    aim = { ...sight, relief: 0.45 }; // пистолет держат на вытянутых руках: кисти дальше от глаз и не загораживают обзор
     muzzleZ = -0.26;
   } else if (type === 'shotgun') {
     add(0.06, 0.06, 0.7, 0x252525, 0, 0, -0.35);
     add(0.075, 0.06, 0.2, 0x7a4a22, 0, -0.055, -0.42);
     add(0.06, 0.1, 0.28, 0x7a4a22, 0, -0.03, 0.12);
+    add(0.045, 0.12, 0.06, 0x1c1c1c, 0, -0.09, 0.0);       // пистолетная рукоять
     shell = part(0.03, 0.03, 0.07, 0xc0262b, 0, -0.12, -0.08);
     shell.visible = false;
     sight = { y: 0.08, z: -0.15 };
@@ -169,6 +170,7 @@ export function buildGun(type: WeaponId): Gun {
     add(0.07, 0.03, 0.26, 0x1c1c1c, 0, 0.07, -0.42);         // кожух сверху
     mag = part(0.12, 0.13, 0.15, 0x3d4a2e, 0.02, -0.12, -0.16); // короб с лентой
     add(0.06, 0.12, 0.26, 0x4a3a28, 0, -0.02, 0.2);          // приклад
+    add(0.05, 0.12, 0.06, 0x1c1c1c, 0, -0.11, 0.02);         // пистолетная рукоять
     for (const side of [-1, 1]) {                            // сошки
       const leg = box(0.015, 0.16, 0.015, 0x1c1c1c);
       leg.position.set(side * 0.04, -0.09, -0.78);
@@ -194,6 +196,7 @@ export function buildGun(type: WeaponId): Gun {
     add(0.035, 0.035, 0.3, 0x1c1c1c, 0, 0.01, -0.58);
     mag = part(0.045, 0.18, 0.07, 0x1c1c1c, 0, -0.12, -0.22);
     add(0.055, 0.1, 0.24, 0x4a3a28, 0, -0.02, 0.16);
+    add(0.045, 0.12, 0.06, 0x3a2a1a, 0, -0.1, -0.01);      // пистолетная рукоять
     sight = { y: 0.1, z: -0.12 };
     sightTop = 0.045;
     aim = { ...sight, relief: 0.22 };
@@ -209,6 +212,8 @@ export function buildGun(type: WeaponId): Gun {
     iron = { y: line - 0.002, z: sight.z + 0.06, relief: aim.relief + 0.04 };
   }
   const flash = box(0.12, 0.12, 0.12, 0xffd34d, false);
+  // Вспышка ярче белого — её подхватывает свечение (bloom); без свечения цветокоррекция делает её бело-жёлтой
+  (flash.material as THREE.MeshBasicMaterial).color.multiplyScalar(6);
   flash.position.set(0, 0, muzzleZ - 0.05);
   flash.visible = false;
   group.add(flash);

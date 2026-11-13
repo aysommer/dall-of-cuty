@@ -1,6 +1,5 @@
 // Сенсорное управление: джойстик под левым пальцем, обзор — под правым, действия — кнопки на экране.
 // Включается само при первом касании пальцем; мышь и клавиатура при этом продолжают работать.
-import { useSlot, type SlotId } from '../ui/hotbar.js';
 import { enableTouch, isTouch, look, pressKey, releaseKey, setAim, setFire, showScoreboard, unlock } from './input.js';
 import { keys, state } from './state.js';
 import { $ } from './util.js';
@@ -118,13 +117,6 @@ export function initTouch(): void {
     lookId = -1;
     $('t-aim').classList.remove('down');
     unlock();
-  });
-  // Слоты оружия и наград внизу экрана нажимаются пальцем
-  $('hotbar').addEventListener('pointerdown', (e) => {
-    const cell = (e.target as HTMLElement).closest<HTMLElement>('.slot');
-    if (!cell || !isTouch() || !state.locked) return;
-    e.preventDefault();
-    useSlot(cell.dataset.id as SlotId);
   });
   // Жесты браузера (масштаб, прокрутка, меню по долгому нажатию) во время игры не нужны
   document.addEventListener('touchmove', (e) => { if (state.locked && isTouch()) e.preventDefault(); }, { passive: false });

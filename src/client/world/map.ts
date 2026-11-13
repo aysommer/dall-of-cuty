@@ -3,10 +3,11 @@ import * as THREE from 'three';
 import { type Box, clipWalls, DOOR, type GameMap, type Ladder, type MapId, MAPS } from '../../shared/map.js';
 import type { Vec3 } from '../../shared/protocol.js';
 import { beep, shotSound } from '../core/audio.js';
-import { bakeShadows, box, scene } from '../core/scene.js';
+import { box, scene, setSunFor } from '../core/scene.js';
 import { me, state } from '../core/state.js';
 import { fireworks } from '../fx/fireworks.js';
-import { buildCrate } from '../pickups/crate.js';
+import { buildCrate, buildParachute } from '../pickups/crate.js';
+import { shatterGlass } from '../fx/glass.js';
 import { applyFog } from './weather.js';
 import { buildBlocks } from './blocks.js';
 
@@ -81,7 +82,7 @@ export function loadMap(id: MapId): void {
 
   applyFog(); // небо, туман и свет — под эту карту и текущую погоду
   for (const m of buildBlocks(currentMap)) mapGroup.add(m);
-  bakeShadows(currentMap.half);
+  setSunFor(currentMap.half, !currentMap.indoor); // на открытых картах солнце ходит по кругу
   for (const l of currentMap.ladders) {
     const ladder = buildLadder(l);
     ladder.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
@@ -144,13 +145,9 @@ export function loadMap(id: MapId): void {
   state.crateMesh = buildCrate();
   state.crateMesh.visible = false;
   mapGroup.add(state.crateMesh);
-  state.crateBeam = box(0.3, 30, 0.3, 0xffd34d, false);
-  const beamMat = state.crateBeam.material as THREE.MeshBasicMaterial;
-  beamMat.transparent = true;
-  beamMat.opacity = 0.35;
-  beamMat.depthWrite = false;
-  state.crateBeam.visible = false;
-  mapGroup.add(state.crateBeam);
+  state.crateChute = buildParachute();
+  state.crateChute.visible = false;
+  mapGroup.add(state.crateChute);
 }
 
 export function rebuildSolids(): void {
@@ -158,7 +155,7 @@ export function rebuildSolids(): void {
   solids = intact.length ? [...currentMap.boxes, ...intact] : currentMap.boxes;
 }
 
-/** Что-то разбили: исчезает, а на его месте разлетаются щепки (дверь) или осколки (стекло). */
+/** Что-то разбили: исчезает, а на его месте разлетаются щепки (дверь) или осколки стекла с физикой. */
 export function onBreaks(broken: number[]): void {
   const now = new Set(broken);
   for (const x of currentMap.breakables ?? []) {
@@ -169,7 +166,7 @@ export function onBreaks(broken: number[]): void {
       const { min, max } = x.box;
       const c: Vec3 = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
       if (x.kind === 'glass') {
-        fireworks(c[0], c[1], c[2], 1.3, [0xbfe6ff, 0xe8f6ff, 0x9fd3ff, 0xffffff]);
+        shatterGlass(x.box, solids);
         shotSound('knife', 1);
         beep(2600, 0.15, 0.08);
       } else {

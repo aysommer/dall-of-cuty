@@ -16,14 +16,21 @@ interface Settings {
   melee: MeleeKind;
   /** Тени от солнца (на слабом телефоне их можно выключить) */
   shadows: boolean;
+  /** Свечение ярких мест: вспышки, взрывы, солнце */
+  bloom: boolean;
+  /** Мягкое затенение углов и стыков (SSAO) */
+  ssao: boolean;
 }
 
 export const SETTINGS_KEY = 'doc-settings';
 
 export const TOKEN_KEY = 'doc-progress';
 
+/** Сенсорный экран без мыши (телефон, планшет): там свечение и затенение по умолчанию выключены — дорогие для слабой видеокарты */
+const coarse = (): boolean => { try { return matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches; } catch { return false; } };
+
 function loadSettings(): Settings {
-  const s: Settings = { volume: 0.7, sens: 1, hand: 'right', fov: 75, kit: [...DEFAULT_KIT], melee: 'knife', shadows: true };
+  const s: Settings = { volume: 0.7, sens: 1, hand: 'right', fov: 75, kit: [...DEFAULT_KIT], melee: 'knife', shadows: true, bloom: !coarse(), ssao: !coarse() };
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>;
     if (typeof raw.volume === 'number') s.volume = Math.max(0, Math.min(1, raw.volume));
@@ -33,6 +40,8 @@ function loadSettings(): Settings {
     if (isKit(raw.kit)) s.kit = raw.kit;
     if (isGear(raw.melee)) s.melee = raw.melee;
     if (raw.shadows === false) s.shadows = false;
+    if (typeof raw.bloom === 'boolean') s.bloom = raw.bloom;
+    if (typeof raw.ssao === 'boolean') s.ssao = raw.ssao;
   } catch { /* испорченные настройки — берём стандартные */ }
   return s;
 }

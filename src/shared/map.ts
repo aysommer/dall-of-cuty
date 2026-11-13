@@ -94,7 +94,8 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
  */
 export const CRATE = {
   size: 1.2, height: 0.9, reach: 2.4, openMs: 1000,
-  dropEveryMs: 60_000, dropChance: 0.5, fallMs: 4000, fallHeight: 40, lifeMs: 120_000,
+  /** Спуск на парашюте: 40 м за 8 с (5 м/с) — заметно, но без долгого ожидания */
+  dropEveryMs: 60_000, dropChance: 0.5, fallMs: 8000, fallHeight: 40, lifeMs: 120_000,
 };
 export const ROCKET = { speed: 70, radius: 4, lifeMs: 4000 };
 
@@ -185,12 +186,13 @@ export const ROOMS = { max: 4, players: 4, passMin: 4, passMax: 16, nameMax: 20 
 export type LimitKind = 'time' | 'kills';
 
 /** Погода: раз в everyMs с вероятностью chance начинается дождь или снег на ms. */
-export const WEATHER = { everyMs: 180_000, chance: 0.25, ms: 60_000 };
+/** Погода. enabled: false — пока выключена на всех картах (механизм оставлен, вернём позже). */
+export const WEATHER = { enabled: false, everyMs: 180_000, chance: 0.25, ms: 60_000 };
 export type WeatherKind = 'rain' | 'snow';
 
 /**
  * Серия убийств (без смертей): награды за 3, 4, 5, 7 и 15 убийств подряд.
- * БПЛА, ракету с неба и бомбу можно использовать и после смерти — они лежат в запасе, пока их не применят.
+ * Награда ждёт в единственной ячейке, пока её не применят (5), — и после смерти тоже; новая заменяет неиспользованную.
  */
 export const STREAK = {
   uav: 3, missile: 4, launcher: 5, superArmor: 7, nuke: 15,
@@ -204,6 +206,11 @@ export const STREAK = {
 export type StreakKind = 'uav' | 'missile' | 'nuke' | 'gunship';
 /** Все награды за серию — те же, что лежат в ящике: к запасаемым добавляются ракетница и Джаггернаут */
 export type RewardKind = StreakKind | 'launcher' | 'juggernaut';
+/**
+ * Награда, которая ждёт применения (клавиша 5). Она одна: новая (за серию или из ящика) заменяет
+ * неиспользованную. Джаггернаут сюда не попадает — он действует сразу.
+ */
+export type RewardSlot = Exclude<RewardKind, 'juggernaut'>;
 /** Сколько убийств подряд стоит каждая награда */
 export const REWARD_KILLS: Record<RewardKind, number> = { uav: 3, missile: 4, launcher: 5, juggernaut: 7, gunship: 11, nuke: 15 };
 export const REWARD_NAMES: Record<RewardKind, string> = {

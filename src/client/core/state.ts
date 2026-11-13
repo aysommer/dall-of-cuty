@@ -12,9 +12,9 @@ export const state = {
   crateState: 'gone' as CrateState,
   /** Куда падает или где лежит ящик */
   crateAt: null as Vec3 | null,
-  crateMesh: null as THREE.Mesh | null,
-  /** Световой столб над лежащим ящиком, чтобы его было видно издалека */
-  crateBeam: null as THREE.Mesh | null,
+  crateMesh: null as THREE.Group | null,
+  /** Парашют падающего ящика — по нему ящик видно издалека */
+  crateChute: null as THREE.Group | null,
   mode: 'tdm' as Mode,
   limit: 20,
   scores: { green: 0, red: 0 } as Record<Team, number>,

@@ -169,7 +169,7 @@ h3 { margin: 22px 0 10px; font-size: 13px; color: var(--text-3); text-transform:
 #scoreboard td.n, #scoreboard th.n { text-align: right; }
 #scoreboard tr.me td { background: rgba(255, 255, 255, 0.08); }
 
-/* ---------- серия убийств, слоты, таймер ---------- */
+/* ---------- серия убийств, награда, таймер ---------- */
 #score .timer { margin-left: 12px; color: #fff; font-variant-numeric: tabular-nums; }
 #streak {
   position: absolute; left: 18px; bottom: 140px; background: rgba(0, 0, 0, 0.45);
@@ -178,18 +178,11 @@ h3 { margin: 22px 0 10px; font-size: 13px; color: var(--text-3); text-transform:
 #streak b { font-size: 20px; color: #ffb347; margin: 0 4px; }
 #streak small { color: #c8ccd4; }
 
-/* Слоты — отдельной строкой в самом низу, над ними HP и патроны */
-#hotbar { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); display: flex; gap: 4px; max-width: calc(100% - 16px); }
-#hotbar .slot {
-  min-width: 58px; padding: 3px 6px; background: rgba(0, 0, 0, 0.5); border: 2px solid transparent;
-  font-size: 11px; line-height: 1.25; text-align: left; position: relative;
+/* Награда, ждущая применения: «БПЛА готов (нажми 5)» — над серией */
+#reward {
+  position: absolute; left: 18px; bottom: 178px; background: rgba(40, 26, 0, 0.6); border-left: 3px solid #ffb347;
+  padding: 5px 12px; font-size: 14px; font-weight: 600; color: #ffd28a; white-space: nowrap;
 }
-#hotbar .slot .key { display: block; font-weight: 700; font-size: 12px; color: #c8ccd4; }
-#hotbar .slot .name { display: block; white-space: nowrap; }
-#hotbar .slot .count { position: absolute; right: 5px; top: 3px; color: #ffb347; font-weight: 700; }
-#hotbar .slot.active { border-color: #fff; }
-#hotbar .slot.off { opacity: 0.35; }
-#hotbar .slot.reward { border-color: #ffb347; }
 
 /* ---------- БПЛА: мини-карта ---------- */
 #minimap { position: absolute; left: 12px; top: 12px; width: 180px; height: 180px; border: 2px solid #3f6f4c; }
@@ -255,9 +248,8 @@ h3 { margin: 22px 0 10px; font-size: 13px; color: var(--text-3); text-transform:
 
 @media (max-width: 640px) {
   #health, #ammo { font-size: 28px; padding: 8px 12px; }
-  #hotbar .slot { min-width: 0; }
-  #hotbar .slot .name { display: none; }
   #streak { bottom: 124px; }
+  #reward { bottom: 160px; }
   #health, #ammo { bottom: 52px; }
 }
 
@@ -387,6 +379,8 @@ body.touch { -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap
 #t-slide { right: calc(104px + env(safe-area-inset-right)); bottom: 214px; width: 50px; height: 50px; font-size: 18px; }
 #t-throw { right: calc(196px + env(safe-area-inset-right)); bottom: 104px; width: 50px; height: 50px; font-size: 20px; }
 #t-use { right: calc(184px + env(safe-area-inset-right)); bottom: 168px; width: 50px; height: 50px; font-weight: 700; font-size: 18px; }
+#t-swap { right: calc(256px + env(safe-area-inset-right)); bottom: 104px; width: 50px; height: 50px; font-size: 22px; }
+#t-reward { right: calc(246px + env(safe-area-inset-right)); bottom: 168px; width: 50px; height: 50px; font-weight: 700; font-size: 18px; border-color: #ffb347; color: #ffd28a; }
 .t-top { position: absolute; left: calc(10px + env(safe-area-inset-left)); top: 8px; display: flex; gap: 8px; }
 #touch .t-top button { position: static; width: 42px; height: 42px; font-size: 18px; }
 #t-rotate {
@@ -394,19 +388,17 @@ body.touch { -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap
   background: rgba(0, 0, 0, 0.7); padding: 8px 14px; font-size: 14px; white-space: nowrap; pointer-events: none;
 }
 @media (orientation: portrait) { body.touch.playing #t-rotate { display: block; } }
-/* На сенсорном экране HUD уступает место кнопкам: патроны — наверх, слоты крупнее и нажимаются */
+/* На сенсорном экране HUD уступает место кнопкам: патроны — наверх */
 body.touch #ammo { bottom: auto; top: 8px; right: calc(10px + env(safe-area-inset-right)); font-size: 24px; padding: 6px 12px; }
 body.touch #weapon-name { font-size: 11px; }
 body.touch #feed { top: 78px; }
 body.touch #health { font-size: 24px; padding: 6px 12px; bottom: 58px; left: calc(10px + env(safe-area-inset-left)); }
 body.touch #streak { bottom: 106px; left: calc(10px + env(safe-area-inset-left)); font-size: 12px; }
-body.touch #chat { bottom: 140px; left: calc(10px + env(safe-area-inset-left)); font-size: 12px; }
+body.touch #reward { bottom: 140px; left: calc(10px + env(safe-area-inset-left)); font-size: 12px; }
+body.touch #chat { bottom: 172px; left: calc(10px + env(safe-area-inset-left)); font-size: 12px; }
 body.touch #minimap { top: 58px; width: 110px; height: 110px; }
 body.touch #score { font-size: 14px; padding: 6px 12px; top: 8px; }
 body.touch #crown-note { top: 44px; font-size: 12px; }
-body.touch.playing #hotbar { pointer-events: auto; z-index: 2; bottom: 6px; }
-body.touch #hotbar .slot { min-width: 40px; padding: 8px 8px; touch-action: none; }
-body.touch #hotbar .slot .name { display: none; }
 body.touch #scoreboard { pointer-events: none; }
 
 /* ===== Снаряжение: замки по уровням и ослепление ===== */
