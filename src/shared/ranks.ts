@@ -71,7 +71,7 @@ export function rankProgress(kills: number): RankProgress {
  * Уровень — номер звания + 1, растёт с убийствами за всё время.
  */
 export const UNLOCK_LEVEL: Record<string, number> = {
-  mine: 2, flash: 2,
+  mine: 2, flash: 2, m6: 2,
   lmg: 3, tripwire: 3,
   smg: 4, sticky: 4,
   sniper: 5,

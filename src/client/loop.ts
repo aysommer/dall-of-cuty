@@ -116,7 +116,7 @@ function frame(now: number): void {
     if (sendAcc >= 0.05) {
       sendAcc = 0;
       sendMsg({
-        t: 'state',
+        t: 'state', ts: Math.round(now),
         p: [+me.pos.x.toFixed(2), +me.pos.y.toFixed(2), +me.pos.z.toFixed(2)],
         yaw: +me.yaw.toFixed(3), pitch: +me.pitch.toFixed(3), w: me.weapon, sl: state.low, cr: state.crouch,
         air: airFrames >= 2 && now - groundedAt > 120 && !touchingLadder(me.pos), rl: performance.now() < me.reloadUntil,
@@ -218,7 +218,7 @@ export function initLoop(): void {
       missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, crouch: state.crouch, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, chute: !!state.crateChute?.visible, cook: !document.getElementById('cook')!.classList.contains('hidden'), eyeH: state.eyeH, recoil: state.recoil, mines: [...mineFx.values()].map((m) => ({ kind: m.info.kind, armed: m.info.armed > 0, p: m.info.p, to: m.info.to })), blind: +blindK(performance.now()).toFixed(2), arms: viewArmsReady(), armsFit: viewArmsDebug(), drawMs: lastDrawMs(), gear, gunBob: +bobGun.toFixed(2), bob: +bobY.toFixed(3),
       corpses: corpses.length, corpse: corpseDebug(), model: characterReady() ? 'ready' : characterFailed() ? 'failed' : 'loading',
       remoteAnim: [...remotes.values()].map((r) => r.char ? { walk: +r.char.walk.getEffectiveWeight().toFixed(2), run: +r.char.run.getEffectiveWeight().toFixed(2), air: +r.char.airK.toFixed(2), reload: r.reloading, speed: +r.char.speed.toFixed(1) } : null), sprays: sprays.length,
-      shadow: { on: renderer.shadowMap.enabled, pending: renderer.shadowMap.needsUpdate, cast: sun.castShadow, map: !!sun.shadow.map, box: [sun.shadow.camera.left, sun.shadow.camera.right, sun.shadow.camera.near, sun.shadow.camera.far].map((v) => +v.toFixed(1)) }, drawCalls: renderer.info.render.calls, glass: glassState(), pingMe: state.pings.get(me.id) ?? 0, skyBake: { ...bakeInfo }, post: postState(), sunDir: sunDirection().toArray().map((v) => +v.toFixed(3)),
+      shadow: { on: renderer.shadowMap.enabled, pending: renderer.shadowMap.needsUpdate, cast: sun.castShadow, map: !!sun.shadow.map, box: [sun.shadow.camera.left, sun.shadow.camera.right, sun.shadow.camera.near, sun.shadow.camera.far].map((v) => +v.toFixed(1)) }, drawCalls: renderer.info.render.calls, glass: glassState(), pingMe: state.pings.get(me.id) ?? 0, skyBake: { ...bakeInfo }, post: postState(), sunDir: sunDirection().toArray().map((v) => +v.toFixed(3)), sunAz: +(Math.atan2(sunDirection().z, sunDirection().x) * 180 / Math.PI).toFixed(4),
       steps: stepCount, medkits: medkitFx.size, boltUntil: state.boltUntil, menuClosed: state.menuClosed, armor: me.armor }),
   };
 }

@@ -91,7 +91,7 @@ function fire(now: number): void {
   if (me.weapon === 'sniper' && me.ammo.sniper > 0) state.boltUntil = now + BOLT_MS;
   const RECOIL: Partial<Record<WeaponId, [number, number]>> = {
     // Пулемёт бьёт вдвое сильнее автомата
-    shotgun: [0.12, 0.035], rifle: [0.05, 0.012], smg: [0.035, 0.008], lmg: [0.1, 0.024], sniper: [0.14, 0.05],
+    shotgun: [0.12, 0.035], rifle: [0.05, 0.012], m6: [0.045, 0.011], smg: [0.035, 0.008], lmg: [0.1, 0.024], sniper: [0.14, 0.05],
   };
   const [k, lift] = RECOIL[me.weapon] ?? [0.05, 0.015];
   state.kick = k;

@@ -83,6 +83,38 @@ function buildIrons(group: THREE.Group, rearTop: number, rearZ: number, frontTop
 }
 
 // Оружие смотрит стволом вдоль -Z.
+let tigerMat: THREE.MeshLambertMaterial | null = null;
+/** Тигровый камуфляж: оранжевый с чёрными рваными полосами поперёк (одна текстура на все M6A1). */
+function tigerMaterial(): THREE.MeshLambertMaterial {
+  if (tigerMat) return tigerMat;
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  const grad = g.createLinearGradient(0, 0, 0, 128);
+  grad.addColorStop(0, '#e2861f'); grad.addColorStop(0.5, '#d4741a'); grad.addColorStop(1, '#e89336');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  g.fillStyle = '#16110c';
+  // Полосы: клинья разной ширины, сужаются к концам, слегка изогнуты
+  for (let i = 0; i < 9; i++) {
+    const x = (i + 0.3 + Math.random() * 0.4) * (128 / 9), w = 3 + Math.random() * 5, len = 50 + Math.random() * 70;
+    const y0 = Math.random() * 128 - len / 2, bend = (Math.random() - 0.5) * 18;
+    for (const dy of [0, 128, -128]) {
+      g.beginPath();
+      g.moveTo(x, y0 + dy);
+      g.quadraticCurveTo(x + w + bend, y0 + dy + len / 2, x + bend * 0.3, y0 + dy + len);
+      g.quadraticCurveTo(x - w + bend, y0 + dy + len / 2, x, y0 + dy);
+      g.fill();
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  tigerMat = new THREE.MeshLambertMaterial({ map: t });
+  tigerMat.userData.shared = true;
+  return tigerMat;
+}
+
 export function buildGun(type: WeaponId): Gun {
   const group = new THREE.Group();
   const add = (w: number, h: number, d: number, color: number, x: number, y: number, z: number): void => {
@@ -191,6 +223,29 @@ export function buildGun(type: WeaponId): Gun {
     sightTop = 0.04;
     aim = { ...sight, relief: 0.22 };
     muzzleZ = -0.48;
+  } else if (type === 'm6') {
+    // M6A1: окрашенные в тигровый камуфляж корпус, цевьё и приклад; ствол, магазин, рукоять и планки — чёрные
+    const tiger = tigerMaterial();
+    const camo = (w: number, h: number, d: number, x: number, y: number, z: number): void => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), tiger);
+      m.position.set(x, y, z);
+      group.add(m);
+    };
+    camo(0.055, 0.075, 0.34, 0, 0, -0.1);                    // ствольная коробка
+    camo(0.065, 0.07, 0.26, 0, 0.005, -0.4);                // цевьё
+    add(0.03, 0.03, 0.3, 0x141414, 0, 0.01, -0.66);           // ствол
+    add(0.02, 0.05, 0.02, 0x141414, 0, 0.06, -0.52);          // мушка на треугольной стойке
+    add(0.03, 0.012, 0.42, 0x1c1c1c, 0, 0.044, -0.25);        // планка сверху
+    mag = part(0.04, 0.17, 0.065, 0x1a1a1a, 0, -0.115, -0.13); // магазин
+    mag.rotation.x = 0.12;                                   // чуть загнут вперёд
+    add(0.042, 0.11, 0.055, 0x1c1c1c, 0, -0.085, 0.03);       // пистолетная рукоять
+    add(0.02, 0.025, 0.12, 0x1c1c1c, 0, -0.045, -0.04);       // спусковая скоба
+    add(0.03, 0.035, 0.16, 0x1c1c1c, 0, 0, 0.14);             // труба приклада
+    camo(0.05, 0.1, 0.12, 0, -0.025, 0.24);                  // раздвижной приклад
+    sight = { y: 0.085, z: -0.14 };
+    sightTop = 0.05;
+    aim = { ...sight, relief: 0.22 };
+    muzzleZ = -0.82;
   } else {
     add(0.06, 0.09, 0.5, 0x30343a, 0, 0, -0.2);
     add(0.035, 0.035, 0.3, 0x1c1c1c, 0, 0.01, -0.58);

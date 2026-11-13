@@ -82,12 +82,12 @@ export const me = {
   grounded: false,
   weapon: 'pistol' as WeaponId,
   ammo: {
-    pistol: WEAPONS.pistol.mag, shotgun: WEAPONS.shotgun.mag, rifle: WEAPONS.rifle.mag,
+    pistol: WEAPONS.pistol.mag, shotgun: WEAPONS.shotgun.mag, rifle: WEAPONS.rifle.mag, m6: WEAPONS.m6.mag,
     sniper: WEAPONS.sniper.mag, lmg: WEAPONS.lmg.mag, smg: WEAPONS.smg.mag, knife: 0, grenade: 0, rocket: 0,
   } as Record<WeaponId, number>,
   /** Запас патронов сверх магазина; кончится — перезаряжаться нечем */
   reserve: {
-    pistol: WEAPONS.pistol.reserve, shotgun: WEAPONS.shotgun.reserve, rifle: WEAPONS.rifle.reserve,
+    pistol: WEAPONS.pistol.reserve, shotgun: WEAPONS.shotgun.reserve, rifle: WEAPONS.rifle.reserve, m6: WEAPONS.m6.reserve,
     sniper: WEAPONS.sniper.reserve, lmg: WEAPONS.lmg.reserve, smg: WEAPONS.smg.reserve, knife: 0, grenade: 0, rocket: 0,
   } as Record<WeaponId, number>,
   reloadUntil: 0,

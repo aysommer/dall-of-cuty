@@ -20,6 +20,7 @@ const SOUND: Record<WeaponId | 'boom' | 'slide', { dur: number; freq: number; ga
   pistol: { dur: 0.18, freq: 1800, gain: 0.35 },
   shotgun: { dur: 0.35, freq: 900, gain: 0.35 },
   rifle: { dur: 0.14, freq: 2600, gain: 0.35 },
+  m6: { dur: 0.12, freq: 2900, gain: 0.33 },
   smg: { dur: 0.1, freq: 3000, gain: 0.3 },
   lmg: { dur: 0.16, freq: 1700, gain: 0.4 },
   grenade: { dur: 0.12, freq: 2500, gain: 0.25, high: true },

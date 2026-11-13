@@ -130,6 +130,7 @@ const HOLDS: Record<WeaponId, { main: Hold; off: Hold | null }> = {
     off: { at: v(0, -0.085, -0.03), finger: v(0, -0.35, -1), palm: v(1, 0, 0), r: 0.05, fist: true },
   },
   rifle: { main: onGrip(-0.085, -0.01), off: underGuard(-0.005, -0.31, 0.045) },
+  m6: { main: onGrip(-0.085, 0.0), off: underGuard(-0.005, -0.3, 0.04) },
   smg: { main: onGrip(-0.075, 0.0), off: underGuard(0, -0.27, 0.04) },
   shotgun: { main: onGrip(-0.075, 0.0), off: underGuard(-0.055, -0.33, 0.03) },          // на цевье-помпе
   sniper: { main: onGrip(-0.085, -0.05), off: underGuard(0, -0.32, 0.04) },
