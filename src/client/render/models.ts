@@ -212,6 +212,8 @@ export function buildGun(type: WeaponId): Gun {
     iron = { y: line - 0.002, z: sight.z + 0.06, relief: aim.relief + 0.04 };
   }
   const flash = box(0.12, 0.12, 0.12, 0xffd34d, false);
+  // Вспышка ярче белого — её подхватывает свечение (bloom); без свечения цветокоррекция делает её бело-жёлтой
+  (flash.material as THREE.MeshBasicMaterial).color.multiplyScalar(6);
   flash.position.set(0, 0, muzzleZ - 0.05);
   flash.visible = false;
   group.add(flash);

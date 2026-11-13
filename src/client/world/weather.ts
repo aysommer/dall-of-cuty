@@ -49,6 +49,8 @@ export function applyFog(): void {
   fog.color.getHSL(hsl);
   skyUniforms.zenith.value.setHSL(hsl.h, Math.min(1, hsl.s * 1.35 + 0.08), hsl.l * 0.72);
   skyUniforms.zenithK.value = weatherKind ? 0.3 : 1;
+  // Диск солнца — только на открытых картах в ясную погоду
+  skyUniforms.sunOn.value = weatherKind || m.indoor ? 0 : 1;
   hemi.groundColor.set(m.floor).multiplyScalar(0.75);
   if (m.indoor) {
     hemi.color.set(0xfff4e2); hemi.intensity = 1.9;

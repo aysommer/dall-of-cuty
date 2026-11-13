@@ -241,6 +241,8 @@ if (!chromium) {
       if (sessionStorage.getItem('seeded')) return; // только при первом открытии: дальше игра хранит своё
       sessionStorage.setItem('seeded', '1');
       localStorage.setItem('doc-name', n);
+      // Тестовый браузер рисует без видеокарты: свечение и затенение углов включаем только там, где их проверяем
+      localStorage.setItem('doc-settings', JSON.stringify({ bloom: false, ssao: false }));
       if (t) { localStorage.setItem('doc-progress', t); localStorage.setItem('doc-kills', String(k)); }
     }, [kills !== undefined ? token(kills) : null, kills ?? 0, name]);
     await p.goto(URL);
@@ -583,6 +585,19 @@ if (!chromium) {
       fit[w] = await V.evaluate(() => game.dbg().armsFit);
     }
     check('руки держат оружие: ладони на рукояти и цевье (ближе 4 см)', Object.values(fit).every((f) => f && f.main < 0.01 && f.off < 0.04), JSON.stringify(fit));
+    // Свечение и затенение углов: включаются в настройках, кадр рисуется через пост-обработку без ошибок
+    const post0 = await V.evaluate(() => game.dbg().post);
+    for (const n of ['bloom', 'ssao']) await V.evaluate((n) => document.querySelector(`[data-setting=${n}] button:nth-child(1)`).click(), n);
+    await V.waitForTimeout(1500);
+    const post1 = await V.evaluate(() => game.dbg().post);
+    for (const n of ['bloom', 'ssao']) await V.evaluate((n) => document.querySelector(`[data-setting=${n}] button:nth-child(2)`).click(), n);
+    check('свечение и затенение углов включаются в настройках', !post0.bloom && !post0.ssao && post1.bloom && post1.ssao && post1.composer, JSON.stringify([post0, post1]));
+    // Солнце на открытой карте ходит по кругу: оборот за 10 минут — за 2 секунды сдвиг ~1,2°
+    const sunA = await V.evaluate(() => game.dbg().sunDir);
+    await V.waitForTimeout(2000);
+    const sunB = await V.evaluate(() => game.dbg().sunDir);
+    const turn = Math.acos(Math.min(1, sunA[0] * sunB[0] + sunA[1] * sunB[1] + sunA[2] * sunB[2])) * 180 / Math.PI;
+    check('солнце движется: полный оборот за 10 минут', turn > 0.5 && turn < 3 && Math.abs(sunA[1] - sunB[1]) < 1e-3, `${turn.toFixed(2)}° за 2 с`);
     // Ящик спускается на парашюте; лёг — парашют исчезает
     await V.evaluate(() => game.crate({ t: 'crate', state: 'falling', at: [0, 0, 0], by: null, ms: 4000, left: 120000 }));
     await V.waitForTimeout(400);
@@ -597,7 +612,7 @@ if (!chromium) {
   {
     console.log('Снаряжение на G (браузер)');
     const G = await open({ name: 'Гренадёр' });
-    await G.evaluate(() => localStorage.setItem('doc-settings', JSON.stringify({ melee: 'grenade' })));
+    await G.evaluate(() => localStorage.setItem('doc-settings', JSON.stringify({ melee: 'grenade', bloom: false, ssao: false })));
     await G.reload();
     await G.waitForFunction(() => !document.getElementById('play').disabled);
     await play(G, { map: 'bricks' });

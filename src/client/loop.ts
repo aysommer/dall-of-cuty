@@ -3,7 +3,8 @@ import type { WeaponId } from '../shared/protocol.js';
 import * as THREE from 'three';
 import { CROUCH, PLAYER, SLIDE, STREAK } from '../shared/map.js';
 import { sendMsg } from './core/net.js';
-import { camera, fog, renderer, scene, sun } from './core/scene.js';
+import { postState, renderFrame } from './core/post.js';
+import { camera, fog, renderer, sun, sunDirection, updateSun } from './core/scene.js';
 import { settings } from './core/settings.js';
 import { keys, me, remotes, state } from './core/state.js';
 import { $ } from './core/util.js';
@@ -163,14 +164,15 @@ function frame(now: number): void {
   updateVote(now);
   const timer = document.getElementById('match-timer');
   if (timer) timer.textContent = timerText();
+  updateSun();
   if (dbgView) {
     // Отладочный вид со стороны: камера стоит рядом с глазами игрока (в его координатах) и смотрит на руки
     camera.updateMatrixWorld(true);
     dbgCam.aspect = camera.aspect; dbgCam.updateProjectionMatrix();
     dbgCam.position.copy(camera.localToWorld(new THREE.Vector3(...dbgView.from)));
     dbgCam.lookAt(camera.localToWorld(new THREE.Vector3(...dbgView.at)));
-    renderer.render(scene, dbgCam);
-  } else renderer.render(scene, camera);
+    renderFrame(dbgCam);
+  } else renderFrame(camera);
 }
 
 /** Отладочный вид со стороны (game.view): откуда и куда смотрит камера, в координатах глаз игрока */
@@ -212,7 +214,7 @@ export function initLoop(): void {
       missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, crouch: state.crouch, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, chute: !!state.crateChute?.visible, cook: !document.getElementById('cook')!.classList.contains('hidden'), eyeH: state.eyeH, recoil: state.recoil, mines: [...mineFx.values()].map((m) => ({ kind: m.info.kind, armed: m.info.armed > 0, p: m.info.p, to: m.info.to })), blind: +blindK(performance.now()).toFixed(2), arms: viewArmsReady(), armsFit: viewArmsDebug(), drawMs: lastDrawMs(), gear, gunBob: +bobGun.toFixed(2), bob: +bobY.toFixed(3),
       corpses: corpses.length, corpse: corpseDebug(), model: characterReady() ? 'ready' : characterFailed() ? 'failed' : 'loading',
       remoteAnim: [...remotes.values()].map((r) => r.char ? { walk: +r.char.walk.getEffectiveWeight().toFixed(2), run: +r.char.run.getEffectiveWeight().toFixed(2), air: +r.char.airK.toFixed(2), reload: r.reloading, speed: +r.char.speed.toFixed(1) } : null), sprays: sprays.length,
-      shadow: { on: renderer.shadowMap.enabled, pending: renderer.shadowMap.needsUpdate, cast: sun.castShadow, map: !!sun.shadow.map, box: [sun.shadow.camera.left, sun.shadow.camera.right, sun.shadow.camera.near, sun.shadow.camera.far].map((v) => +v.toFixed(1)) }, drawCalls: renderer.info.render.calls,
+      shadow: { on: renderer.shadowMap.enabled, pending: renderer.shadowMap.needsUpdate, cast: sun.castShadow, map: !!sun.shadow.map, box: [sun.shadow.camera.left, sun.shadow.camera.right, sun.shadow.camera.near, sun.shadow.camera.far].map((v) => +v.toFixed(1)) }, drawCalls: renderer.info.render.calls, post: postState(), sunDir: sunDirection().toArray().map((v) => +v.toFixed(3)),
       steps: stepCount, medkits: medkitFx.size, boltUntil: state.boltUntil, menuClosed: state.menuClosed, armor: me.armor }),
   };
 }

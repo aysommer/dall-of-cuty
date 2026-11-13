@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { type Box, clipWalls, DOOR, type GameMap, type Ladder, type MapId, MAPS } from '../../shared/map.js';
 import type { Vec3 } from '../../shared/protocol.js';
 import { beep, shotSound } from '../core/audio.js';
-import { bakeShadows, box, scene } from '../core/scene.js';
+import { box, scene, setSunFor } from '../core/scene.js';
 import { me, state } from '../core/state.js';
 import { fireworks } from '../fx/fireworks.js';
 import { buildCrate, buildParachute } from '../pickups/crate.js';
@@ -81,7 +81,7 @@ export function loadMap(id: MapId): void {
 
   applyFog(); // небо, туман и свет — под эту карту и текущую погоду
   for (const m of buildBlocks(currentMap)) mapGroup.add(m);
-  bakeShadows(currentMap.half);
+  setSunFor(currentMap.half, !currentMap.indoor); // на открытых картах солнце ходит по кругу
   for (const l of currentMap.ladders) {
     const ladder = buildLadder(l);
     ladder.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });

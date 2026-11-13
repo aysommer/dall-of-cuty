@@ -37,6 +37,8 @@ export function fireworks(x: number, y: number, z: number, scale = 1, colors: nu
     size: 0.22 * Math.sqrt(scale), vertexColors: true, transparent: true, opacity: 1,
     blending: THREE.AdditiveBlending, depthWrite: false,
   });
+  // Искры ярче белого: горячие светятся (bloom)
+  mat.color.setScalar(5);
   const points = new THREE.Points(geo, mat);
   scene.add(points);
   bursts.push({ points, vel, born: performance.now(), life: 1400 + 600 * (scale - 1) });

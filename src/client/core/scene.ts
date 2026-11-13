@@ -35,6 +35,9 @@ export const skyUniforms = {
   horizon: { value: new THREE.Color(0x9fc9ea) },
   zenith: { value: new THREE.Color(0x3d7fd6) },
   zenithK: { value: 0.55 },
+  /** Куда смотреть на солнце и видно ли его диск (на открытых картах в ясную погоду) */
+  sunDir: { value: new THREE.Vector3(0, 1, 0) },
+  sunOn: { value: 0 },
 };
 const skyDome = new THREE.Mesh(
   new THREE.SphereGeometry(200, 32, 16),
@@ -53,11 +56,19 @@ const skyDome = new THREE.Mesh(
       uniform vec3 horizon;
       uniform vec3 zenith;
       uniform float zenithK;
+      uniform vec3 sunDir;
+      uniform float sunOn;
       varying vec3 vDir;
       void main() {
-        float h = clamp(vDir.y, 0.0, 1.0);
+        vec3 d = normalize(vDir);
+        float h = clamp(d.y, 0.0, 1.0);
         vec3 top = mix(horizon, zenith, zenithK);
-        gl_FragColor = vec4(mix(horizon, top, pow(h, 0.55)), 1.0);
+        // Плавно от горизонта вверх, без излома на самой линии горизонта
+        vec3 col = mix(horizon, top, 1.0 - pow(1.0 - h, 2.2));
+        // Солнце: яркий диск (ярче всего на экране — от него свечение) и мягкий ореол вокруг
+        float c = max(dot(d, sunDir), 0.0);
+        col += sunOn * (vec3(9.0, 8.2, 6.6) * smoothstep(0.99955, 0.9998, c) + vec3(1.0, 0.85, 0.6) * (0.35 * pow(c, 64.0) + 0.15 * pow(c, 24.0)));
+        gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,
@@ -72,10 +83,15 @@ skyDome.onBeforeRender = (_r, _s, cam) => {
   skyDome.matrixWorld.setPosition(camPos);                     // modelViewMatrix пересчитается из него следом
 };
 
+/** Подписчики на изменение размера окна (пост-обработка) */
+const onResize: Array<(w: number, h: number) => void> = [];
+export const addResizeListener = (f: (w: number, h: number) => void): void => { onResize.push(f); };
+
 function resize(): void {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
+  for (const f of onResize) f(window.innerWidth, window.innerHeight);
 }
 
 /** Включить или выключить тени: шейдеры всех материалов пересобираются, карта теней считается заново. */
@@ -90,12 +106,44 @@ export function setShadows(on: boolean): void {
   if (on) renderer.shadowMap.needsUpdate = true;
 }
 
-/** Направление на солнце */
+/** Направление на солнце на закрытых картах (неподвижное) */
 const SUN_DIR = new THREE.Vector3(22, 30, 12).normalize();   // ~50° над горизонтом
+/** На открытых картах солнце обходит небо по кругу на этой высоте за SUN_TURN_MS — одинаково у всех (по часам) */
+const SUN_ELEV = Math.asin(SUN_DIR.y), SUN_TURN_MS = 10 * 60_000;
+/** Как часто пересчитывать тени, пока солнце движется (за секунду оно сдвигается на 0,6°) */
+const SUN_SHADOW_MS = 1000;
 
-/** Настроить тень солнца под размер карты и пересчитать её один раз (вызывается после загрузки карты). */
+let mapHalf = { x: 30, z: 30 }, movingSun = false, lastSunAt = 0;
+
+/** Направление на солнце сейчас */
+export function sunDirection(now = Date.now(), out = new THREE.Vector3()): THREE.Vector3 {
+  if (!movingSun) return out.copy(SUN_DIR);
+  const a = (now % SUN_TURN_MS) / SUN_TURN_MS * Math.PI * 2;
+  return out.set(Math.cos(SUN_ELEV) * Math.cos(a), Math.sin(SUN_ELEV), Math.cos(SUN_ELEV) * Math.sin(a));
+}
+
+/**
+ * Карта загружена: открытая (moving) — солнце ходит по кругу и видно в небе, закрытая — стоит на месте.
+ * Тень настраивается под размер карты.
+ */
+export function setSunFor(half: { x: number; z: number }, moving: boolean): void {
+  mapHalf = { ...half };
+  movingSun = moving;
+  bakeShadows(half);
+}
+
+/** Кадр: солнце сдвигается; тень пересчитывается раз в SUN_SHADOW_MS. */
+export function updateSun(): void {
+  if (!movingSun) return;
+  const now = Date.now();
+  sunDirection(now, skyUniforms.sunDir.value);
+  if (now - lastSunAt >= SUN_SHADOW_MS) bakeShadows(mapHalf);
+}
+
+/** Настроить тень солнца под размер карты и направление солнца и пересчитать её (при загрузке карты; раз в секунду, если солнце движется). */
 export function bakeShadows(half: { x: number; z: number }): void {
-  sun.position.copy(SUN_DIR).multiplyScalar(120);
+  lastSunAt = Date.now();
+  sun.position.copy(sunDirection(lastSunAt, skyUniforms.sunDir.value)).multiplyScalar(120);
   sun.target.position.set(0, 0, 0);
   sun.target.updateMatrixWorld();
   sun.updateMatrixWorld();

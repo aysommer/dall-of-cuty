@@ -43,6 +43,8 @@ function buildSettings(root: HTMLElement): void {
   root.append(
     choices('Положение оружия', [['right', 'Справа'], ['left', 'Слева']] as const, () => settings.hand, (v) => { settings.hand = v; }),
     choices('Тени', [[true, 'Вкл'], [false, 'Выкл']] as const, () => settings.shadows, (v) => { settings.shadows = v; }, 'shadows'),
+    choices('Свечение', [[true, 'Вкл'], [false, 'Выкл']] as const, () => settings.bloom, (v) => { settings.bloom = v; }, 'bloom'),
+    choices('Затенение углов', [[true, 'Вкл'], [false, 'Выкл']] as const, () => settings.ssao, (v) => { settings.ssao = v; }, 'ssao'),
   );
 }
 
