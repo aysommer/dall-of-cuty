@@ -1,5 +1,6 @@
 // Чужие игроки: человекоподобная модель (или прямоугольник, пока она грузится), оружие в руках,
 // шлем Джаггернаута, бронежилет и корона лидера.
+import { type Interp, newInterp, pushSample, sampleAt } from '../../shared/interp.js';
 import * as THREE from 'three';
 import { type Low, PLAYER, STREAK } from '../../shared/map.js';
 import type { PlayerInfo, WeaponId } from '../../shared/protocol.js';
@@ -127,6 +128,11 @@ export interface Remote {
   w: WeaponId;
   pos: THREE.Vector3;
   target: THREE.Vector3;
+  /**
+   * Буфер положений с метками времени отправителя: [ts, x, y, z, yaw]. Игрок рисуется с небольшой задержкой
+   * (INTERP_DELAY) между двумя соседними положениями — так движение ровное, даже если снимки пришли пачкой.
+   */
+  net: Interp;
   /** Скорость по сглаженному положению — для анимации шага и для тела после смерти */
   vel: THREE.Vector3;
   yaw: number;
@@ -183,7 +189,7 @@ export function buildPlayer(info: PlayerInfo): Remote {
   const r: Remote = {
     info, g, pose, char: null, body, slide: false, crouch: false, poseK: 0, crouchK: 0, labelY: PLAYER.h + 0.35, crown, armor, helmet, label, hand, gun, w: 'pistol',
     stepAcc: 0, lastPos: new THREE.Vector3(),
-    pos: new THREE.Vector3(), target: new THREE.Vector3(), vel: new THREE.Vector3(),
+    pos: new THREE.Vector3(), target: new THREE.Vector3(), vel: new THREE.Vector3(), net: newInterp(),
     yaw: 0, targetYaw: 0, pitch: 0, air: false, reloading: false, flashUntil: 0,
   };
   attachCharacter(r);
@@ -250,9 +256,19 @@ export function scaleOfRemote(r: Remote): number {
 const _prev = new THREE.Vector3(), _rh = new THREE.Vector3(), _lh = new THREE.Vector3();
 
 /** Кадр чужого игрока: сглаженное движение, подкат и анимация модели. k — доля сглаживания за кадр. */
+/** Пришло положение игрока с меткой времени отправителя — в буфер. */
+export function pushRemoteState(r: Remote, ts: number, x: number, y: number, z: number, yaw: number, now: number): void {
+  pushSample(r.net, [ts, x, y, z, yaw], now);
+}
+
+/** Телепорт (появление): буфер сбрасывается, игрок сразу на новом месте. */
+export function resetRemoteState(r: Remote): void { r.net.buf.length = 0; r.net.lag = null; }
+
 export function updateRemote(r: Remote, dt: number, now: number, k: number): void {
   _prev.copy(r.pos);
-  r.pos.lerp(r.target, k);
+  // Из буфера — точное положение на момент «минус задержка»; без меток времени — по-старому, догоняем последнее
+  const smp = sampleAt(r.net, now);
+  if (smp) { r.target.set(smp[1], smp[2], smp[3]); r.targetYaw = smp[4]; r.pos.copy(r.target); r.yaw = smp[4]; } else r.pos.lerp(r.target, k);
   if (dt > 0) {
     _prev.subVectors(r.pos, _prev).divideScalar(dt);
     // Быстрее 12 м/с игроки не двигаются: больше — это рывок из-за задержки сети или редких кадров

@@ -55,7 +55,7 @@ export function handleJoin(room: Room, ws: WebSocket, msg: Incoming): Player | n
     hp: 100, armor: 0, alive: false, kills: 0, deaths: 0, lastShot: 0, lastSpray: 0,
     profile: decodeProfile(msg.token),
     rockets: 0,
-    hasKnife: true, streak: 0, reward: null, uavUntil: 0, ping: 0, big: false, helmet: 0,
+    hasKnife: true, streak: 0, reward: null, uavUntil: 0, ping: 0, stateTs: 0, big: false, helmet: 0,
     kit: isKit(msg.kit) ? msg.kit : [...DEFAULT_KIT],
     melee: 'knife', gear: 'knife', grenades: 0, cookStart: 0,
   };
@@ -98,6 +98,7 @@ export function handle(room: Room, me: Player, msg: Incoming): void {
   }
   if (msg.t === 'state') {
     if (me.alive && isVec3(msg.p)) me.pos = msg.p;
+    if (isNum(msg.ts)) me.stateTs = msg.ts;
     me.slide = me.alive && msg.sl === true;
     me.crouch = me.alive && !me.slide && msg.cr === true;
     me.air = me.alive && msg.air === true;
@@ -204,7 +205,7 @@ export function tick(room: Room): void {
   if (room.players.size < 2) return;
   const ps: SnapRow[] = [];
   for (const p of room.players.values()) {
-    ps.push([p.id, p.pos[0], p.pos[1], p.pos[2], p.yaw, p.pitch, p.w, p.slide ? 1 : 0, p.air ? 1 : 0, p.reloading ? 1 : 0, p.crouch ? 1 : 0]);
+    ps.push([p.id, p.pos[0], p.pos[1], p.pos[2], p.yaw, p.pitch, p.w, p.slide ? 1 : 0, p.air ? 1 : 0, p.reloading ? 1 : 0, p.crouch ? 1 : 0, p.stateTs]);
   }
   broadcast(room, { t: 'snap', ps });
 }

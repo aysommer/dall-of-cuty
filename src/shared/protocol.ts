@@ -5,7 +5,7 @@ import type { LimitKind, RewardKind, RewardSlot, WeatherKind } from './map.js';
 
 export type Team = 'green' | 'red';
 export type Mode = 'tdm' | 'ffa';
-export type WeaponId = 'pistol' | 'smg' | 'shotgun' | 'rifle' | 'lmg' | 'sniper' | 'knife' | 'grenade' | 'rocket';
+export type WeaponId = 'pistol' | 'smg' | 'shotgun' | 'rifle' | 'm6' | 'lmg' | 'sniper' | 'knife' | 'grenade' | 'rocket';
 /** Что в слоте 1 вместо огнестрела: нож или граната */
 export type MeleeKind = 'knife' | 'grenade' | 'flash' | 'sticky' | 'mine' | 'tripwire' | 'launcher';
 /** falling — летит с неба, idle — лежит, opening — его открывают, gone — ящика нет */
@@ -31,7 +31,8 @@ export interface PlayerInfo {
 }
 
 /** [id, x, y, z, yaw, pitch, оружие, лежит 0/1 (подкат или лёжа), в воздухе 0/1, перезаряжается 0/1, присел 0/1] */
-export type SnapRow = [number, number, number, number, number, number, WeaponId, 0 | 1, 0 | 1, 0 | 1, 0 | 1];
+/** Строка снимка: id, x, y, z, yaw, pitch, оружие, подкат, в воздухе, перезарядка, присед, ts — когда отправитель посчитал это положение (его часы, мс) */
+export type SnapRow = [number, number, number, number, number, number, WeaponId, 0 | 1, 0 | 1, 0 | 1, 0 | 1, number];
 
 export interface Winner {
   team?: Team;
@@ -197,6 +198,6 @@ export type ClientMsg =
   | { t: 'rocket'; d: Vec3 }
   | { t: 'spray'; p: Vec3; n: [number, number]; e: number }
   /** sl — лежит (подкат или лёжа), cr — присел, air — в воздухе, rl — перезаряжается (два последних — только для анимации у других) */
-  | { t: 'state'; p: Vec3; yaw: number; pitch: number; w: WeaponId; sl: boolean; cr?: boolean; air?: boolean; rl?: boolean }
+  | { t: 'state'; p: Vec3; yaw: number; pitch: number; w: WeaponId; sl: boolean; cr?: boolean; air?: boolean; rl?: boolean; ts?: number }
   /** hits: id игрока → [попаданий в тело, попаданий в голову] */
   | { t: 'shoot'; w: WeaponId; ends: Vec3[]; hits: Record<number, [number, number]>; brk?: Record<number, number> };

@@ -186,6 +186,23 @@ console.log('Снаряжение и уровни (WebSocket)');
     check('ракет вылетело ровно две', a.msgs.filter((m) => m.t === 'rocket').length === 2 && last(a, 'rockets')?.n === 0);
     await done(a, b);
   }
+  // Попадание в голову: урон ×1,5; убийство в голову помечено как хедшот
+  {
+    const a = await wsClient(), b = await wsClient();
+    join(a, { room: 'new', roomName: 'Голова', name: 'Стрелок', map: 'sands', kit: ['rifle', 'pistol'] }); await wait(250);
+    join(b, { room: await roomId(a), name: 'Цель' }); await wait(300);
+    const bid = last(b, 'welcome').id;
+    state(a, [0, 0, 20], 0); state(b, [0, 0, 14]); await wait(200);
+    a.ws.send(JSON.stringify({ t: 'shoot', w: 'rifle', ends: [[0, 1.7, 14]], hits: { [bid]: [1, 0] } })); await wait(250);
+    const body = 100 - hpOf(a, 'Цель');
+    a.ws.send(JSON.stringify({ t: 'shoot', w: 'rifle', ends: [[0, 1.7, 14]], hits: { [bid]: [0, 1] } })); await wait(250);
+    const head = 100 - body - hpOf(a, 'Цель');
+    check('в голову урон в 1,5 раза больше: AK49 — 21 по телу, 32 в голову', body === 21 && Math.abs(head - 31.5) <= 0.5, `тело ${body}, голова ${head}`);
+    for (let i = 0; i < 4 && hpOf(a, 'Цель') > 0; i++) { a.ws.send(JSON.stringify({ t: 'shoot', w: 'rifle', ends: [[0, 1.7, 14]], hits: { [bid]: [0, 1] } })); await wait(250); }
+    const kill = a.msgs.find((m) => m.t === 'kill' && m.victim === bid);
+    check('убийство в голову приходит с пометкой хедшота', kill?.head === true, JSON.stringify(kill));
+    await done(a, b);
+  }
   // Ракета с неба: 4 убийства подряд — награда в ячейке; 5 — ракета вылетает
   {
     const a = await wsClient(), b = await wsClient();
@@ -215,6 +232,33 @@ console.log('Снаряжение и уровни (WebSocket)');
     await done(a, b);
   }
   await wait(1200);
+}
+
+console.log('Неткод: интерполяция чужих игроков');
+{
+  // Игрок бежит 6,5 м/с; отправитель шлёт положение раз в свой кадр (неровно), сервер пересылает раз в 50 мс,
+  // сеть добавляет 30 мс и случайную задержку. На 60 кадрах получателя движение должно быть ровным при любом отправителе.
+  const { newInterp, pushSample, sampleAt } = await import(path.join(ROOT, 'dist/shared/interp.js'));
+  let seed = 7;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const run = (frame, jitter) => {
+    const sent = []; for (let t = 0; t < 6000; t += frame * (0.7 + rnd() * 0.6)) sent.push([t, 6.5 * t / 1000]);
+    const arrive = []; let k = 0;
+    for (let t = 0; t < 6000; t += 50) { while (k + 1 < sent.length && sent[k + 1][0] + 20 <= t) k++; arrive.push({ at: t + 30 + rnd() * jitter, s: sent[k] }); }
+    arrive.sort((a, b) => a.at - b.at);
+    const st = newInterp(); const sp = []; let j = 0, pos = 0, last = 0;
+    for (let now = 1000; now < 5500; now += 16.7) {
+      while (j < arrive.length && arrive[j].at <= now) { const { s } = arrive[j++]; pushSample(st, [s[0], s[1], 0, 0, 0], now); }
+      const m = sampleAt(st, now); if (m) pos = m[1];
+      if (now > 1100) sp.push((pos - last) / 0.0167);
+      last = pos;
+    }
+    const mean = sp.reduce((u, v) => u + v, 0) / sp.length;
+    return { cv: Math.sqrt(sp.reduce((u, v) => u + (v - mean) ** 2, 0) / sp.length) / mean, stalls: sp.filter((v) => v < mean * 0.25).length, mean };
+  };
+  const res = [[16.7, 40], [50, 15], [125, 15]].map(([f, j]) => run(f, j));
+  check('чужой игрок движется ровно и при сетевых задержках, и когда у него тормозит графика',
+    res.every((r) => r.cv < 0.1 && r.stalls === 0 && Math.abs(r.mean - 6.5) < 0.3), res.map((r) => `${(r.cv * 100).toFixed(0)} % / ${r.stalls}`).join(', '));
 }
 
 console.log('Ящик и карты (сервер)');
@@ -454,6 +498,8 @@ if (!chromium) {
     check('от бедра разброс на 30 % больше прежнего: в 7,15 раза больше прицельного (у дробовика — в 3,12)', hipSpread(WEAPONS.rifle) === 7.15 && hipSpread(WEAPONS.shotgun) === 3.12);
     check('названия и баланс: UZE90 — 13 урона и 42 патрона', WEAPONS.smg.name === 'UZE90' && WEAPONS.smg.dmg === 13 && WEAPONS.smg.mag === 42 &&
       ['Jecov', 'Chester', 'AK49', 'Z700', 'Piz'].join() === ['pistol', 'shotgun', 'rifle', 'lmg', 'sniper'].map((w) => WEAPONS[w].name).join());
+    check('M6A1: автомат 2-го уровня — чуть слабее AK49, но стреляет чаще', WEAPONS.m6.name === 'M6A1' && WEAPONS.m6.type === 'rifle' &&
+      WEAPONS.m6.dmg < WEAPONS.rifle.dmg && WEAPONS.m6.rate < WEAPONS.rifle.rate && (await import(path.join(ROOT, 'dist/shared/ranks.js'))).unlockLevel('m6') === 2);
   }
 
   console.log('Смена оружия и бег');
@@ -641,11 +687,13 @@ if (!chromium) {
     const bake = await V.waitForFunction(() => { const b = game.dbg().skyBake; return b.pending === 0 && b.ms > 0 ? b : null; }, null, { timeout: 30000 }).then((h) => h.jsonValue(), () => null);
     check('освещение неба запечено при загрузке карты', !!bake && bake.vertices > 10000, JSON.stringify(bake));
     // Солнце на открытой карте ходит по кругу: оборот за 10 минут — за 2 секунды сдвиг ~1,2°
-    const sunA = await V.evaluate(() => game.dbg().sunDir);
+    // Азимут солнца: 360° за 600 с — 0,6° в секунду; сравниваем с реально прошедшим временем (тестовый браузер медленный)
+    const [azA, sunA, tA] = await V.evaluate(() => [game.dbg().sunAz, game.dbg().sunDir, Date.now()]);
     await V.waitForTimeout(2000);
-    const sunB = await V.evaluate(() => game.dbg().sunDir);
-    const turn = Math.acos(Math.min(1, sunA[0] * sunB[0] + sunA[1] * sunB[1] + sunA[2] * sunB[2])) * 180 / Math.PI;
-    check('солнце движется: полный оборот за 10 минут', turn > 0.5 && turn < 3 && Math.abs(sunA[1] - sunB[1]) < 1e-3, `${turn.toFixed(2)}° за 2 с`);
+    const [azB, sunB, tB] = await V.evaluate(() => [game.dbg().sunAz, game.dbg().sunDir, Date.now()]);
+    const turn = ((azB - azA) % 360 + 360) % 360;
+    const want = (tB - tA) / 1000 * 0.6;
+    check('солнце движется: полный оборот за 10 минут', Math.abs(turn - want) < 0.15 && Math.abs(sunA[1] - sunB[1]) < 1e-3, `${turn.toFixed(2)}° за ${((tB - tA) / 1000).toFixed(1)} с (ждали ${want.toFixed(2)}°)`);
     // Ящик спускается на парашюте; лёг — парашют исчезает
     await V.evaluate(() => game.crate({ t: 'crate', state: 'falling', at: [0, 0, 0], by: null, ms: 4000, left: 120000 }));
     await V.waitForTimeout(400);

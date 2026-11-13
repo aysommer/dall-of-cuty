@@ -81,6 +81,8 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
   // Пистолет-пулемёт: урон ниже, скорострельность выше, чем у автомата
   smg:     { name: 'UZE90', type: 'smg', dmg: 13, pellets: 1, rate: 70, mag: 42, reserve: 64, reload: 1700, spread: 0.012, auto: true, zoom: 60 },
   rifle:   { name: 'AK49', type: 'rifle', dmg: 21, pellets: 1, rate: 125, mag: 30, reserve: 60, reload: 2000, spread: 0.009, auto: true, zoom: 55 },
+  // M6A1: чуть слабее AK49 (19 против 21), но стреляет чаще (раз в 110 мс против 125) — урон в секунду почти тот же
+  m6:      { name: 'M6A1', type: 'rifle', dmg: 19, pellets: 1, rate: 110, mag: 30, reserve: 60, reload: 1900, spread: 0.0085, auto: true, zoom: 55 },
   sniper:  { name: 'Piz', type: 'sniper', dmg: 80, pellets: 1, rate: 1300, mag: 5, reserve: 19, reload: 2800, spread: 0.0015, auto: false, zoom: 20, headKill: true },
   knife:   { name: 'Нож', dmg: 100, pellets: 1, rate: 650, mag: 0, reserve: 0, reload: 0, spread: 0, auto: false, zoom: null, melee: 2 },
   // Ракетница достаётся только из ящика: 6 ракет, без перезарядки
@@ -252,10 +254,10 @@ export function gunshipPos(half: { x: number; z: number }, phase: number, elapse
   const a = phase + (elapsed / (GUNSHIP.ms / 1000)) * Math.PI * 2;
   return [Math.cos(a) * r, GUNSHIP.height, Math.sin(a) * r];
 }
-export const WEAPON_ORDER: WeaponId[] = ['pistol', 'smg', 'shotgun', 'rifle', 'lmg', 'sniper', 'knife'];
+export const WEAPON_ORDER: WeaponId[] = ['pistol', 'smg', 'shotgun', 'rifle', 'm6', 'lmg', 'sniper', 'knife'];
 
 /** Огнестрел, из которого собирают набор: не больше двух стволов, нож есть всегда. */
-export const GUNS: WeaponId[] = ['pistol', 'smg', 'shotgun', 'rifle', 'lmg', 'sniper'];
+export const GUNS: WeaponId[] = ['pistol', 'smg', 'shotgun', 'rifle', 'm6', 'lmg', 'sniper'];
 export const KIT_SIZE = 2;
 
 /** Дверь открывают и закрывают на F, стоя не дальше reach метров от неё */

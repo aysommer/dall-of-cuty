@@ -193,7 +193,7 @@ const ramp = (p: number, a: number, b: number): number => ease(Math.max(0, Math.
 
 /** Сколько миллисекунд достаётся оружие: лёгкое — быстро, тяжёлое — долго */
 const DRAW_MS: Record<WeaponId, number> = {
-  knife: 240, grenade: 280, pistol: 280, smg: 380, shotgun: 540, rifle: 540, sniper: 680, lmg: 740, rocket: 680,
+  knife: 240, grenade: 280, pistol: 280, smg: 380, shotgun: 540, rifle: 540, m6: 520, sniper: 680, lmg: 740, rocket: 680,
 };
 let drawUntil = 0, drawMs = 1;
 /** Сколько длится текущее (последнее) доставание оружия — для отладки и тестов */

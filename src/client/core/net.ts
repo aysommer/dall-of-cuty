@@ -1,4 +1,5 @@
 // Сеть: соединение с сервером и разбор всех его сообщений.
+import { openSocket } from './socket.js';
 import * as THREE from 'three';
 import type { ClientMsg, KillMsg, KillWeapon, OverMsg, PlayerInfo, PlayersMsg, ServerMsg, ShotMsg, SnapMsg, SpawnMsg, WeaponId } from '../../shared/protocol.js';
 import { AMMO_PACK, PLAYER, STREAK, WEAPON_ORDER, WEAPONS, REWARD_NAMES } from '../../shared/map.js';
@@ -14,7 +15,7 @@ import { onAmmoPacks } from '../pickups/ammo.js';
 import { onCrate } from '../pickups/crate.js';
 import { onMedkits } from '../pickups/medkits.js';
 import { muzzleWorld } from '../render/models.js';
-import { applyLook, buildPlayer, dropHelmet, leaderId, placeCrown, setRemoteWeapon } from '../render/players.js';
+import { applyLook, buildPlayer, dropHelmet, leaderId, placeCrown, pushRemoteState, resetRemoteState, setRemoteWeapon } from '../render/players.js';
 import { gunner, gunshipFx, onGunship, onGunshipEnd } from '../streaks/gunship.js';
 import { endMissile, onMissile, startMissile } from '../streaks/missile.js';
 import { onNuke } from '../streaks/nuke.js';
@@ -34,10 +35,11 @@ import { setWeapon } from '../weapons/viewmodel.js';
 import { loadMap, onBreaks, openDoors, rebuildSolids } from '../world/map.js';
 import { applyFog, onWeather } from '../world/weather.js';
 
-const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+// Соединение — в фоновом потоке: замер задержки отвечает сразу, не дожидаясь отрисовки кадра
+const ws = openSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
 
 export function sendMsg(m: ClientMsg): void {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m));
+  if (ws.isOpen()) ws.send(JSON.stringify(m));
 }
 
 export const playBtn = $<HTMLButtonElement>('play');
@@ -109,13 +111,16 @@ function onSpawn(m: SpawnMsg): void {
     r.pos.set(m.p[0], m.p[1], m.p[2]);
     r.target.copy(r.pos);
     r.yaw = r.targetYaw = m.yaw;
+    resetRemoteState(r);
   }
 }
 
 function onSnap(m: SnapMsg): void {
-  for (const [id, x, y, z, yaw, pitch, w, sl, air, rl, cr] of m.ps) {
+  const now = performance.now();
+  for (const [id, x, y, z, yaw, pitch, w, sl, air, rl, cr, ts] of m.ps) {
     const r = remotes.get(id);
     if (!r) continue;
+    if (ts) pushRemoteState(r, ts, x, y, z, yaw, now);
     r.slide = sl === 1;
     r.crouch = cr === 1;
     r.air = air === 1;
@@ -181,16 +186,42 @@ function onKill(m: KillMsg): void {
     s.textContent = p.name;
     return s;
   };
-  row.append(span(k), ` ▸ ${weaponName(m.w)}${m.head ? ' 🎯' : ''} ▸ `, span(v));
+  // Хедшот — как в CS: значок «голова в прицеле» рядом с оружием и выделенная строка
+  const weapon = document.createElement('span');
+  weapon.textContent = ` ▸ ${weaponName(m.w)} `;
+  row.append(span(k), weapon);
+  if (m.head) {
+    row.classList.add('headshot');
+    const icon = document.createElement('span');
+    icon.className = 'hs-icon';
+    icon.title = 'Хедшот';
+    row.append(icon, ' ');
+  }
+  row.append('▸ ', span(v));
   $('feed').prepend(row);
   setTimeout(() => row.remove(), 5000);
   const self = m.killer === m.victim;
-  if (m.killer === me.id && !self) { showHit(true); beep(880, 0.15); }
+  if (m.killer === me.id && !self) {
+    showHit(true); beep(880, 0.15);
+    if (m.head) showHeadshot();
+  }
   if (m.victim === me.id) {
     $('center-msg').textContent = self
       ? `Ты подорвался: ${weaponName(m.w)}\nВозрождение через 3 сек.`
       : `Тебя убил ${k.name}\nВозрождение через 3 сек.`;
   }
+}
+
+let headshotTimer = 0;
+/** Убил в голову — вверху по центру на секунду «ХЕДШОТ» и звонкий двойной сигнал. */
+function showHeadshot(): void {
+  const el = $('headshot');
+  el.classList.remove('show');
+  void el.offsetWidth; // перезапуск анимации
+  el.classList.add('show');
+  beep(1900, 0.06, 0.1); setTimeout(() => beep(2500, 0.08, 0.1), 70);
+  clearTimeout(headshotTimer);
+  headshotTimer = window.setTimeout(() => el.classList.remove('show'), 1200);
 }
 
 function weaponName(w: KillWeapon): string {
@@ -213,7 +244,7 @@ function onOver(m: OverMsg): void {
 
 /** Запуск модуля: подписки на события и начальная отрисовка (вызывается из main.ts). */
 export function initNet(): void {
-  ws.addEventListener('close', () => {
+  ws.on('close', () => {
     $('status').textContent = 'Соединение с сервером потеряно. Обнови страницу.';
     playBtn.disabled = true;
     if (state.joined) {
@@ -221,8 +252,8 @@ export function initNet(): void {
       leaveGame();
     }
   });
-  ws.addEventListener('message', (e: MessageEvent<string>) => {
-    const m = JSON.parse(e.data) as ServerMsg;
+  ws.on('message', (data) => {
+    const m = JSON.parse(data!) as ServerMsg;
     switch (m.t) {
       case 'lobby': onLobby(m); break;
       case 'chat': onChat(m.kind, m.name, m.team); break;
@@ -300,7 +331,7 @@ export function initNet(): void {
       case 'ping': onPing(m); break;
       case 'lat': {
         // Замер задержки: сразу вернуть метку; пинг всех игроков — для таблицы счёта
-        sendMsg({ t: 'pong', at: m.at });
+        if (!ws.pongInWorker) sendMsg({ t: 'pong', at: m.at });
         state.pings = new Map(m.list);
         if (!$('scoreboard').classList.contains('hidden')) renderScoreboard();
         break;
