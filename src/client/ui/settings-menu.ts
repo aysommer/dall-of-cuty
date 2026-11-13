@@ -42,9 +42,19 @@ function buildSettings(root: HTMLElement): void {
   );
   root.append(
     choices('Положение оружия', [['right', 'Справа'], ['left', 'Слева']] as const, () => settings.hand, (v) => { settings.hand = v; }),
+  );
+}
+
+/** Раздел «Графика»: тени, свечение, затенение углов — с подсказкой, чего стоит каждое. */
+function buildGraphics(root: HTMLElement): void {
+  const hint = (text: string): HTMLElement => textEl('small', text, 'setting-hint');
+  root.append(
     choices('Тени', [[true, 'Вкл'], [false, 'Выкл']] as const, () => settings.shadows, (v) => { settings.shadows = v; }, 'shadows'),
+    hint('Тени от солнца. На слабом телефоне лучше выключить.'),
     choices('Свечение', [[true, 'Вкл'], [false, 'Выкл']] as const, () => settings.bloom, (v) => { settings.bloom = v; }, 'bloom'),
+    hint('Светятся вспышки выстрелов, взрывы и солнце. Дорого для встроенной графики.'),
     choices('Затенение углов', [[true, 'Вкл'], [false, 'Выкл']] as const, () => settings.ssao, (v) => { settings.ssao = v; }, 'ssao'),
+    hint('Мягкая тень в углах и стыках стен. Дорого для встроенной графики.'),
   );
 }
 
@@ -70,5 +80,6 @@ function choices<T>(label: string, options: ReadonlyArray<readonly [T, string]>,
 /** Запуск модуля: подписки на события и начальная отрисовка (вызывается из main.ts). */
 export function initSettingsMenu(): void {
   for (const root of document.querySelectorAll<HTMLElement>('.settings')) buildSettings(root);
+  for (const root of document.querySelectorAll<HTMLElement>('.graphics')) buildGraphics(root);
   applySettings();
 }

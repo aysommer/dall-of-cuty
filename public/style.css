@@ -62,6 +62,7 @@ h3 { margin: 22px 0 10px; font-size: 13px; color: var(--text-3); text-transform:
 .setting .value { flex: 0 0 48px; text-align: right; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .setting .choice { flex: 1; margin: 0; }
 .setting .choice button { padding: 6px; }
+.setting-hint { display: block; text-align: left; margin: -6px 0 14px; font-size: 12px; color: var(--text-3); }
 
 #status { display: block; margin-top: 10px; min-height: 18px; color: var(--danger); font-size: 13px; line-height: 1.4; }
 
@@ -168,6 +169,9 @@ h3 { margin: 22px 0 10px; font-size: 13px; color: var(--text-3); text-transform:
 #scoreboard td { padding: 6px 8px; border-top: 1px solid #2a303c; }
 #scoreboard td.n, #scoreboard th.n { text-align: right; }
 #scoreboard tr.me td { background: rgba(255, 255, 255, 0.08); }
+#scoreboard td.ping.good { color: #7ddc6f; }
+#scoreboard td.ping.mid { color: #ffd166; }
+#scoreboard td.ping.bad { color: #ff7b72; }
 
 /* ---------- серия убийств, награда, таймер ---------- */
 #score .timer { margin-left: 12px; color: #fff; font-variant-numeric: tabular-nums; }

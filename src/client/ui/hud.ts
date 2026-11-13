@@ -87,7 +87,7 @@ export function renderScoreboard(): void {
   sb.textContent = '';
   const table = document.createElement('table');
   const head = table.insertRow();
-  for (const [t, cls] of [['Игрок', ''], ['Уровень', 'n'], ['Убийства', 'n'], ['Смерти', 'n']] as const) {
+  for (const [t, cls] of [['Игрок', ''], ['Уровень', 'n'], ['Убийства', 'n'], ['Смерти', 'n'], ['Пинг', 'n']] as const) {
     const th = document.createElement('th');
     th.textContent = t;
     th.className = cls;
@@ -111,6 +111,12 @@ export function renderScoreboard(): void {
     lv.title = `Уровень ${levelOf(p.rank)} — ${rank.name}`;
     const k = row.insertCell(); k.textContent = String(p.kills); k.className = 'n';
     const d = row.insertCell(); d.textContent = String(p.deaths); d.className = 'n';
+    // Пинг: до 60 мс — зелёный, до 120 — жёлтый, больше — красный; пока не замерен — прочерк
+    const ms = state.pings.get(p.id) ?? 0;
+    const pg = row.insertCell();
+    pg.textContent = ms > 0 ? String(ms) : '—';
+    pg.className = 'n ping' + (ms > 0 ? (ms <= 60 ? ' good' : ms <= 120 ? ' mid' : ' bad') : '');
+    pg.title = 'Задержка до сервера, мс';
   }
   sb.append(table);
 }

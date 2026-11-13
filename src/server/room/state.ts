@@ -33,6 +33,8 @@ export interface Player {
   kills: number;
   deaths: number;
   lastShot: number;
+  /** Задержка до игрока (туда и обратно), мс; сглаженная */
+  ping: number;
   /** Когда последний раз рисовал на стене */
   lastSpray: number;
   profile: Profile;
@@ -113,6 +115,8 @@ export interface Room {
   /** Голоса за карту: id игрока → карта */
   votes: Map<number, MapId>;
   lastPing: number;
+  /** Когда последний раз замеряли задержку игроков */
+  lastLatency: number;
   missiles: Map<number, Missile>;
   nextMissileId: number;
   gunship: Gunship | null;
@@ -177,6 +181,7 @@ export function newRoom(id: number, roomName: string, password: string, hooks: R
     voteTimer: undefined,
     votes: new Map<number, MapId>(),
     lastPing: 0,
+    lastLatency: 0,
     missiles: new Map<number, Missile>(),
     nextMissileId: 1,
     gunship: null,

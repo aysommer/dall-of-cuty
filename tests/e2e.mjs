@@ -617,6 +617,19 @@ if (!chromium) {
       fit[w] = await V.evaluate(() => game.dbg().armsFit);
     }
     check('руки держат оружие: ладони на рукояти и цевье (ближе 4 см)', Object.values(fit).every((f) => f && f.main < 0.01 && f.off < 0.04), JSON.stringify(fit));
+    // Отдельный раздел «Графика»: тени, свечение и затенение — там, а не в общих настройках
+    const gfx = await V.evaluate(() => ({
+      inGraphics: ['shadows', 'bloom', 'ssao'].every((n) => document.querySelector(`#view-settings .graphics [data-setting=${n}]`)),
+      inCommon: !!document.querySelector('#view-settings .settings [data-setting=bloom]'),
+      title: [...document.querySelectorAll('#view-settings h2')].map((h) => h.textContent).join(','),
+    }));
+    check('настройки графики — отдельным разделом', gfx.inGraphics && !gfx.inCommon && /Графика/.test(gfx.title), JSON.stringify(gfx));
+    // Пинг в таблице счёта: замер раз в 2 секунды
+    await V.waitForFunction(() => game.dbg().pingMe > 0, null, { timeout: 8000 }).catch(() => {});
+    await V.keyboard.down('Tab'); await V.waitForTimeout(200);
+    const sb = await V.evaluate(() => ({ head: [...document.querySelectorAll('#scoreboard th')].map((t) => t.textContent).join(','), ping: document.querySelector('#scoreboard tr.me td.ping')?.textContent }));
+    await V.keyboard.up('Tab');
+    check('в таблице счёта есть пинг', /Пинг/.test(sb.head) && /^\d+$/.test(sb.ping ?? ''), JSON.stringify(sb));
     // Свечение и затенение углов: включаются в настройках, кадр рисуется через пост-обработку без ошибок
     const post0 = await V.evaluate(() => game.dbg().post);
     for (const n of ['bloom', 'ssao']) await V.evaluate((n) => document.querySelector(`[data-setting=${n}] button:nth-child(1)`).click(), n);
