@@ -19,7 +19,7 @@ import { gunner, gunshipFx, onGunship, onGunshipEnd } from '../streaks/gunship.j
 import { endMissile, onMissile, startMissile } from '../streaks/missile.js';
 import { onNuke } from '../streaks/nuke.js';
 import { onPing } from '../streaks/uav.js';
-import { onLoadout } from '../ui/hotbar.js';
+import { onLoadout, weaponSlots } from '../ui/hotbar.js';
 import { feedNote, flashDamage, onChat, showHit, toast, updateHud } from '../ui/hud.js';
 import { onNewMap, onVote } from '../ui/match.js';
 import { unlock } from './input.js';
@@ -320,10 +320,9 @@ export function initNet(): void {
       case 'newmap': onNewMap(m.map); break;
       case 'reward': toast(`📦 В ящике: ${REWARD_NAMES[m.kind]}`); beep(1200, 0.3, 0.12); break;
       case 'rockets': {
-        const had = me.ammo.rocket;
         me.ammo.rocket = m.n;
-        if (m.n > 0 && had === 0) { setWeapon('rocket'); beep(990, 0.3); }
-        if (m.n === 0 && me.weapon === 'rocket') setWeapon(settings.kit[0]!);
+        // Ракетница — снаряжение на G: в руки сама не прыгает; кончились ракеты — в руках снова ствол
+        if (m.n === 0 && me.weapon === 'rocket') setWeapon(weaponSlots()[1] ?? weaponSlots()[0] ?? 'pistol');
         updateHud();
         break;
       }

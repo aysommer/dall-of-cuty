@@ -7,7 +7,7 @@ export type Team = 'green' | 'red';
 export type Mode = 'tdm' | 'ffa';
 export type WeaponId = 'pistol' | 'smg' | 'shotgun' | 'rifle' | 'lmg' | 'sniper' | 'knife' | 'grenade' | 'rocket';
 /** Что в слоте 1 вместо огнестрела: нож или граната */
-export type MeleeKind = 'knife' | 'grenade' | 'flash' | 'sticky' | 'mine' | 'tripwire';
+export type MeleeKind = 'knife' | 'grenade' | 'flash' | 'sticky' | 'mine' | 'tripwire' | 'launcher';
 /** falling — летит с неба, idle — лежит, opening — его открывают, gone — ящика нет */
 export type CrateState = 'falling' | 'idle' | 'opening' | 'gone';
 export type Vec3 = [number, number, number];

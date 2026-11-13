@@ -1,6 +1,6 @@
 // Матч: появление, раунды, лимит по времени или убийствам, победитель, голосование за карту.
 import { chooseSpawn } from '../spawn.js';
-import { fitGear, isMapId, MAP_ORDER, type MapId, MAPS, MATCH } from '../../shared/map.js';
+import { fitGear, isMapId, MAP_ORDER, type MapId, MAPS, MATCH, ROCKET } from '../../shared/map.js';
 import type { BestPlayer, ServerMsg, Winner } from '../../shared/protocol.js';
 import { rankOf } from '../../shared/ranks.js';
 import { clearMines } from './mines.js';
@@ -27,7 +27,9 @@ export function spawn(room: Room, p: Player): void {
   // Нож или граната возвращаются после смерти — смотря что выбрано
   p.gear = fitGear(p.melee, p.profile.kills);
   p.hasKnife = p.gear === 'knife';
-  p.grenades = p.gear === 'knife' ? 0 : 1;
+  // Ракетница (снаряжение): заряды — ракеты; остальное устройство — одно на жизнь
+  p.grenades = p.gear === 'knife' || p.gear === 'launcher' ? 0 : 1;
+  setRockets(p, p.gear === 'launcher' ? ROCKET.charges : 0);
   p.cookStart = 0;
   p.alive = true;
   sendLoadout(p);

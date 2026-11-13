@@ -22,7 +22,7 @@ export let gear: MeleeKind = settings.melee;
 export let reward: RewardSlot | null = null;
 
 const REWARD_TITLE: Record<RewardSlot, string> = {
-  uav: '🛰 БПЛА готов', missile: '🚀 Ракета с неба готова', launcher: '🎯 Ракетница готова', gunship: '✈ Самолёт готов', nuke: '☢ Бомба готова',
+  uav: '🛰 БПЛА готов', missile: '🚀 Ракета с неба готова', gunship: '✈ Самолёт готов', nuke: '☢ Бомба готова',
 };
 
 /** Стволы на 1 и 2: на 1 — пистолет (если он в наборе, иначе второй ствол), на 2 — основной. */
@@ -39,12 +39,9 @@ export function useWeaponSlot(i: 0 | 1): void {
   if (w && me.alive) setWeapon(w);
 }
 
-/** 5: применить награду. Ракетница берётся в руки; если ракеты ещё остались — 5 снова даёт её в руки. */
+/** 5: применить награду. */
 export function useReward(): void {
-  if (!reward) {
-    if (me.ammo.rocket > 0 && me.alive) setWeapon('rocket');
-    return;
-  }
+  if (!reward) return;
   if (reward === 'missile' && missileCtl) return;
   sendMsg({ t: 'use' });
 }
@@ -57,7 +54,7 @@ export function renderReward(): void {
 }
 
 const STREAK_STEPS: Array<[number, string]> = [
-  [STREAK.uav, 'БПЛА'], [STREAK.missile, 'ракета с неба'], [STREAK.launcher, 'ракетница'],
+  [STREAK.uav, 'БПЛА'], [STREAK.missile, 'ракета с неба'],
   [STREAK.superArmor, 'суперброня'], [GUNSHIP.streak, 'самолёт'], [STREAK.nuke, 'бомба'],
 ];
 

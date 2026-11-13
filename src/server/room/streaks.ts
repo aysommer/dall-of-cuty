@@ -4,7 +4,6 @@ import type { ServerMsg, Vec3 } from '../../shared/protocol.js';
 import { blast, hurt, isEnemy, killPlayer, scaleOf, lowOf } from './combat.js';
 import { checkWin } from './match.js';
 import { broadcast, broadcastPlayers, isVec3, send } from './net.js';
-import { setRockets } from './pickups.js';
 import type { Gunship, Incoming, Missile, Player, Rocket, Room } from './state.js';
 import { blastBreakables, worldBoxes } from './world.js';
 
@@ -44,12 +43,9 @@ export function useStreak(room: Room, p: Player): void {
   if (k === 'missile' && [...room.missiles.values()].some((m) => m.owner === p.id)) return;
   if (k === 'nuke' && room.nukeTimer) return;
   if (k === 'gunship' && room.gunship) return; // в небе одновременно только один самолёт
-  if (k === 'launcher' && !p.alive) return;      // ракетницу берут в руки — только живым
   p.reward = null;
   sendLoadout(p);
-  if (k === 'launcher') {
-    setRockets(p, Math.max(p.rockets, 6));
-  } else if (k === 'uav') {
+  if (k === 'uav') {
     p.uavUntil = Math.max(p.uavUntil, Date.now()) + STREAK.uavMs;
     for (const r of uavViewers(room, p)) send(r.ws, { t: 'uav', ms: p.uavUntil - Date.now() });
   } else if (k === 'missile') {

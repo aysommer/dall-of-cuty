@@ -55,7 +55,7 @@ export const PLAYER = { w: 0.8, h: 1.8, eye: 1.6 };
  * Стрельба от бедра намного менее точная, чем прицельная: издалека попасть трудно — нужно целиться.
  * У дробовика свой множитель (hip): дробь и так разлетается широко.
  */
-export const HIP_SPREAD = 5.5;
+export const HIP_SPREAD = 7.15;   // было 5,5: от бедра на 30 % менее точно — чтобы прицеливание окупалось
 export const hipSpread = (w: Weapon): number => w.hip ?? HIP_SPREAD;
 
 /**
@@ -75,7 +75,7 @@ export const MEDKIT = {
 
 export const WEAPONS: Record<WeaponId, Weapon> = {
   pistol:  { name: 'Jecov', type: 'pistol', dmg: 25, pellets: 1, rate: 280, mag: 12, reserve: 24, reload: 1200, spread: 0.006, auto: false, zoom: 60 },
-  shotgun: { name: 'Chester', type: 'shotgun', dmg: 15, pellets: 8, rate: 900, mag: 6, reserve: 18, reload: 2200, spread: 0.045, hip: 2.4, auto: false, zoom: 62 },
+  shotgun: { name: 'Chester', type: 'shotgun', dmg: 15, pellets: 8, rate: 900, mag: 6, reserve: 18, reload: 2200, spread: 0.045, hip: 3.12, auto: false, zoom: 62 },
   // Пулемёт: лента на 100 патронов, отдача вдвое сильнее, чем у автомата
   lmg:     { name: 'Z700', type: 'lmg', dmg: 22, pellets: 1, rate: 95, mag: 100, reserve: 0, reload: 4200, spread: 0.014, auto: true, zoom: 58 },
   // Пистолет-пулемёт: урон ниже, скорострельность выше, чем у автомата
@@ -85,7 +85,7 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
   knife:   { name: 'Нож', dmg: 100, pellets: 1, rate: 650, mag: 0, reserve: 0, reload: 0, spread: 0, auto: false, zoom: null, melee: 2 },
   // Ракетница достаётся только из ящика: 6 ракет, без перезарядки
   grenade: { name: 'Граната', dmg: 0, pellets: 1, rate: 600, mag: 0, reserve: 0, reload: 0, spread: 0, auto: false, zoom: null },
-  rocket:  { name: 'Ракетница', dmg: 999, pellets: 1, rate: 900, mag: 6, reserve: 0, reload: 0, spread: 0, auto: false, zoom: 60 },
+  rocket:  { name: 'Ракетница', dmg: 999, pellets: 1, rate: 900, mag: 2, reserve: 0, reload: 0, spread: 0, auto: false, zoom: 60 },
 };
 
 /**
@@ -97,7 +97,8 @@ export const CRATE = {
   /** Спуск на парашюте: 40 м за 8 с (5 м/с) — заметно, но без долгого ожидания */
   dropEveryMs: 60_000, dropChance: 0.5, fallMs: 8000, fallHeight: 40, lifeMs: 120_000,
 };
-export const ROCKET = { speed: 70, radius: 4, lifeMs: 4000 };
+/** Ракетница: радиус взрыва 3,4 м (было 4 — уменьшен на 15 %); зарядов на жизнь — charges */
+export const ROCKET = { speed: 70, radius: 3.4, lifeMs: 4000, charges: 2 };
 
 /** Метательный нож: один на жизнь, после смерти появляется снова. */
 /** pad — насколько попадание ножом «прощает» промах мимо края хитбокса, м. */
@@ -124,8 +125,9 @@ export const GEAR: Record<MeleeKind, { name: string; icon: string; hint: string 
   sticky: { name: 'Липучка', icon: '🧲', hint: 'Граната, которая прилипает к стене' },
   mine: { name: 'Мина', icon: '🔴', hint: 'Срабатывает, когда враг подойдёт на 2 м' },
   tripwire: { name: 'Растяжка', icon: '🪢', hint: 'Срабатывает, когда враг заденет верёвку' },
+  launcher: { name: 'Ракетница', icon: '🚀', hint: '2 ракеты на жизнь: G — взять в руки, ЛКМ — выстрел' },
 };
-export const GEAR_ORDER: MeleeKind[] = ['knife', 'grenade', 'flash', 'sticky', 'mine', 'tripwire'];
+export const GEAR_ORDER: MeleeKind[] = ['knife', 'grenade', 'flash', 'sticky', 'mine', 'tripwire', 'launcher'];
 export const isGear = (v: unknown): v is MeleeKind => typeof v === 'string' && Object.hasOwn(GEAR, v);
 /** Гранаты, которые бросают (в отличие от мины и растяжки, которые ставят) */
 export const isThrown = (g: MeleeKind): boolean => g === 'grenade' || g === 'flash' || g === 'sticky';
@@ -191,11 +193,11 @@ export const WEATHER = { enabled: false, everyMs: 180_000, chance: 0.25, ms: 60_
 export type WeatherKind = 'rain' | 'snow';
 
 /**
- * Серия убийств (без смертей): награды за 3, 4, 5, 7 и 15 убийств подряд.
+ * Серия убийств (без смертей): награды за 3, 4, 7, 11 и 15 убийств подряд.
  * Награда ждёт в единственной ячейке, пока её не применят (5), — и после смерти тоже; новая заменяет неиспользованную.
  */
 export const STREAK = {
-  uav: 3, missile: 4, launcher: 5, superArmor: 7, nuke: 15,
+  uav: 3, missile: 4, superArmor: 7, nuke: 15,
   uavMs: 30_000, pingMs: 2000,
   missileHeight: 60, missileSpeed: 18, missileBoost: 55, missileRadius: 6, missileMaxMs: 20_000,
   superArmorHp: 500, bigScale: 1.1,
@@ -205,16 +207,16 @@ export const STREAK = {
 };
 export type StreakKind = 'uav' | 'missile' | 'nuke' | 'gunship';
 /** Все награды за серию — те же, что лежат в ящике: к запасаемым добавляются ракетница и Джаггернаут */
-export type RewardKind = StreakKind | 'launcher' | 'juggernaut';
+export type RewardKind = StreakKind | 'juggernaut';
 /**
  * Награда, которая ждёт применения (клавиша 5). Она одна: новая (за серию или из ящика) заменяет
  * неиспользованную. Джаггернаут сюда не попадает — он действует сразу.
  */
 export type RewardSlot = Exclude<RewardKind, 'juggernaut'>;
 /** Сколько убийств подряд стоит каждая награда */
-export const REWARD_KILLS: Record<RewardKind, number> = { uav: 3, missile: 4, launcher: 5, juggernaut: 7, gunship: 11, nuke: 15 };
+export const REWARD_KILLS: Record<RewardKind, number> = { uav: 3, missile: 4, juggernaut: 7, gunship: 11, nuke: 15 };
 export const REWARD_NAMES: Record<RewardKind, string> = {
-  uav: 'БПЛА', missile: 'Ракета с неба', launcher: 'Ракетница', juggernaut: 'Джаггернаут', gunship: 'Самолёт', nuke: 'Бомба',
+  uav: 'БПЛА', missile: 'Ракета с неба', juggernaut: 'Джаггернаут', gunship: 'Самолёт', nuke: 'Бомба',
 };
 /**
  * Шанс найти награду в ящике — обратно пропорционален квадрату её цены в убийствах:
@@ -233,12 +235,12 @@ export function crateReward(roll: number): RewardKind {
 }
 
 /**
- * Самолёт (серия 11): 15 секунд кружит высоко над картой сам, игрок только стреляет —
+ * Самолёт (серия 11): 30 секунд кружит высоко над картой сам, игрок только стреляет —
  * пулемёт (перегрев за 5 с непрерывной стрельбы, остывание 1 с) и ракеты (раз в 3 с).
  * Сбить можно двумя попаданиями из ракетницы.
  */
 export const GUNSHIP = {
-  streak: 11, ms: 15_000, height: 40, orbitShare: 0.65,
+  streak: 11, ms: 30_000, height: 40, orbitShare: 0.65,
   gunDmg: 28, gunRateMs: 80, heatMs: 5000, coolMs: 1000, spread: 0.012,
   rocketCdMs: 3000, rocketRadius: 5,
   hitsToDown: 2, half: [3.6, 1.1, 3.6] as const,

@@ -26,11 +26,10 @@ export const SETTINGS_KEY = 'doc-settings';
 
 export const TOKEN_KEY = 'doc-progress';
 
-/** Сенсорный экран без мыши (телефон, планшет): там свечение и затенение по умолчанию выключены — дорогие для слабой видеокарты */
-const coarse = (): boolean => { try { return matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches; } catch { return false; } };
+// Свечение и затенение углов по умолчанию выключены на всех устройствах: на ноутбуках со встроенной графикой они тормозят
 
 function loadSettings(): Settings {
-  const s: Settings = { volume: 0.7, sens: 1, hand: 'right', fov: 75, kit: [...DEFAULT_KIT], melee: 'knife', shadows: true, bloom: !coarse(), ssao: !coarse() };
+  const s: Settings = { volume: 0.7, sens: 1, hand: 'right', fov: 75, kit: [...DEFAULT_KIT], melee: 'knife', shadows: true, bloom: false, ssao: false };
   try {
     const raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>;
     if (typeof raw.volume === 'number') s.volume = Math.max(0, Math.min(1, raw.volume));

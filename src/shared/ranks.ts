@@ -75,6 +75,7 @@ export const UNLOCK_LEVEL: Record<string, number> = {
   lmg: 3, tripwire: 3,
   smg: 4, sticky: 4,
   sniper: 5,
+  launcher: 6,
 };
 export const unlockLevel = (id: string): number => UNLOCK_LEVEL[id] ?? 1;
 /** Открыто ли оружие или снаряжение при таком числе убийств за всё время */
