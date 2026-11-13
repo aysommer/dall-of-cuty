@@ -3,6 +3,19 @@
 // «штукатурки» — в шейдере (кромка считается в метрах от края грани, шум — по мировым координатам).
 import * as THREE from 'three';
 import type { Box, GameMap } from '../../shared/map.js';
+import { bakeSky, type Occluder, skyAttribute } from './skybake.js';
+
+/**
+ * Отражённый свет для запечённого освещения: насколько светят стены и пол вокруг (зависит от солнца и неба —
+ * задаётся вместе со светом в weather.ts). Умножается на цвет, который «увидели» лучи запекания.
+ */
+export const blockLight = { bounce: { value: new THREE.Color(0.6, 0.55, 0.5) } };
+
+/** Размер клетки сетки на гранях — с таким шагом запекается освещение (большие грани — не больше 48 клеток) */
+const CELL = 1, MAX_CELLS = 48;
+
+/** Сколько вершин запекается и когда закончили (для отладки и тестов) */
+export const bakeInfo = { vertices: 0, pending: 0, ms: 0, startedAt: 0 };
 
 /** Нижние 1,4 м стоящего блока темнее (до 72 % яркости): стены «стоят» на земле, а не висят над ней. */
 const BASE_DARK = 0.72, BASE_H = 1.4;
@@ -55,13 +68,20 @@ function blockMaterial(): THREE.MeshLambertMaterial {
   material.userData.shared = true;
   material.onBeforeCompile = (sh) => {
     sh.uniforms.grain = { value: grain };
-    sh.vertexShader = 'attribute vec4 aFace;\nvarying vec4 vFace;\nvarying vec3 vWPos;\nvarying vec3 vWNorm;\n'
+    sh.uniforms.bounceLight = blockLight.bounce;
+    sh.vertexShader = 'attribute vec4 aFace;\nattribute vec4 aSky;\nvarying vec4 vFace;\nvarying vec4 vSky;\nvarying vec3 vWPos;\nvarying vec3 vWNorm;\n'
       + sh.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
         vFace = aFace;
+        vSky = aSky;
         vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
         vWNorm = normal;`);
-    sh.fragmentShader = 'uniform sampler2D grain;\nvarying vec4 vFace;\nvarying vec3 vWPos;\nvarying vec3 vWNorm;\n'
-      + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+    sh.fragmentShader = 'uniform sampler2D grain;\nuniform vec3 bounceLight;\nvarying vec4 vFace;\nvarying vec4 vSky;\nvarying vec3 vWPos;\nvarying vec3 vWNorm;\n'
+      + sh.fragmentShader.replace('#include <lights_fragment_end>', `
+        #if defined( RE_IndirectDiffuse )
+          // Запечённое: рассеянный свет неба — только та доля, что видна из этой точки, плюс отражённый от соседних блоков
+          irradiance = irradiance * vSky.x + bounceLight * vSky.yzw;
+        #endif
+        #include <lights_fragment_end>`).replace('#include <color_fragment>', `#include <color_fragment>
         // Кромка: темнее в последних ~7 см до края грани
         vec2 fe = min(vFace.xy, vFace.zw - vFace.xy);
         float edge = mix(0.8, 1.0, smoothstep(0.0, 0.07, min(fe.x, fe.y)));
@@ -77,13 +97,19 @@ function blockMaterial(): THREE.MeshLambertMaterial {
 class Builder {
   pos: number[] = []; norm: number[] = []; col: number[] = []; face: number[] = []; idx: number[] = [];
 
-  /** Прямоугольная грань o + s·U + t·V (U×V смотрит наружу), по высоте разбита на rows полос. */
-  quad(o: number[], U: number[], V: number[], n: number[], c: THREE.Color, shade: (y: number) => number, rows = 1): void {
+  /**
+   * Прямоугольная грань o + s·U + t·V (U×V смотрит наружу) — сеткой с шагом ~CELL (по ней запекается освещение);
+   * по высоте не меньше minRows полос (затемнение у основания).
+   */
+  quad(o: number[], U: number[], V: number[], n: number[], c: THREE.Color, shade: (y: number) => number, minRows = 1): void {
     const lu = Math.hypot(U[0]!, U[1]!, U[2]!), lv = Math.hypot(V[0]!, V[1]!, V[2]!);
+    const cols = Math.min(MAX_CELLS, Math.max(1, Math.ceil(lu / CELL)));
+    const rows = Math.max(minRows, Math.min(MAX_CELLS, Math.max(1, Math.ceil(lv / CELL))));
     const base = this.pos.length / 3;
     for (let r = 0; r <= rows; r++) {
       const t = r / rows;
-      for (const s of [0, 1]) {
+      for (let q = 0; q <= cols; q++) {
+        const s = q / cols;
         const p = [0, 1, 2].map((k) => o[k]! + s * U[k]! + t * V[k]!);
         this.pos.push(p[0]!, p[1]!, p[2]!);
         this.norm.push(n[0]!, n[1]!, n[2]!);
@@ -92,9 +118,10 @@ class Builder {
         this.face.push(s * lu, t * lv, lu, lv);
       }
     }
-    for (let r = 0; r < rows; r++) {
-      const a = base + r * 2;
-      this.idx.push(a, a + 1, a + 3, a, a + 3, a + 2);
+    const w = cols + 1;
+    for (let r = 0; r < rows; r++) for (let q = 0; q < cols; q++) {
+      const a = base + r * w + q;
+      this.idx.push(a, a + 1, a + w + 1, a, a + w + 1, a + w);
     }
   }
 
@@ -104,6 +131,7 @@ class Builder {
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.norm, 3));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
     geo.setAttribute('aFace', new THREE.Float32BufferAttribute(this.face, 4));
+    geo.setAttribute('aSky', skyAttribute(this.pos.length / 3));
     geo.setIndex(this.idx);
     geo.computeBoundingSphere();
     return new THREE.Mesh(geo, blockMaterial());
@@ -118,6 +146,8 @@ export function buildBlocks(map: GameMap): THREE.Mesh[] {
   const casters = new Builder(), others = new Builder();
   const area = 4 * map.half.x * map.half.z;
   const side = new THREE.Color(), top = new THREE.Color();
+  // Преграды для запекания: все блоки, кроме потолка закрытой карты (он — как лампы, свет идёт сверху)
+  const occluders: Occluder[] = [];
   for (const b of map.boxes) {
     const [x0, y0, z0] = b.min, [x1, y1, z1] = b.max;
     const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
@@ -125,6 +155,7 @@ export function buildBlocks(map: GameMap): THREE.Mesh[] {
     const out = ceiling ? others : casters;
     side.set(b.color);
     top.set(b.top ?? b.color);
+    if (!ceiling) occluders.push({ box: b, side: side.clone(), top: top.clone() });
     const grounded = dy >= 0.4 && resting(b, map.boxes);
     const shade = grounded ? (y: number): number => BASE_DARK + (1 - BASE_DARK) * Math.min(1, (y - y0) / BASE_H) : (): number => 1;
     const rows = grounded ? Math.ceil(dy / BASE_H) : 1;
@@ -144,5 +175,11 @@ export function buildBlocks(map: GameMap): THREE.Mesh[] {
     m.receiveShadow = true;
     meshes.push(m);
   }
+  // Освещение запекается в фоне: до конца расчёта карта выглядит как без него
+  bakeInfo.vertices = meshes.reduce((n, m) => n + m.geometry.getAttribute('position').count, 0);
+  bakeInfo.pending = meshes.length;
+  bakeInfo.startedAt = performance.now();
+  bakeInfo.ms = 0;
+  for (const m of meshes) bakeSky(m, occluders, () => { if (--bakeInfo.pending === 0) bakeInfo.ms = Math.round(performance.now() - bakeInfo.startedAt); });
   return meshes;
 }

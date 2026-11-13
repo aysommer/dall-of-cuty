@@ -266,6 +266,8 @@ if (!chromium) {
     for (let i = 0; i < 60; i++) {
       // О смерти судим по данным стрелка: страница жертвы в тестовом браузере может отставать на секунды
       if (await shooter.evaluate(() => [...game.remotes.values()].some((r) => !r.info.alive))) return true;
+      // Жертва уже знает, что погибла, — не стреляем дальше (иначе после возрождения она погибнет второй раз)
+      if (!(await target.evaluate(() => game.me.alive))) return true;
       const at = await shooter.evaluate(() => game.me.pos.toArray());
       await target.evaluate(([x, y, z]) => { game.me.pos.set(x, y, z - 2); game.me.vel.set(0, 0, 0); }, at);
       await shooter.evaluate(() => { game.me.yaw = 0; game.me.pitch = -0.05; });
@@ -592,6 +594,9 @@ if (!chromium) {
     const post1 = await V.evaluate(() => game.dbg().post);
     for (const n of ['bloom', 'ssao']) await V.evaluate((n) => document.querySelector(`[data-setting=${n}] button:nth-child(2)`).click(), n);
     check('свечение и затенение углов включаются в настройках', !post0.bloom && !post0.ssao && post1.bloom && post1.ssao && post1.composer, JSON.stringify([post0, post1]));
+    // Запечённое небесное освещение: посчитано в фоне за пару секунд
+    const bake = await V.waitForFunction(() => { const b = game.dbg().skyBake; return b.pending === 0 && b.ms > 0 ? b : null; }, null, { timeout: 30000 }).then((h) => h.jsonValue(), () => null);
+    check('освещение неба запечено при загрузке карты', !!bake && bake.vertices > 10000, JSON.stringify(bake));
     // Солнце на открытой карте ходит по кругу: оборот за 10 минут — за 2 секунды сдвиг ~1,2°
     const sunA = await V.evaluate(() => game.dbg().sunDir);
     await V.waitForTimeout(2000);

@@ -6,6 +6,7 @@ import { camera, fog, hemi, scene, sky, skyUniforms, sun } from '../core/scene.j
 import { state } from '../core/state.js';
 import { toast } from '../ui/hud.js';
 import { currentMap } from './map.js';
+import { blockLight } from './blocks.js';
 
 export let weatherKind: WeatherKind | null = null;
 
@@ -65,6 +66,8 @@ export function applyFog(): void {
     hemi.color.copy(WHITE).lerp(new THREE.Color(m.sky), 0.35); hemi.intensity = 1.2;
     sun.color.set(0xffe9cc); sun.intensity = 2.15;
   }
+  // Отражённый свет для запечённого освещения: стены и пол вокруг освещены солнцем и небом
+  blockLight.bounce.value.copy(sun.color).multiplyScalar(sun.intensity * 0.22).add(hemi.color.clone().multiplyScalar(hemi.intensity * 0.12));
 }
 
 export function onWeather(m: WeatherMsg): void {
