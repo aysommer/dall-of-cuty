@@ -15,7 +15,7 @@ export const blockLight = { bounce: { value: new THREE.Color(0.6, 0.55, 0.5) } }
 const CELL = 1, MAX_CELLS = 48;
 
 /** Сколько вершин запекается и когда закончили (для отладки и тестов) */
-export const bakeInfo = { vertices: 0, pending: 0, ms: 0, startedAt: 0 };
+export const bakeInfo = { vertices: 0, pending: 0, ms: 0, startedAt: 0, ceilings: 0 };
 
 /** Нижние 1,4 м стоящего блока темнее (до 72 % яркости): стены «стоят» на земле, а не висят над ней. */
 const BASE_DARK = 0.72, BASE_H = 1.4;
@@ -148,6 +148,7 @@ export function buildBlocks(map: GameMap): THREE.Mesh[] {
   const side = new THREE.Color(), top = new THREE.Color();
   // Преграды для запекания: все блоки, кроме потолка закрытой карты (он — как лампы, свет идёт сверху)
   const occluders: Occluder[] = [];
+  let ceilings = 0;
   for (const b of map.boxes) {
     const [x0, y0, z0] = b.min, [x1, y1, z1] = b.max;
     const dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
@@ -164,8 +165,10 @@ export function buildBlocks(map: GameMap): THREE.Mesh[] {
     out.quad([x0, y0, z1], [dx, 0, 0], [0, dy, 0], [0, 0, 1], side, shade, rows);
     out.quad([x1, y0, z0], [-dx, 0, 0], [0, dy, 0], [0, 0, -1], side, shade, rows);
     out.quad([x0, y1, z1], [dx, 0, 0], [0, 0, -dz], [0, 1, 0], top, shade);
-    // Низ стоящего блока никогда не виден
-    if (!grounded) out.quad([x0, y0, z0], [dx, 0, 0], [0, 0, dz], [0, -1, 0], side, shade);
+    // Низ не виден только у блока, стоящего на земле. У лежащего на других блоках (крыша на стенах, перекрытие
+    // этажа) низ — это потолок, его видно снизу; цвет без затемнения у основания
+    if (y0 > 0.05) ceilings++;
+    if (y0 > 0.05) out.quad([x0, y0, z0], [dx, 0, 0], [0, 0, dz], [0, -1, 0], side, () => 1);
   }
   const meshes: THREE.Mesh[] = [];
   for (const [bld, cast] of [[casters, true], [others, false]] as const) {
@@ -178,6 +181,7 @@ export function buildBlocks(map: GameMap): THREE.Mesh[] {
   // Освещение запекается в фоне: до конца расчёта карта выглядит как без него
   bakeInfo.vertices = meshes.reduce((n, m) => n + m.geometry.getAttribute('position').count, 0);
   bakeInfo.pending = meshes.length;
+  bakeInfo.ceilings = ceilings;
   bakeInfo.startedAt = performance.now();
   bakeInfo.ms = 0;
   for (const m of meshes) bakeSky(m, occluders, () => { if (--bakeInfo.pending === 0) bakeInfo.ms = Math.round(performance.now() - bakeInfo.startedAt); });
