@@ -1,13 +1,13 @@
 // Типы карт. Вся геометрия — только прямоугольные блоки.
 import type { Team, Vec3 } from '../protocol.js';
 
-export type MapId = 'sands' | 'bricks' | 'depot' | 'jumps' | 'town' | 'house';
+export type MapId = 'sands' | 'bricks' | 'depot' | 'jumps' | 'town' | 'house' | 'fall' | 'store';
 
 export interface Box {
   min: Vec3;
   max: Vec3;
   color: string;
-  /** Цвет верхней грани, если он другой (у плиты земли верх — земля, бока и низ — тёмный потолок канализации) */
+  /** Цвет верхней грани, если он другой (у плиты земли верх — земля, бока и низ — тёмные) */
   top?: string;
 }
 
@@ -39,6 +39,8 @@ export type SpawnPoint = [x: number, z: number, yaw: number, y?: number];
 export interface GameMap {
   id: MapId;
   name: string;
+  /** Карта из раздела «Новые»; без отметки — из раздела «Старые» */
+  fresh?: boolean;
   /** Половина размера арены по X и Z (без внешних стен) */
   half: { x: number; z: number };
   floor: string;
@@ -49,8 +51,6 @@ export interface GameMap {
   crateDrops: Vec3[];
   /** Куда могут падать аптечки (центр по X/Z и высота пола) */
   medkitDrops: Vec3[];
-  /** Фонари в канализации */
-  lamps: Vec3[];
   /** Трамплины (есть не на всех картах) */
   pads?: JumpPad[];
   /** Разрушаемые стекло и двери */

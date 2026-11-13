@@ -33,7 +33,7 @@ export function updateMinimap(now: number): void {
   ctx.fillRect(0, 0, size, size);
   ctx.fillStyle = 'rgba(150, 190, 160, 0.55)';
   for (const b of currentMap.boxes) {
-    if (b.max[1] <= 0.05) continue; // земля и канализация
+    if (b.max[1] <= 0.05) continue; // земля
     if (b.max[1] - b.min[1] < 0.6 && b.min[1] > 0) continue; // тонкие крыши и полки не рисуем
     ctx.fillRect(sx(b.min[0]), sz(b.min[2]), (b.max[0] - b.min[0]) * k, (b.max[2] - b.min[2]) * k);
   }

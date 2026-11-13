@@ -3,10 +3,12 @@ import * as THREE from 'three';
 import { type Box, clipWalls, DOOR, type GameMap, type Ladder, type MapId, MAPS } from '../../shared/map.js';
 import type { Vec3 } from '../../shared/protocol.js';
 import { beep, shotSound } from '../core/audio.js';
-import { box, fog, scene, sky } from '../core/scene.js';
+import { bakeShadows, box, scene } from '../core/scene.js';
 import { me, state } from '../core/state.js';
 import { fireworks } from '../fx/fireworks.js';
 import { buildCrate } from '../pickups/crate.js';
+import { applyFog } from './weather.js';
+import { buildBlocks } from './blocks.js';
 
 export let currentMap: GameMap = MAPS.sands;
 
@@ -25,8 +27,6 @@ const doorHinges = new Map<number, { pivot: THREE.Group; angle: number }>();
 /** Невидимые стены по краю текущей карты */
 export let clips: Box[] = clipWalls(MAPS.sands.half);
 
-/** Свет фонарей канализации — включается, когда камера под землёй */
-export const lampLights: THREE.PointLight[] = [];
 
 let loadedMap: MapId | null = null;
 
@@ -71,6 +71,7 @@ export function loadMap(id: MapId): void {
       o.geometry.dispose();
       const materials = (Array.isArray(o.material) ? o.material : [o.material]) as THREE.Material[];
       for (const mat of materials) {
+        if (mat.userData.shared) continue; // общий материал блоков живёт между картами
         (mat as THREE.MeshLambertMaterial).map?.dispose();
         mat.dispose();
       }
@@ -78,40 +79,21 @@ export function loadMap(id: MapId): void {
   });
   mapGroup.clear();
 
-  sky.set(currentMap.sky);
-  fog.color.set(currentMap.sky);
-  // Пол — плита из блоков с люками (она в boxes), под ней канализация
-  lampLights.length = 0;
-  for (const [x, y, z] of currentMap.lamps) {
-    // Фонарь: корпус, светящееся стекло и тёплый свет на весь коридор
-    const body = box(0.3, 0.12, 0.3, 0x222222);
-    body.position.set(x, y + 0.3, z);
-    const glass = box(0.22, 0.3, 0.22, 0xffd27a, false);
-    glass.position.set(x, y + 0.1, z);
-    const light = new THREE.PointLight(0xffd9a0, 14, 30, 1);
-    light.position.set(x, y, z);
-    light.visible = false;
-    lampLights.push(light);
-    mapGroup.add(body, glass, light);
+  applyFog(); // небо, туман и свет — под эту карту и текущую погоду
+  for (const m of buildBlocks(currentMap)) mapGroup.add(m);
+  bakeShadows(currentMap.half);
+  for (const l of currentMap.ladders) {
+    const ladder = buildLadder(l);
+    ladder.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
+    mapGroup.add(ladder);
   }
-  for (const b of currentMap.boxes) {
-    const w = b.max[0] - b.min[0], h = b.max[1] - b.min[1], d = b.max[2] - b.min[2];
-    const m = box(w, h, d, b.color);
-    if (b.top) {
-      // Грани куба: +x, -x, +y, -y, +z, -z — верх своим цветом
-      const side = m.material as THREE.MeshLambertMaterial;
-      m.material = [side, side, new THREE.MeshLambertMaterial({ color: b.top }), side, side, side];
-    }
-    m.position.set(b.min[0] + w / 2, b.min[1] + h / 2, b.min[2] + d / 2);
-    mapGroup.add(m);
-  }
-  for (const l of currentMap.ladders) mapGroup.add(buildLadder(l));
   breakMeshes.clear();
   doorHinges.clear();
   for (const x of currentMap.breakables ?? []) {
     const { min, max } = x.box;
     const w = max[0] - min[0], h = max[1] - min[1], d = max[2] - min[2];
     const m = box(w, h, d, x.box.color);
+    m.receiveShadow = true;
     if (x.kind === 'glass') {
       const mat = m.material as THREE.MeshLambertMaterial;
       mat.transparent = true;

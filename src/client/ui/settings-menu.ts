@@ -1,5 +1,6 @@
 // Ползунки и переключатели настроек в меню.
 import { master } from '../core/audio.js';
+import { setShadows } from '../core/scene.js';
 import { settings, SETTINGS_KEY } from '../core/settings.js';
 import { textEl } from '../core/util.js';
 import { viewModel } from '../weapons/viewmodel.js';
@@ -9,6 +10,7 @@ const settingsRefreshers: Array<() => void> = [];
 export function applySettings(): void {
   if (master) master.gain.value = settings.volume;
   viewModel.position.x = settings.hand === 'left' ? -0.22 : 0.22;
+  setShadows(settings.shadows);
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* хранилище недоступно */ }
   for (const refresh of settingsRefreshers) refresh();
 }
@@ -38,22 +40,29 @@ function buildSettings(root: HTMLElement): void {
     slider('Угол обзора (FOV)', 70, 100, 1, () => settings.fov, (v) => { settings.fov = v; },
       (v) => `${v}°`),
   );
+  root.append(
+    choices('Положение оружия', [['right', 'Справа'], ['left', 'Слева']] as const, () => settings.hand, (v) => { settings.hand = v; }),
+    choices('Тени', [[true, 'Вкл'], [false, 'Выкл']] as const, () => settings.shadows, (v) => { settings.shadows = v; }, 'shadows'),
+  );
+}
+
+/** Строка настроек с кнопками-вариантами; выбранный подсвечен. */
+function choices<T>(label: string, options: ReadonlyArray<readonly [T, string]>, get: () => T, set: (v: T) => void, name?: string): HTMLElement {
   const row = document.createElement('div');
   row.className = 'setting';
   const choice = document.createElement('div');
   choice.className = 'choice';
-  const hands = [['right', 'Справа'], ['left', 'Слева']] as const;
-  const buttons = hands.map(([hand, title]) => {
+  if (name) choice.dataset.setting = name;
+  for (const [value, title] of options) {
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = title;
-    b.addEventListener('click', () => { settings.hand = hand; applySettings(); });
-    settingsRefreshers.push(() => b.classList.toggle('active', settings.hand === hand));
-    return b;
-  });
-  choice.append(...buttons);
-  row.append(textEl('span', 'Положение оружия', 'name'), choice);
-  root.append(row);
+    b.addEventListener('click', () => { set(value); applySettings(); });
+    settingsRefreshers.push(() => b.classList.toggle('active', get() === value));
+    choice.append(b);
+  }
+  row.append(textEl('span', label, 'name'), choice);
+  return row;
 }
 
 /** Запуск модуля: подписки на события и начальная отрисовка (вызывается из main.ts). */

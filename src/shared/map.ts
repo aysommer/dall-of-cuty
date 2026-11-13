@@ -8,6 +8,8 @@ import { DEPOT } from './maps/depot.js';
 import { JUMPS } from './maps/jumps.js';
 import { TOWN } from './maps/town.js';
 import { HOUSE } from './maps/house.js';
+import { FALL } from './maps/fall.js';
+import { STORE } from './maps/store.js';
 import type { Box, GameMap, MapId } from './maps/types.js';
 
 export type { Box, Breakable, GameMap, JumpPad, Ladder, MapId, SpawnPoint } from './maps/types.js';
@@ -87,14 +89,12 @@ export const WEAPONS: Record<WeaponId, Weapon> = {
 };
 
 /**
- * Ящик с ракетницей. Раз в dropEveryMs с вероятностью dropChance падает с неба (fallMs),
+ * Ящик с наградой. Раз в dropEveryMs с вероятностью dropChance падает с неба (fallMs),
  * лежит на земле lifeMs и, если его никто не открыл, исчезает.
  */
 export const CRATE = {
   size: 1.2, height: 0.9, reach: 2.4, openMs: 1000,
   dropEveryMs: 60_000, dropChance: 0.5, fallMs: 4000, fallHeight: 40, lifeMs: 120_000,
-  // Что внутри: 10% — взрыв, 40% — ракетница, остальные 50% — броня
-  trapChance: 0.1, rocketChance: 0.4, trapRadius: 5,
 };
 export const ROCKET = { speed: 70, radius: 4, lifeMs: 4000 };
 
@@ -202,6 +202,28 @@ export const STREAK = {
   nukeMs: 4000,
 };
 export type StreakKind = 'uav' | 'missile' | 'nuke' | 'gunship';
+/** Все награды за серию — те же, что лежат в ящике: к запасаемым добавляются ракетница и Джаггернаут */
+export type RewardKind = StreakKind | 'launcher' | 'juggernaut';
+/** Сколько убийств подряд стоит каждая награда */
+export const REWARD_KILLS: Record<RewardKind, number> = { uav: 3, missile: 4, launcher: 5, juggernaut: 7, gunship: 11, nuke: 15 };
+export const REWARD_NAMES: Record<RewardKind, string> = {
+  uav: 'БПЛА', missile: 'Ракета с неба', launcher: 'Ракетница', juggernaut: 'Джаггернаут', gunship: 'Самолёт', nuke: 'Бомба',
+};
+/**
+ * Шанс найти награду в ящике — обратно пропорционален квадрату её цены в убийствах:
+ * БПЛА попадается почти в половине ящиков, бомба — меньше чем в двух из ста.
+ */
+export const CRATE_ODDS: Array<{ kind: RewardKind; chance: number }> = (() => {
+  const w = (Object.keys(REWARD_KILLS) as RewardKind[]).map((kind) => ({ kind, w: 1 / REWARD_KILLS[kind] ** 2 }));
+  const sum = w.reduce((s, x) => s + x.w, 0);
+  return w.map((x) => ({ kind: x.kind, chance: x.w / sum }));
+})();
+/** Что лежит в ящике: roll — случайное число 0…1 */
+export function crateReward(roll: number): RewardKind {
+  let acc = 0;
+  for (const o of CRATE_ODDS) { acc += o.chance; if (roll < acc) return o.kind; }
+  return CRATE_ODDS[0]!.kind;
+}
 
 /**
  * Самолёт (серия 11): 15 секунд кружит высоко над картой сам, игрок только стреляет —
@@ -278,8 +300,13 @@ export function bodyPoints(pos: Vec3, sliding: Low, scale = 1): Vec3[] {
   return [0.2, h / 2, h - 0.1].map((y) => [pos[0], pos[1] + y, pos[2]] as Vec3);
 }
 
-export const MAPS: Record<MapId, GameMap> = { sands: SANDS, bricks: BRICKS, depot: DEPOT, jumps: JUMPS, town: TOWN, house: HOUSE };
-export const MAP_ORDER: MapId[] = ['sands', 'bricks', 'depot', 'jumps', 'town', 'house'];
+export const MAPS: Record<MapId, GameMap> = { sands: SANDS, bricks: BRICKS, depot: DEPOT, jumps: JUMPS, town: TOWN, house: HOUSE, fall: FALL, store: STORE };
+export const MAP_ORDER: MapId[] = ['fall', 'store', 'sands', 'bricks', 'depot', 'jumps', 'town', 'house'];
+/** Разделы карт в меню и в голосовании: сначала новые, потом старые */
+export const MAP_SECTIONS: Array<{ title: string; maps: MapId[] }> = [
+  { title: 'Новые', maps: MAP_ORDER.filter((id) => MAPS[id].fresh) },
+  { title: 'Старые', maps: MAP_ORDER.filter((id) => !MAPS[id].fresh) },
+];
 
 /**
  * Невидимые стены по краю арены — на месте внешних стен, но высотой 100 м:
@@ -321,7 +348,7 @@ export function rayBox(o: Vec3, d: Vec3, min: Vec3, max: Vec3): number {
 }
 
 // Ближайшее пересечение луча с геометрией карты (включая пол).
-/** Дно мира: ниже ничего нет (пол карты — плита из блоков, под ней канализация). */
+/** Дно мира: ниже ничего нет (пол карты — плита из блоков толщиной 1 м). */
 export const WORLD_BOTTOM = -6;
 
 export function rayWorld(boxes: Box[], o: Vec3, d: Vec3, maxDist = 200): number {

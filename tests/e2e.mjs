@@ -187,6 +187,29 @@ console.log('Снаряжение и уровни (WebSocket)');
   await wait(1200);
 }
 
+console.log('Ящик и карты (сервер)');
+{
+  const { CRATE_ODDS, crateReward, MAPS, MAP_SECTIONS } = await import(path.join(ROOT, 'dist/shared/map.js'));
+  const odds = Object.fromEntries(CRATE_ODDS.map((o) => [o.kind, o.chance]));
+  check('в ящике — любая награда за серию, без ловушки', CRATE_ODDS.length === 6 && Math.abs(CRATE_ODDS.reduce((s, o) => s + o.chance, 0) - 1) < 1e-9);
+  check('чем дороже награда, тем реже: БПЛА чаще всех, бомба — меньше 2%',
+    odds.uav > odds.missile && odds.missile > odds.launcher && odds.launcher > odds.juggernaut && odds.juggernaut > odds.gunship && odds.gunship > odds.nuke && odds.nuke < 0.02,
+    CRATE_ODDS.map((o) => `${o.kind} ${(o.chance * 100).toFixed(1)}%`).join(', '));
+  check('жребий раскладывается по шансам', crateReward(0) === 'uav' && crateReward(0.999) === 'nuke');
+  check('разделы карт: в «Новых» — «Падение» и «Магазин», остальные — в «Старых»; Explosion City нет',
+    MAP_SECTIONS[0].title === 'Новые' && MAP_SECTIONS[0].maps.join() === 'fall,store' && MAPS.fall.name === 'Падение' && MAPS.store.name === 'Магазин' && MAP_SECTIONS[1].maps.length === 6 && !('blast' in MAPS));
+  check('канализации нет ни на одной карте', Object.values(MAPS).every((m) => !m.boxes.some((b) => b.min[1] < -1.01) && !('lamps' in m)));
+  check('на «Песках» есть лестница на серую крышу', MAPS.sands.ladders.some((l) => l.max[1] > 4 && l.min[1] === 0));
+  const f = await wsClient();
+  join(f, { room: 'new', roomName: 'Падение', name: 'F', map: 'fall' }); await wait(300);
+  check('в комнате можно играть на новой карте «Падение»', last(f, 'welcome')?.map === 'fall');
+  const st = await wsClient();
+  join(st, { room: 'new', roomName: 'Магазин', name: 'S', map: 'store' }); await wait(300);
+  check('и на «Магазине»', last(st, 'welcome')?.map === 'store');
+  st.ws.close();
+  f.ws.close(); await wait(1200);
+}
+
 // ---------- браузер ----------
 let chromium;
 try {
@@ -227,7 +250,8 @@ if (!chromium) {
   /** shooter стреляет в упор, пока target не умрёт (или пока не выйдет время). */
   async function kill(shooter, target) {
     for (let i = 0; i < 60; i++) {
-      if (!(await target.evaluate(() => game.me.alive))) return true;
+      // О смерти судим по данным стрелка: страница жертвы в тестовом браузере может отставать на секунды
+      if (await shooter.evaluate(() => [...game.remotes.values()].some((r) => !r.info.alive))) return true;
       const at = await shooter.evaluate(() => game.me.pos.toArray());
       await target.evaluate(([x, y, z]) => { game.me.pos.set(x, y, z - 2); game.me.vel.set(0, 0, 0); }, at);
       await shooter.evaluate(() => { game.me.yaw = 0; game.me.pitch = -0.05; });
@@ -245,7 +269,12 @@ if (!chromium) {
   await A.click('#nick-edit'); await A.fill('#name', 'Волк'); await A.click('#nick-edit');
   check('ник меняется кнопкой «Изменить»', (await A.textContent('#home-nick')) === 'Волк' && await A.evaluate(() => localStorage.getItem('doc-name')) === 'Волк');
   await A.click('#nav-progress');
-  check('прогресс: шкала уровней с открытиями', /Piz/.test(await A.textContent('#progress')) && /🔒/.test(await A.textContent('#progress')) && (await A.locator('#progress .node').count()) >= 5);
+  {
+    // Уровень 1 (19 убийств): только две отметки — текущий и следующий; у первого список оружия не пишется
+    const text = await A.textContent('#progress');
+    check('прогресс: только текущий и следующий уровень', (await A.locator('#progress .node').count()) === 2 && !/Piz|Z700|UZE90/.test(text));
+    check('прогресс: на 1-м уровне оружие не перечисляется, на 2-м — что откроется', (await A.locator('#progress .node >> nth=0').locator('.chip').count()) === 0 && /🔒.*Мина/.test(text) && /🔒.*Световая/.test(text));
+  }
   await A.click('#nav-settings');
   check('настройки: FOV и разложенный по клавишам список управления', /FOV/.test(await A.textContent('#view-settings')) && (await A.locator('#keys .key-row').count()) > 15);
   await A.click('#nav-rooms');
@@ -290,15 +319,21 @@ if (!chromium) {
 
   console.log('Бой');
   check('A убивает B', await kill(A, B));
+  // Тестовый браузер рисует редко: тело, лента и окно повышения живут считаные секунды — ждём всё одновременно.
+  // Окно повышения висит 4,5 с, строка в ленте — 5 с, тело — около 5,7 с
+  const corpseA0 = await A.evaluate(() => game.dbg().corpse);
+  const [corpseB0, feedOk, promoted, c] = await Promise.all([
+    B.waitForFunction(() => game.dbg().corpse?.modelled, null, { timeout: 4000 }).then(() => true, () => false),
+    A.waitForFunction(() => /Лиса/.test(document.getElementById('feed').textContent), null, { timeout: 4000 }).then(() => true, () => false),
+    A.waitForFunction(() => /ПОВЫСИЛИ/.test(document.getElementById('promo').textContent) && !document.getElementById('promo').classList.contains('hidden'), null, { timeout: 4000 }).then(() => true, () => false),
+    // Голова за пару секунд оказывается у земли; запоминаем суставы в этот момент
+    A.waitForFunction(() => { const c = game.dbg().corpse; return c && c.joints[2] && c.joints[2][1] < 0.6 ? c : null; }, null, { timeout: 20000 })
+      .then((h) => h.jsonValue(), () => null),
+  ]);
   {
-    const corpse = () => A.evaluate(() => game.dbg().corpse);
-    const first = await corpse();
-    check('тело погибшего — модель с физикой', first?.modelled === true);
-    check('у погибшего на экране тоже своё тело с физикой', (await B.evaluate(() => game.dbg().corpse))?.modelled === true);
-    // Голова за пару секунд оказывается у земли, а конечности остаются на своих местах относительно тела
-    const fell = await A.waitForFunction(() => (game.dbg().corpse?.joints[2]?.[1] ?? 9) < 0.6, null, { timeout: 20000 }).then(() => true, () => false);
-    const c = await corpse();
-    check('тело упало на землю', fell, c ? `голова на высоте ${c.joints[2][1]}` : 'тела нет');
+    check('тело погибшего — модель с физикой', corpseA0?.modelled === true);
+    check('у погибшего на экране тоже своё тело с физикой', corpseB0);
+    check('тело упало на землю', !!c);
     if (c) {
       const d = (i, j) => Math.hypot(c.joints[i][0] - c.joints[j][0], c.joints[i][1] - c.joints[j][1], c.joints[i][2] - c.joints[j][2]);
       check('кости не растянулись (бедро и голень ~0.4 м)', Math.abs(d(9, 10) - 0.41) < 0.08 && Math.abs(d(10, 11) - 0.42) < 0.08, `${d(9, 10).toFixed(2)} и ${d(10, 11).toFixed(2)}`);
@@ -307,8 +342,8 @@ if (!chromium) {
   }
   await A.waitForTimeout(500);
   check('счёт A вырос', /Ты: 1/.test(await A.textContent('#score')));
-  check('лента убийств', /Лиса/.test(await A.textContent('#feed')));
-  check('повышение до 2-го уровня (19 → 20 убийств)', await A.isVisible('#promo') && /ПОВЫСИЛИ/.test(await A.textContent('#promo')));
+  check('лента убийств', feedOk);
+  check('повышение до 2-го уровня (19 → 20 убийств)', promoted);
   check('B после смерти возродился', await B.waitForFunction(() => game.me.alive, null, { timeout: 6000 }).then(() => true, () => false));
 
   const C = await open({ name: 'Третий' });
@@ -316,7 +351,8 @@ if (!chromium) {
   check('лучший игрок в меню — Волк', /Волк/.test(await C.textContent('#best')) && /Ночная|Комната/.test(await C.textContent('#best')));
   // Случайный матч: единственная комната с паролем — значит, открывается своя, и игрок сразу в бою
   await C.click('#nav-random');
-  check('«Найти случайный матч» сразу отправляет в бой', await C.waitForFunction(() => document.body.classList.contains('in-game') && document.getElementById('menu').classList.contains('hidden'), null, { timeout: 8000 }).then(() => true, () => false));
+  // Три страницы рисуют в тестовом браузере одновременно — даём запас по времени
+  check('«Найти случайный матч» сразу отправляет в бой', await C.waitForFunction(() => document.body.classList.contains('in-game') && document.getElementById('menu').classList.contains('hidden'), null, { timeout: 15000 }).then(() => true, () => false));
   await C.close();
 
   console.log('Движение');
@@ -337,7 +373,7 @@ if (!chromium) {
     await A.keyboard.down('KeyW'); await A.waitForTimeout(700);
     const bobs = []; for (let i = 0; i < 6; i++) { bobs.push((await A.evaluate(() => game.dbg())).bob); await A.waitForTimeout(60); }
     await A.keyboard.up('KeyW'); await A.waitForTimeout(900);
-    check('камера покачивается на ходу (до 4,5 см)', bobs.some((b) => b < -0.005) && bobs.every((b) => b >= -0.05), bobs.join(' '));
+    check('камера покачивается на ходу (на шаге — до 3 см)', bobs.some((b) => b < -0.005) && bobs.every((b) => b >= -0.035), bobs.join(' '));
     check('стоя камера не качается', await A.waitForFunction(() => Math.abs(game.dbg().bob) < 0.002, null, { timeout: 8000 }).then(() => true, () => false));
   }
   check('ходьба 6.5', Math.abs(walk - 6.5) < 0.05, walk.toFixed(2));
@@ -371,6 +407,22 @@ if (!chromium) {
     check('от бедра разброс в 5,5 раза больше прицельного (у дробовика — в 2,4)', hipSpread(WEAPONS.rifle) === 5.5 && hipSpread(WEAPONS.shotgun) === 2.4);
     check('названия и баланс: UZE90 — 13 урона и 42 патрона', WEAPONS.smg.name === 'UZE90' && WEAPONS.smg.dmg === 13 && WEAPONS.smg.mag === 42 &&
       ['Jecov', 'Chester', 'AK49', 'Z700', 'Piz'].join() === ['pistol', 'shotgun', 'rifle', 'lmg', 'sniper'].map((w) => WEAPONS[w].name).join());
+  }
+
+  console.log('Смена оружия и бег');
+  {
+    // Пистолет достаётся быстрее основного ствола; пока достаёшь — стрелять нельзя
+    const draw = async (key) => { await A.keyboard.press(key); await A.waitForTimeout(100); return A.evaluate(() => game.dbg().drawMs); };
+    await A.keyboard.press('Digit2'); await A.waitForTimeout(900);
+    const pistol = await draw('Digit3'); await A.waitForTimeout(900);
+    const rifle = await draw('Digit2'); await A.waitForTimeout(900);
+    check('пистолет достаётся быстрее основного оружия', pistol === 280 && rifle >= 500, `${Math.round(pistol)} и ${Math.round(rifle)} мс`);
+    await A.evaluate(() => { game.me.pos.set(0, 0, 10); game.me.vel.set(0, 0, 0); game.me.yaw = 0; });
+    await A.keyboard.down('ShiftLeft'); await A.keyboard.down('KeyW'); await A.waitForTimeout(900);
+    let bob = 0, cam = 0;
+    for (let i = 0; i < 8; i++) { const d = await A.evaluate(() => game.dbg()); bob = Math.max(bob, d.gunBob); cam = Math.min(cam, d.bob); await A.waitForTimeout(70); }
+    await A.keyboard.up('KeyW'); await A.keyboard.up('ShiftLeft'); await A.waitForTimeout(600);
+    check('на бегу оружие и камера качаются сильнее, чем на шаге', bob > 1.2 && cam < -0.04, `оружие ${bob}, камера ${cam}`);
   }
 
   console.log('Съёмный прицел');
@@ -420,7 +472,9 @@ if (!chromium) {
   check('дверь открылась', (await H.evaluate(() => game.dbg())).openDoors.length === 1);
   await H.evaluate(() => { game.me.pos.set(2.75, 3.5, 3.2); game.me.yaw = Math.PI; game.me.vel.set(0, 0, 0); });
   await H.waitForTimeout(300);
-  await H.keyboard.down('KeyW'); await H.waitForTimeout(1800); await H.keyboard.up('KeyW'); await H.waitForTimeout(300);
+  await H.keyboard.down('KeyW');
+  await H.waitForFunction(() => game.me.pos.y > 7.25, null, { timeout: 8000 }).catch(() => {});
+  await H.keyboard.up('KeyW'); await H.waitForTimeout(300);
   const y = await H.evaluate(() => game.me.pos.y);
   check('лестница ведёт на крышу (y 7.3)', Math.abs(y - 7.3) < 0.05, y.toFixed(2));
   await H.close();
@@ -448,12 +502,18 @@ if (!chromium) {
     await touch('touchMove', [[150, 190, 1]]); await T.waitForTimeout(1000);
     const run = await T.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z));
     check('джойстик: ходьба и бег до упора', Math.abs(walk - 6.5) < 0.1 && Math.abs(run - 8.125) < 0.1, `${walk.toFixed(2)} и ${run.toFixed(2)}`);
+    // Назад на исходную точку (скорость сохраняется): впереди свободно, бег не упирается в препятствие
+    await T.evaluate(() => { game.me.pos.set(0, 0, 10); });
     const yaw0 = await T.evaluate(() => game.me.yaw);
     await touch('touchStart', [[150, 190, 1], [520, 150, 2]]);
     for (let x = 540; x <= 620; x += 20) await touch('touchMove', [[150, 190, 1], [x, 150, 2]]);
     await T.waitForTimeout(100);
-    check('второй палец поворачивает взгляд, первый продолжает бег',
-      Math.abs(await T.evaluate((y) => game.me.yaw - y, yaw0)) > 0.3 && await T.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z)) > 6);
+    const turned = Math.abs(await T.evaluate((y) => game.me.yaw - y, yaw0));
+    // Пока шли касания, игрок мог добежать до укрытия в центре — снова на свободное место и меряем бег
+    await T.evaluate(() => { game.me.pos.set(0, 0, 10); });
+    await T.waitForTimeout(300);
+    const speed2 = await T.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z));
+    check('второй палец поворачивает взгляд, первый продолжает бег', turned > 0.3 && speed2 > 6, `поворот ${turned.toFixed(2)}, скорость ${speed2.toFixed(2)}`);
     await touch('touchEnd', []); await T.waitForTimeout(500);
     const ammo = await T.evaluate(() => game.me.ammo[game.me.weapon]);
     const [fx, fy] = await centre('#t-fire');
@@ -467,6 +527,36 @@ if (!chromium) {
     await T.tap('#t-menu'); await T.waitForTimeout(200);
     check('кнопка меню открывает меню', await T.isVisible('#resume'));
     await ctx.close();
+  }
+
+  {
+    console.log('Голосование за карту (браузер)');
+    const V = await open();
+    await play(V, { map: 'fall' });
+    await V.evaluate(() => game.vote({ t: 'vote', ms: 15000, mine: 'store',
+      counts: { fall: 0, store: 2, sands: 1, bricks: 0, depot: 0, jumps: 0, town: 0, house: 0 } }));
+    await V.waitForFunction(() => [...document.querySelectorAll('#vote-maps img')].every((i) => i.complete && i.naturalWidth > 0));
+    const v = await V.evaluate(() => ({
+      tiles: document.querySelectorAll('#vote-maps .vote-tile').length,
+      imgs: document.querySelectorAll('#vote-maps .vote-tile img').length,
+      sections: [...document.querySelectorAll('#vote-maps .vote-section')].map((e) => e.textContent).join(','),
+      active: document.querySelector('#vote-maps .vote-tile.active span')?.textContent,
+      cols: getComputedStyle(document.getElementById('vote-maps')).gridTemplateColumns.split(' ').length,
+    }));
+    check('голосование: плитки с превью всех карт', v.tiles === 8 && v.imgs === 8, JSON.stringify(v));
+    check('голосование: разделы и мой выбор подсвечен', v.sections.split(',').length === 2 && v.active === 'Магазин', JSON.stringify(v));
+    check('голосование: плитки в несколько колонок', v.cols >= 3, JSON.stringify(v));
+    if (process.env.VOTE_SHOT) await V.screenshot({ path: process.env.VOTE_SHOT });
+    const sh0 = await V.evaluate(() => game.dbg().shadow);
+    await V.evaluate(() => document.querySelector('[data-setting=shadows] button:nth-child(2)').click());
+    const sh1 = await V.evaluate(() => game.dbg().shadow);
+    const saved = await V.evaluate(() => JSON.parse(localStorage.getItem('doc-settings')).shadows);
+    await V.evaluate(() => document.querySelector('[data-setting=shadows] button:nth-child(1)').click());
+    const sh2 = await V.evaluate(() => game.dbg().shadow);
+    check('тени включены и считаются один раз на карту', sh0.on && sh0.cast && sh0.map && !sh0.pending, JSON.stringify(sh0));
+    check('тени выключаются в настройках и включаются обратно', !sh1.on && !sh1.cast && saved === false && sh2.on && sh2.cast, JSON.stringify([sh1, sh2]));
+    check('блоки карты склеены: вызовов отрисовки меньше 120', (await V.evaluate(() => game.dbg().drawCalls)) < 120);
+    await V.context().close();
   }
 
   check('без ошибок на страницах', errors.length === 0, errors.join(' | '));

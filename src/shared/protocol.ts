@@ -1,7 +1,7 @@
 // Типы сетевого протокола — общие для клиента и сервера.
 
 import type { MapId } from './maps/types.js';
-import type { LimitKind, StreakKind, WeatherKind } from './map.js';
+import type { LimitKind, RewardKind, StreakKind, WeatherKind } from './map.js';
 
 export type Team = 'green' | 'red';
 export type Mode = 'tdm' | 'ffa';
@@ -159,6 +159,8 @@ export type ServerMsg =
   | { t: 'missile-go'; id: number; p: Vec3 }
   | { t: 'newmap'; map: MapId }
   | { t: 'rockets'; n: number }
+  /** Что оказалось в открытом ящике */
+  | { t: 'reward'; kind: RewardKind }
   | { t: 'error'; text: string }
   | { t: 'welcome'; id: number; mode: Mode; map: MapId }
   | { t: 'reset' };

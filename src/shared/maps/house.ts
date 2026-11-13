@@ -5,7 +5,7 @@
 // балок: за ними прячутся, а ракеты с неба и самолёт достают только сюда.
 // Планировка своя и симметрична относительно центра.
 import { builder, type Breakable, type GameMap, type Ladder, type SpawnPoint } from './types.js';
-import { addGroundAndSewer, subtract } from './sewer.js';
+import { addGround, subtract } from './ground.js';
 
 const HALF = { x: 15, z: 11 };
 const F2 = 3.5;         // пол второго этажа
@@ -150,9 +150,9 @@ for (const s of [-1, 1]) {
 breakable('door', -11, F2, 2.9, -9.5, F2 + DOOR_H, 3.1);
 breakable('door', 9.5, F2, -3.1, 11, F2 + DOOR_H, -2.9);
 
-// Канализация: под первым этажом, люки в комнатах запада и востока
+// Земля под всем домом; лестниц-подъёмов на карте нет
 const ladders: Ladder[] = [];
-const { lamps } = addGroundAndSewer(boxes, ladders, HALF, { axis: 'x', from: -13, to: 13, at: 4 }, FLOOR1);
+addGround(boxes, HALF, FLOOR1);
 
 // Зелёные — в западной части первого этажа, красные — в восточной
 const E = -Math.PI / 2, W = Math.PI / 2;
@@ -167,7 +167,6 @@ export const HOUSE: GameMap = {
   sky: '#c9d6e3',
   boxes,
   ladders,
-  lamps,
   breakables,
   indoor: true,
   crateDrops: [[-3.5, 0, -4], [3.5, 0, 4], [-9, F2, -6], [9, F2, 6], [-7, F3, 0], [7, F3, 0]],

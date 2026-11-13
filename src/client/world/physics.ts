@@ -174,7 +174,7 @@ export function move(dt: number): void {
 
   p.y += me.vel.y * dt;
   me.grounded = false;
-  // Дно мира — страховка; обычно игрок стоит на плите земли или на полу канализации
+  // Дно мира — страховка; обычно игрок стоит на плите земли
   if (p.y <= WORLD_BOTTOM) {
     p.y = WORLD_BOTTOM; me.vel.y = 0; me.grounded = true;
   } else {

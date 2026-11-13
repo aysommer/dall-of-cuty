@@ -3,7 +3,7 @@
 // Команды появляются на западной и восточной окраинах. Планировка своя и симметрична
 // относительно центра, чтобы стороны были в равных условиях.
 import { builder, type GameMap, type Ladder, type SpawnPoint } from './types.js';
-import { addGroundAndSewer } from './sewer.js';
+import { addGround } from './ground.js';
 
 const HALF = { x: 25, z: 20 };
 const WALL_H = 7;
@@ -97,8 +97,8 @@ sym(-20, -10, -19.4, -3, 2.6, BRICK);
 sym(-20, 3, -19.4, 10, 2.6, BRICK);
 sym(-23, -1, -21.5, 1, 1.4, WOOD);
 
-// Канализация: под площадью, с севера на юг
-const { lamps } = addGroundAndSewer(boxes, ladders, HALF, { axis: 'z', from: -16, to: 16, at: 0 }, '#9aa36b');
+// Земля под всей ареной
+addGround(boxes, HALF, '#9aa36b');
 
 // Зелёные — на западе (взгляд на восток), красные — на востоке
 const E = -Math.PI / 2, W = Math.PI / 2;
@@ -113,7 +113,6 @@ export const TOWN: GameMap = {
   sky: '#b8dcf5',
   boxes,
   ladders,
-  lamps,
   // Ящик падает на крышу одной из лавок или на площадь у скамейки
   crateDrops: [[-13, ROOF_Y, -11.5], [13, ROOF_Y, 11.5], [0, 0, 7.5]],
   medkitDrops: [[-6, 0, 3], [6, 0, -3], [-10, 0, 14], [10, 0, -14]],

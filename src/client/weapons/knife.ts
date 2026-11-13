@@ -11,7 +11,7 @@ import { openingUntil } from '../pickups/crate.js';
 import { missileCtl } from '../streaks/missile.js';
 import { showHit, updateHud } from '../ui/hud.js';
 import { _dir } from './shooting.js';
-import { setWeapon } from './viewmodel.js';
+import { setWeapon, startOffhandThrow, startThrow } from './viewmodel.js';
 
 interface KnifeFx { mesh: THREE.Group; vel: THREE.Vector3 }
 
@@ -34,7 +34,12 @@ export function throwKnife(): void {
   camera.getWorldDirection(_dir);
   sendMsg({ t: 'throw', d: [+_dir.x.toFixed(4), +_dir.y.toFixed(4), +_dir.z.toFixed(4)] });
   state.hasKnife = false; // сервер подтвердит
-  if (me.weapon === 'knife') setWeapon(settings.kit[0]!);
+  // Бросок виден: нож в руке уходит замахом вперёд, а если в руках ствол — бросает свободная рука
+  const now = performance.now();
+  if (me.weapon === 'knife') {
+    startThrow(now);
+    setTimeout(() => { if (me.weapon === 'knife') setWeapon(settings.kit[0]!); }, 300);
+  } else startOffhandThrow(now);
   shotSound('knife', 1);
   updateHud();
 }

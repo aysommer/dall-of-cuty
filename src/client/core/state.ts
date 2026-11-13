@@ -56,7 +56,6 @@ export const state = {
   hasKnife: true,
   myGrenades: 0,
   lastWeather: null as WeatherMsg | null,
-  underground: false,
   uavUntil: 0,
   matchEndsAt: 0,
   sprintK: 0,
