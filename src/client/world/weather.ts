@@ -60,8 +60,8 @@ export function applyFog(): void {
     hemi.color.set(0xeef2f7); hemi.intensity = 1.8;
     sun.color.set(0xe4ebf3); sun.intensity = 0.8;
   } else {
-    hemi.color.copy(WHITE).lerp(new THREE.Color(m.sky), 0.35); hemi.intensity = 1.35;
-    sun.color.set(0xffe9cc); sun.intensity = 1.9;
+    hemi.color.copy(WHITE).lerp(new THREE.Color(m.sky), 0.35); hemi.intensity = 1.2;
+    sun.color.set(0xffe9cc); sun.intensity = 2.15;
   }
 }
 

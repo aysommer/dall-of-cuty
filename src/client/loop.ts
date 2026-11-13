@@ -1,7 +1,7 @@
 // Главный цикл: движение, эффекты, отрисовка; отладочный доступ window.game.
 import { CROUCH, PLAYER, SLIDE, STREAK } from '../shared/map.js';
 import { sendMsg } from './core/net.js';
-import { camera, fog, renderer, scene } from './core/scene.js';
+import { camera, fog, renderer, scene, sun } from './core/scene.js';
 import { settings } from './core/settings.js';
 import { keys, me, remotes, state } from './core/state.js';
 import { $ } from './core/util.js';
@@ -44,7 +44,8 @@ let groundedAt = 0, airFrames = 0;
 let bobPhase = 0, bobAmp = 0, bobY = 0, bobRoll = 0, bobGun = 0;
 function frame(now: number): void {
   requestAnimationFrame(frame);
-  const dt = Math.min(0.05, (now - last) / 1000);
+  const rawDt = Math.min(0.25, (now - last) / 1000);
+  const dt = Math.min(0.05, rawDt);
   last = now;
 
   if (state.joined) {
@@ -142,7 +143,7 @@ function frame(now: number): void {
   updateEffects(now);
   updateCrate(now);
   updateCratePrompt(now);
-  updateCorpses(now, dt);
+  updateCorpses(now, rawDt);  // тела догоняют реальное время сами (до 0,12 с за кадр)
   updateSprays(now);
   updateMedkits(now);
   updateSteps(dt);
@@ -189,6 +190,7 @@ export function initLoop(): void {
       missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, crouch: state.crouch, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, eyeH: state.eyeH, recoil: state.recoil, mines: [...mineFx.values()].map((m) => ({ kind: m.info.kind, armed: m.info.armed > 0, p: m.info.p, to: m.info.to })), blind: +blindK(performance.now()).toFixed(2), arms: viewArmsReady(), drawMs: lastDrawMs(), gear, gunBob: +bobGun.toFixed(2), bob: +bobY.toFixed(3),
       corpses: corpses.length, corpse: corpseDebug(), model: characterReady() ? 'ready' : characterFailed() ? 'failed' : 'loading',
       remoteAnim: [...remotes.values()].map((r) => r.char ? { walk: +r.char.walk.getEffectiveWeight().toFixed(2), run: +r.char.run.getEffectiveWeight().toFixed(2), air: +r.char.airK.toFixed(2), reload: r.reloading, speed: +r.char.speed.toFixed(1) } : null), sprays: sprays.length,
+      shadow: { on: renderer.shadowMap.enabled, pending: renderer.shadowMap.needsUpdate, cast: sun.castShadow, map: !!sun.shadow.map, box: [sun.shadow.camera.left, sun.shadow.camera.right, sun.shadow.camera.near, sun.shadow.camera.far].map((v) => +v.toFixed(1)) }, drawCalls: renderer.info.render.calls,
       steps: stepCount, medkits: medkitFx.size, boltUntil: state.boltUntil, menuClosed: state.menuClosed, armor: me.armor }),
   };
 }

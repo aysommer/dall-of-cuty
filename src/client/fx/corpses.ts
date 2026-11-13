@@ -264,7 +264,8 @@ export function updateCorpses(now: number, dt = 1 / 60): void {
       const r = c.ragdoll;
       if (sink === 0 && r.still < 0.6) {
         const before = r.pos[HIPS]!.clone().add(r.pos[HEAD]!).add(r.pos[L_FOOT]!).add(r.pos[R_HAND]!);
-        r.acc = Math.min(r.acc + dt, 0.05);
+        // Догоняем до 0,12 с за кадр: и на медленном устройстве тело падает за реальное время, а не застывает
+        r.acc = Math.min(r.acc + dt, 0.12);
         while (r.acc >= SUBSTEP) {
           r.acc -= SUBSTEP;
           refreshNear(r);

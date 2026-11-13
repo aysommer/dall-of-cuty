@@ -8,6 +8,10 @@ export const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 // Мягкая цветокоррекция: яркие места не выгорают в белое, а оттенки цветов карты сохраняются
 renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.toneMappingExposure = 1.3;
+// Тени от солнца считаются один раз при загрузке карты (карта неподвижна) — в бою кадр их не пересчитывает
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.shadowMap.autoUpdate = false;
 
 export const scene = new THREE.Scene();
 
@@ -74,6 +78,44 @@ function resize(): void {
   camera.updateProjectionMatrix();
 }
 
+/** Включить или выключить тени: шейдеры всех материалов пересобираются, карта теней считается заново. */
+export function setShadows(on: boolean): void {
+  if (renderer.shadowMap.enabled === on) return;
+  renderer.shadowMap.enabled = on;
+  sun.castShadow = on;
+  scene.traverse((o) => {
+    const mat = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+    for (const m of mat ? (Array.isArray(mat) ? mat : [mat]) : []) m.needsUpdate = true;
+  });
+  if (on) renderer.shadowMap.needsUpdate = true;
+}
+
+/** Направление на солнце */
+const SUN_DIR = new THREE.Vector3(22, 30, 12).normalize();   // ~50° над горизонтом
+
+/** Настроить тень солнца под размер карты и пересчитать её один раз (вызывается после загрузки карты). */
+export function bakeShadows(half: { x: number; z: number }): void {
+  sun.position.copy(SUN_DIR).multiplyScalar(120);
+  sun.target.position.set(0, 0, 0);
+  sun.target.updateMatrixWorld();
+  sun.updateMatrixWorld();
+  // Кадр тени — ровно по карте, как её видит солнце: углы арены (со стенами, от земли до 12 м) в его координатах
+  const cam = sun.shadow.camera;
+  cam.position.copy(sun.position);
+  cam.lookAt(sun.target.position);
+  cam.updateMatrixWorld();
+  const lo = new THREE.Vector3(Infinity, Infinity, Infinity), hi = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+  const p = new THREE.Vector3();
+  for (const x of [-half.x - 1, half.x + 1]) for (const y of [-1, 12]) for (const z of [-half.z - 1, half.z + 1]) {
+    p.set(x, y, z).applyMatrix4(cam.matrixWorldInverse);
+    lo.min(p); hi.max(p);
+  }
+  cam.left = lo.x - 1; cam.right = hi.x + 1; cam.bottom = lo.y - 1; cam.top = hi.y + 1;
+  cam.near = Math.max(1, -hi.z - 2); cam.far = -lo.z + 2;
+  cam.updateProjectionMatrix();
+  renderer.shadowMap.needsUpdate = true;
+}
+
 export function box(w: number, h: number, d: number, color: THREE.ColorRepresentation, lit = true): THREE.Mesh {
   const material = lit ? new THREE.MeshLambertMaterial({ color }) : new THREE.MeshBasicMaterial({ color });
   return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
@@ -87,7 +129,12 @@ export function initScene(): void {
   camera.rotation.order = 'YXZ';
   scene.add(camera);
   scene.add(hemi);
-  sun.position.set(20, 40, 10);
+  sun.position.copy(SUN_DIR).multiplyScalar(120);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.bias = -0.0004;
+  sun.shadow.normalBias = 0.03;
+  sun.shadow.radius = 2.5;                                     // мягкий край тени
   scene.add(sun);
   scene.add(skyDome);
   window.addEventListener('resize', resize);

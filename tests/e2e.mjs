@@ -319,19 +319,21 @@ if (!chromium) {
 
   console.log('Бой');
   check('A убивает B', await kill(A, B));
-  // Окно повышения висит 4,5 с — смотрим сразу, пока тело ещё падает
-  // Строка в ленте живёт 5 с — тоже смотрим сразу
-  const feedOk = await A.waitForFunction(() => /Лиса/.test(document.getElementById('feed').textContent), null, { timeout: 4000 }).then(() => true, () => false);
-  const promoted = await A.waitForFunction(() => /ПОВЫСИЛИ/.test(document.getElementById('promo').textContent) && !document.getElementById('promo').classList.contains('hidden'), null, { timeout: 4000 }).then(() => true, () => false);
+  // Тестовый браузер рисует редко: тело, лента и окно повышения живут считаные секунды — ждём всё одновременно.
+  // Окно повышения висит 4,5 с, строка в ленте — 5 с, тело — около 5,7 с
+  const corpseA0 = await A.evaluate(() => game.dbg().corpse);
+  const [corpseB0, feedOk, promoted, c] = await Promise.all([
+    B.waitForFunction(() => game.dbg().corpse?.modelled, null, { timeout: 4000 }).then(() => true, () => false),
+    A.waitForFunction(() => /Лиса/.test(document.getElementById('feed').textContent), null, { timeout: 4000 }).then(() => true, () => false),
+    A.waitForFunction(() => /ПОВЫСИЛИ/.test(document.getElementById('promo').textContent) && !document.getElementById('promo').classList.contains('hidden'), null, { timeout: 4000 }).then(() => true, () => false),
+    // Голова за пару секунд оказывается у земли; запоминаем суставы в этот момент
+    A.waitForFunction(() => { const c = game.dbg().corpse; return c && c.joints[2] && c.joints[2][1] < 0.6 ? c : null; }, null, { timeout: 20000 })
+      .then((h) => h.jsonValue(), () => null),
+  ]);
   {
-    const corpse = () => A.evaluate(() => game.dbg().corpse);
-    const first = await corpse();
-    check('тело погибшего — модель с физикой', first?.modelled === true);
-    check('у погибшего на экране тоже своё тело с физикой', (await B.evaluate(() => game.dbg().corpse))?.modelled === true);
-    // Голова за пару секунд оказывается у земли, а конечности остаются на своих местах относительно тела
-    const fell = await A.waitForFunction(() => (game.dbg().corpse?.joints[2]?.[1] ?? 9) < 0.6, null, { timeout: 20000 }).then(() => true, () => false);
-    const c = await corpse();
-    check('тело упало на землю', fell, c ? `голова на высоте ${c.joints[2][1]}` : 'тела нет');
+    check('тело погибшего — модель с физикой', corpseA0?.modelled === true);
+    check('у погибшего на экране тоже своё тело с физикой', corpseB0);
+    check('тело упало на землю', !!c);
     if (c) {
       const d = (i, j) => Math.hypot(c.joints[i][0] - c.joints[j][0], c.joints[i][1] - c.joints[j][1], c.joints[i][2] - c.joints[j][2]);
       check('кости не растянулись (бедро и голень ~0.4 м)', Math.abs(d(9, 10) - 0.41) < 0.08 && Math.abs(d(10, 11) - 0.42) < 0.08, `${d(9, 10).toFixed(2)} и ${d(10, 11).toFixed(2)}`);
@@ -349,7 +351,8 @@ if (!chromium) {
   check('лучший игрок в меню — Волк', /Волк/.test(await C.textContent('#best')) && /Ночная|Комната/.test(await C.textContent('#best')));
   // Случайный матч: единственная комната с паролем — значит, открывается своя, и игрок сразу в бою
   await C.click('#nav-random');
-  check('«Найти случайный матч» сразу отправляет в бой', await C.waitForFunction(() => document.body.classList.contains('in-game') && document.getElementById('menu').classList.contains('hidden'), null, { timeout: 8000 }).then(() => true, () => false));
+  // Три страницы рисуют в тестовом браузере одновременно — даём запас по времени
+  check('«Найти случайный матч» сразу отправляет в бой', await C.waitForFunction(() => document.body.classList.contains('in-game') && document.getElementById('menu').classList.contains('hidden'), null, { timeout: 15000 }).then(() => true, () => false));
   await C.close();
 
   console.log('Движение');
@@ -499,12 +502,18 @@ if (!chromium) {
     await touch('touchMove', [[150, 190, 1]]); await T.waitForTimeout(1000);
     const run = await T.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z));
     check('джойстик: ходьба и бег до упора', Math.abs(walk - 6.5) < 0.1 && Math.abs(run - 8.125) < 0.1, `${walk.toFixed(2)} и ${run.toFixed(2)}`);
+    // Назад на исходную точку (скорость сохраняется): впереди свободно, бег не упирается в препятствие
+    await T.evaluate(() => { game.me.pos.set(0, 0, 10); });
     const yaw0 = await T.evaluate(() => game.me.yaw);
     await touch('touchStart', [[150, 190, 1], [520, 150, 2]]);
     for (let x = 540; x <= 620; x += 20) await touch('touchMove', [[150, 190, 1], [x, 150, 2]]);
     await T.waitForTimeout(100);
-    check('второй палец поворачивает взгляд, первый продолжает бег',
-      Math.abs(await T.evaluate((y) => game.me.yaw - y, yaw0)) > 0.3 && await T.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z)) > 6);
+    const turned = Math.abs(await T.evaluate((y) => game.me.yaw - y, yaw0));
+    // Пока шли касания, игрок мог добежать до укрытия в центре — снова на свободное место и меряем бег
+    await T.evaluate(() => { game.me.pos.set(0, 0, 10); });
+    await T.waitForTimeout(300);
+    const speed2 = await T.evaluate(() => Math.hypot(game.me.vel.x, game.me.vel.z));
+    check('второй палец поворачивает взгляд, первый продолжает бег', turned > 0.3 && speed2 > 6, `поворот ${turned.toFixed(2)}, скорость ${speed2.toFixed(2)}`);
     await touch('touchEnd', []); await T.waitForTimeout(500);
     const ammo = await T.evaluate(() => game.me.ammo[game.me.weapon]);
     const [fx, fy] = await centre('#t-fire');
@@ -538,6 +547,15 @@ if (!chromium) {
     check('голосование: разделы и мой выбор подсвечен', v.sections.split(',').length === 2 && v.active === 'Магазин', JSON.stringify(v));
     check('голосование: плитки в несколько колонок', v.cols >= 3, JSON.stringify(v));
     if (process.env.VOTE_SHOT) await V.screenshot({ path: process.env.VOTE_SHOT });
+    const sh0 = await V.evaluate(() => game.dbg().shadow);
+    await V.evaluate(() => document.querySelector('[data-setting=shadows] button:nth-child(2)').click());
+    const sh1 = await V.evaluate(() => game.dbg().shadow);
+    const saved = await V.evaluate(() => JSON.parse(localStorage.getItem('doc-settings')).shadows);
+    await V.evaluate(() => document.querySelector('[data-setting=shadows] button:nth-child(1)').click());
+    const sh2 = await V.evaluate(() => game.dbg().shadow);
+    check('тени включены и считаются один раз на карту', sh0.on && sh0.cast && sh0.map && !sh0.pending, JSON.stringify(sh0));
+    check('тени выключаются в настройках и включаются обратно', !sh1.on && !sh1.cast && saved === false && sh2.on && sh2.cast, JSON.stringify([sh1, sh2]));
+    check('блоки карты склеены: вызовов отрисовки меньше 120', (await V.evaluate(() => game.dbg().drawCalls)) < 120);
     await V.context().close();
   }
 
