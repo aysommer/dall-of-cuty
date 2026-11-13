@@ -520,6 +520,27 @@ if (!chromium) {
     await ctx.close();
   }
 
+  {
+    console.log('Голосование за карту (браузер)');
+    const V = await open();
+    await play(V, { map: 'fall' });
+    await V.evaluate(() => game.vote({ t: 'vote', ms: 15000, mine: 'store',
+      counts: { fall: 0, store: 2, sands: 1, bricks: 0, depot: 0, jumps: 0, town: 0, house: 0 } }));
+    await V.waitForFunction(() => [...document.querySelectorAll('#vote-maps img')].every((i) => i.complete && i.naturalWidth > 0));
+    const v = await V.evaluate(() => ({
+      tiles: document.querySelectorAll('#vote-maps .vote-tile').length,
+      imgs: document.querySelectorAll('#vote-maps .vote-tile img').length,
+      sections: [...document.querySelectorAll('#vote-maps .vote-section')].map((e) => e.textContent).join(','),
+      active: document.querySelector('#vote-maps .vote-tile.active span')?.textContent,
+      cols: getComputedStyle(document.getElementById('vote-maps')).gridTemplateColumns.split(' ').length,
+    }));
+    check('голосование: плитки с превью всех карт', v.tiles === 8 && v.imgs === 8, JSON.stringify(v));
+    check('голосование: разделы и мой выбор подсвечен', v.sections.split(',').length === 2 && v.active === 'Магазин', JSON.stringify(v));
+    check('голосование: плитки в несколько колонок', v.cols >= 3, JSON.stringify(v));
+    if (process.env.VOTE_SHOT) await V.screenshot({ path: process.env.VOTE_SHOT });
+    await V.context().close();
+  }
+
   check('без ошибок на страницах', errors.length === 0, errors.join(' | '));
   await browser.close();
 }

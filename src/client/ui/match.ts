@@ -9,6 +9,7 @@ import { $, textEl } from '../core/util.js';
 import { feedNote } from './hud.js';
 import { loadMap } from '../world/map.js';
 import { applyFog, onWeather } from '../world/weather.js';
+import { mapPreview } from './mappreview.js';
 
 export let voting = false;
 
@@ -41,8 +42,15 @@ export function onVote(m: VoteMsg): void {
     for (const id of section.maps) {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = id === m.mine ? 'active' : '';
-      b.append(textEl('span', MAPS[id].name), textEl('small', ` · голосов: ${m.counts[id]}`));
+      b.className = 'vote-tile' + (id === m.mine ? ' active' : '');
+      const img = document.createElement('img');
+      img.src = mapPreview(id);
+      img.alt = `Карта «${MAPS[id].name}» сверху`;
+      const n = m.counts[id];
+      const cap = document.createElement('div');
+      cap.className = 'vote-cap';
+      cap.append(textEl('span', MAPS[id].name), textEl('small', n ? `голосов: ${n}` : 'нет голосов', n ? 'has' : ''));
+      b.append(img, cap);
       b.addEventListener('click', () => sendMsg({ t: 'vote', map: id }));
       list.append(b);
     }

@@ -238,12 +238,20 @@ h3 { margin: 22px 0 10px; font-size: 13px; color: var(--text-3); text-transform:
 .choice.kit { margin: 8px 0 4px; flex-wrap: wrap; }
 .choice.kit button { flex: 1 1 40%; }
 
-#vote-maps { display: flex; flex-direction: column; gap: 8px; margin: 16px 0 10px; }
-#vote-maps button {
-  padding: 12px; font-size: 16px; cursor: pointer; background: #11141a; border: 2px solid #343b48; color: #fff; text-align: left;
+#vote > .panel { max-width: 900px; }
+#vote-maps { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin: 16px 0 10px; }
+#vote-maps .vote-section { grid-column: 1 / -1; }
+.vote-tile {
+  display: flex; flex-direction: column; padding: 0; cursor: pointer; background: #11141a; border: 2px solid #343b48;
+  border-radius: 6px; overflow: hidden; color: #fff; text-align: left; transition: border-color 0.12s, transform 0.12s;
 }
-#vote-maps button.active { border-color: #5cf07a; background: #173d20; }
-#vote-maps small { color: #9aa4b5; }
+.vote-tile:hover { border-color: #6b7587; transform: translateY(-2px); }
+.vote-tile img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: contain; background: #15171b; }
+.vote-cap { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; padding: 8px 10px; }
+.vote-cap span { font-size: 15px; font-weight: 600; }
+.vote-cap small { color: #9aa4b5; font-size: 12px; white-space: nowrap; }
+.vote-cap small.has { color: #5cf07a; }
+.vote-tile.active { border-color: #5cf07a; background: #173d20; }
 
 @media (max-width: 640px) {
   #health, #ammo { font-size: 28px; padding: 8px 12px; }

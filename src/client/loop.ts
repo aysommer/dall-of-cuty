@@ -24,7 +24,7 @@ import { updateNuke } from './streaks/nuke.js';
 import { updateMinimap } from './streaks/uav.js';
 import { hotbar } from './ui/hotbar.js';
 import { updateHud } from './ui/hud.js';
-import { timerText, updateVote } from './ui/match.js';
+import { onVote, timerText, updateVote } from './ui/match.js';
 import { updateCratePrompt } from './ui/prompt.js';
 import { cookStart, grenadeFx, updateGrenades } from './weapons/grenade.js';
 import { updateKnives } from './weapons/knife.js';
@@ -168,7 +168,7 @@ declare global {
   interface Window {
     game: {
       me: typeof me; remotes: typeof remotes; keys: typeof keys; applyLook: typeof applyLook;
-      steer: (yaw: number, pitch: number) => void; dbg: () => Record<string, unknown>;
+      steer: (yaw: number, pitch: number) => void; dbg: () => Record<string, unknown>; vote: typeof onVote;
     };
   }
 }
@@ -179,7 +179,7 @@ export function initLoop(): void {
   updateHud();
   requestAnimationFrame(frame);
   window.game = {
-    me, remotes, keys, applyLook,
+    me, remotes, keys, applyLook, vote: onVote,
     steer: (yaw: number, pitch: number) => {
       if (missileCtl) { missileCtl.yaw = yaw; missileCtl.pitch = pitch; }
       if (gunner) { gunner.yaw = yaw; gunner.pitch = pitch; }
