@@ -12,6 +12,7 @@ import { corpseDebug, corpses, updateCorpses } from './fx/corpses.js';
 import { blindK, mineFx, updateBlind, updateMines } from './weapons/mines.js';
 import { gear } from './ui/hotbar.js';
 import { bursts, updateFireworks } from './fx/fireworks.js';
+import { glassState, setGlassLife, updateGlass } from './fx/glass.js';
 import { stepCount, updateSteps } from './fx/footsteps.js';
 import { sprays, updateSprays } from './fx/sprays.js';
 import { updateEffects } from './fx/tracers.js';
@@ -153,6 +154,7 @@ function frame(now: number): void {
   updateKnives(dt);
   updateSinking(now);
   updateFireworks(dt);
+  updateGlass(now, rawDt);
   updateDoors(dt);
   updateGrenades(now);
   updateMines(now);
@@ -184,7 +186,7 @@ declare global {
   interface Window {
     game: {
       me: typeof me; remotes: typeof remotes; keys: typeof keys; applyLook: typeof applyLook;
-      steer: (yaw: number, pitch: number) => void; dbg: () => Record<string, unknown>; vote: typeof onVote; equip: (w: WeaponId) => void; view: (v: { from: [number, number, number]; at: [number, number, number] } | null) => void; crate: typeof onCrate;
+      steer: (yaw: number, pitch: number) => void; dbg: () => Record<string, unknown>; vote: typeof onVote; equip: (w: WeaponId) => void; view: (v: { from: [number, number, number]; at: [number, number, number] } | null) => void; crate: typeof onCrate; glassLife: typeof setGlassLife;
     };
   }
 }
@@ -199,6 +201,7 @@ export function initLoop(): void {
     view: (v: typeof dbgView) => { dbgView = v; },
     // Для скриптов: показать ящик у себя (как будто пришло сообщение сервера)
     crate: onCrate,
+    glassLife: setGlassLife,
     // Для скриптов: взять любой ствол, даже не из набора (набор на это время подменяется)
     equip: (w: WeaponId) => {
       if (w !== 'knife' && w !== 'grenade' && w !== 'rocket' && !settings.kit.includes(w)) settings.kit = [w, settings.kit[1] ?? 'pistol'];
@@ -214,7 +217,7 @@ export function initLoop(): void {
       missile: missileCtl ? missileCtl.pos.toArray() : null, low: state.low, crouch: state.crouch, adsK: state.adsK, fov: camera.fov, crateState: state.crateState, crateAt: state.crateAt, chute: !!state.crateChute?.visible, cook: !document.getElementById('cook')!.classList.contains('hidden'), eyeH: state.eyeH, recoil: state.recoil, mines: [...mineFx.values()].map((m) => ({ kind: m.info.kind, armed: m.info.armed > 0, p: m.info.p, to: m.info.to })), blind: +blindK(performance.now()).toFixed(2), arms: viewArmsReady(), armsFit: viewArmsDebug(), drawMs: lastDrawMs(), gear, gunBob: +bobGun.toFixed(2), bob: +bobY.toFixed(3),
       corpses: corpses.length, corpse: corpseDebug(), model: characterReady() ? 'ready' : characterFailed() ? 'failed' : 'loading',
       remoteAnim: [...remotes.values()].map((r) => r.char ? { walk: +r.char.walk.getEffectiveWeight().toFixed(2), run: +r.char.run.getEffectiveWeight().toFixed(2), air: +r.char.airK.toFixed(2), reload: r.reloading, speed: +r.char.speed.toFixed(1) } : null), sprays: sprays.length,
-      shadow: { on: renderer.shadowMap.enabled, pending: renderer.shadowMap.needsUpdate, cast: sun.castShadow, map: !!sun.shadow.map, box: [sun.shadow.camera.left, sun.shadow.camera.right, sun.shadow.camera.near, sun.shadow.camera.far].map((v) => +v.toFixed(1)) }, drawCalls: renderer.info.render.calls, post: postState(), sunDir: sunDirection().toArray().map((v) => +v.toFixed(3)),
+      shadow: { on: renderer.shadowMap.enabled, pending: renderer.shadowMap.needsUpdate, cast: sun.castShadow, map: !!sun.shadow.map, box: [sun.shadow.camera.left, sun.shadow.camera.right, sun.shadow.camera.near, sun.shadow.camera.far].map((v) => +v.toFixed(1)) }, drawCalls: renderer.info.render.calls, glass: glassState(), post: postState(), sunDir: sunDirection().toArray().map((v) => +v.toFixed(3)),
       steps: stepCount, medkits: medkitFx.size, boltUntil: state.boltUntil, menuClosed: state.menuClosed, armor: me.armor }),
   };
 }

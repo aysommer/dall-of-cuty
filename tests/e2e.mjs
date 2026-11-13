@@ -629,6 +629,26 @@ if (!chromium) {
     await G.close();
   }
 
+  {
+    console.log('Разбитое стекло (браузер)');
+    const W = await open({ name: 'Стекольщик' });
+    await play(W, { map: 'fall' });
+    // Окно первого этажа трёхэтажки; стреляем изнутри наружу. Срок жизни осколков продлён: тестовый браузер рисует медленно
+    await W.evaluate(() => { game.me.pos.set(-13.25, 0, 10.5); game.me.vel.set(0, 0, 0); game.me.yaw = 0; game.me.pitch = -0.05; game.glassLife(60000); });
+    await W.waitForTimeout(500);
+    await W.mouse.down(); await W.waitForTimeout(150); await W.mouse.up();
+    const broke = await W.waitForFunction(() => game.dbg().glass.shards > 0, null, { timeout: 6000 }).then(() => true, () => false);
+    const n = (await W.evaluate(() => game.dbg().glass)).shards;
+    check('стекло раскалывается на треугольные осколки', broke && n >= 20, `${n} осколков`);
+    await W.waitForFunction(() => { const g = game.dbg().glass; return g.resting === g.shards; }, null, { timeout: 60000 }).catch(() => {});
+    const lay = await W.evaluate(() => game.dbg().glass);
+    check('осколки упали и легли на пол и подоконник, не провалившись', lay.resting === lay.shards && lay.lowest > -0.02 && lay.highest < 1.5, JSON.stringify(lay));
+    await W.evaluate(() => game.glassLife(null));
+    const gone = await W.waitForFunction(() => game.dbg().glass.shards === 0, null, { timeout: 8000 }).then(() => true, () => false);
+    check('через 3 секунды осколки проваливаются под пол и исчезают', gone);
+    await W.close();
+  }
+
   check('без ошибок на страницах', errors.length === 0, errors.join(' | '));
   await browser.close();
 }
