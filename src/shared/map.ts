@@ -9,6 +9,7 @@ import { JUMPS } from './maps/jumps.js';
 import { TOWN } from './maps/town.js';
 import { HOUSE } from './maps/house.js';
 import { FALL } from './maps/fall.js';
+import { STORE } from './maps/store.js';
 import type { Box, GameMap, MapId } from './maps/types.js';
 
 export type { Box, Breakable, GameMap, JumpPad, Ladder, MapId, SpawnPoint } from './maps/types.js';
@@ -299,8 +300,8 @@ export function bodyPoints(pos: Vec3, sliding: Low, scale = 1): Vec3[] {
   return [0.2, h / 2, h - 0.1].map((y) => [pos[0], pos[1] + y, pos[2]] as Vec3);
 }
 
-export const MAPS: Record<MapId, GameMap> = { sands: SANDS, bricks: BRICKS, depot: DEPOT, jumps: JUMPS, town: TOWN, house: HOUSE, fall: FALL };
-export const MAP_ORDER: MapId[] = ['fall', 'sands', 'bricks', 'depot', 'jumps', 'town', 'house'];
+export const MAPS: Record<MapId, GameMap> = { sands: SANDS, bricks: BRICKS, depot: DEPOT, jumps: JUMPS, town: TOWN, house: HOUSE, fall: FALL, store: STORE };
+export const MAP_ORDER: MapId[] = ['fall', 'store', 'sands', 'bricks', 'depot', 'jumps', 'town', 'house'];
 /** Разделы карт в меню и в голосовании: сначала новые, потом старые */
 export const MAP_SECTIONS: Array<{ title: string; maps: MapId[] }> = [
   { title: 'Новые', maps: MAP_ORDER.filter((id) => MAPS[id].fresh) },

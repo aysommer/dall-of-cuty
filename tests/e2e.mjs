@@ -196,13 +196,17 @@ console.log('Ящик и карты (сервер)');
     odds.uav > odds.missile && odds.missile > odds.launcher && odds.launcher > odds.juggernaut && odds.juggernaut > odds.gunship && odds.gunship > odds.nuke && odds.nuke < 0.02,
     CRATE_ODDS.map((o) => `${o.kind} ${(o.chance * 100).toFixed(1)}%`).join(', '));
   check('жребий раскладывается по шансам', crateReward(0) === 'uav' && crateReward(0.999) === 'nuke');
-  check('разделы карт: в «Новых» — «Падение», остальные — в «Старых»; Explosion City нет',
-    MAP_SECTIONS[0].title === 'Новые' && MAP_SECTIONS[0].maps.join() === 'fall' && MAPS.fall.name === 'Падение' && MAP_SECTIONS[1].maps.length === 6 && !('blast' in MAPS));
+  check('разделы карт: в «Новых» — «Падение» и «Магазин», остальные — в «Старых»; Explosion City нет',
+    MAP_SECTIONS[0].title === 'Новые' && MAP_SECTIONS[0].maps.join() === 'fall,store' && MAPS.fall.name === 'Падение' && MAPS.store.name === 'Магазин' && MAP_SECTIONS[1].maps.length === 6 && !('blast' in MAPS));
   check('канализации нет ни на одной карте', Object.values(MAPS).every((m) => !m.boxes.some((b) => b.min[1] < -1.01) && !('lamps' in m)));
   check('на «Песках» есть лестница на серую крышу', MAPS.sands.ladders.some((l) => l.max[1] > 4 && l.min[1] === 0));
   const f = await wsClient();
   join(f, { room: 'new', roomName: 'Падение', name: 'F', map: 'fall' }); await wait(300);
   check('в комнате можно играть на новой карте «Падение»', last(f, 'welcome')?.map === 'fall');
+  const st = await wsClient();
+  join(st, { room: 'new', roomName: 'Магазин', name: 'S', map: 'store' }); await wait(300);
+  check('и на «Магазине»', last(st, 'welcome')?.map === 'store');
+  st.ws.close();
   f.ws.close(); await wait(1200);
 }
 
