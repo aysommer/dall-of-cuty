@@ -33,7 +33,7 @@ const nameInput = $<HTMLInputElement>('name');
 const buttonsOf = (id: string): HTMLButtonElement[] =>
   [...$(id).querySelectorAll<HTMLButtonElement>('button')];
 
-const MODE_NAMES: Record<Mode, string> = { tdm: 'Команды 2 × 2', ffa: 'Каждый сам за себя' };
+const MODE_NAMES: Record<Mode, string> = { tdm: `Команды ${ROOMS.team} × ${ROOMS.team}`, ffa: 'Каждый сам за себя' };
 
 const limitText = (kind: LimitKind, value: number): string => kind === 'time' ? `${value} мин` : `до ${value} убийств`;
 
@@ -96,9 +96,9 @@ function renderMenu(): void {
   const tdm = chosenMode === 'tdm';
   $('team-field').classList.toggle('hidden', !tdm);
   const green = room?.green ?? 0, red = room?.red ?? 0;
-  $('green-count').textContent = `${green}/2`;
-  $('red-count').textContent = `${red}/2`;
-  const full: Record<Team, boolean> = { green: tdm && green >= 2, red: tdm && red >= 2 };
+  $('green-count').textContent = `${green}/${ROOMS.team}`;
+  $('red-count').textContent = `${red}/${ROOMS.team}`;
+  const full: Record<Team, boolean> = { green: tdm && green >= ROOMS.team, red: tdm && red >= ROOMS.team };
   if (full[chosenTeam]) chosenTeam = chosenTeam === 'green' ? 'red' : 'green';
   for (const b of buttonsOf('team-choice')) {
     b.disabled = full[b.dataset.team as Team];

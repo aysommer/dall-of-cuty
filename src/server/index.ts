@@ -1,4 +1,4 @@
-// Сервер: раздаёт статику и ведёт до 4 игровых комнат по 4 игрока.
+// Сервер: раздаёт статику и ведёт до 4 игровых комнат по 8 игроков.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';

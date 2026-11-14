@@ -7,7 +7,7 @@ import type { Profile } from '../../shared/progress.js';
 
 export const MAX_PLAYERS = ROOMS.players;
 
-export const TEAM_SIZE = 2;
+export const TEAM_SIZE = ROOMS.team;
 
 export const RESPAWN_MS = 3000;
 
