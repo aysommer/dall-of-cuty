@@ -1,4 +1,4 @@
-// Игровая комната: своя карта, свой матч и до 4 игроков. Комнат на сервере несколько,
+// Игровая комната: своя карта, свой матч и до 8 игроков. Комнат на сервере несколько,
 // у каждой всё состояние своё (объект Room). Здесь — вход игрока, разбор его сообщений, выход и такт.
 import type { WebSocket } from 'ws';
 import { DEFAULT_KIT, fitGear, fitKit, GUNSHIP, isGear, isKit, isMapId, isWeapon, MATCH, STREAK } from '../../shared/map.js';
@@ -21,7 +21,7 @@ let nextId = 1;
 
 export function handleJoin(room: Room, ws: WebSocket, msg: Incoming): Player | null {
   if (room.players.size >= MAX_PLAYERS) {
-    send(ws, { t: 'error', text: `Комната заполнена (максимум ${MAX_PLAYERS} игрока)` });
+    send(ws, { t: 'error', text: `Комната заполнена (максимум ${MAX_PLAYERS} игроков)` });
     return null;
   }
   if (room.players.size === 0) {

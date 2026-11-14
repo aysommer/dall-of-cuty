@@ -84,6 +84,25 @@ console.log('Комнаты (WebSocket)');
   await wait(1200);
 }
 
+console.log('Комната на 8 игроков (WebSocket)');
+{
+  // Командный режим: восемь игроков входят, команды по 4; девятому — «комната заполнена»
+  const host = await wsClient();
+  join(host, { room: 'new', roomName: 'Восьмёрка', name: 'P1', mode: 'tdm', team: 'green' }); await wait(300);
+  const lob = await wsClient(); await wait(150);
+  const id = last(lob, 'lobby').rooms.find((r) => r.name === 'Восьмёрка').id;
+  const guests = [];
+  for (let i = 2; i <= 8; i++) { const c = await wsClient(); join(c, { room: id, name: `P${i}`, team: 'green' }); guests.push(c); await wait(120); }
+  await wait(300);
+  const list = last(host, 'players').list;
+  check('в комнату входят 8 игроков, команды по 4', list.length === 8 && list.filter((p) => p.team === 'green').length === 4 && list.filter((p) => p.team === 'red').length === 4,
+    `${list.length} игроков, зелёных ${list.filter((p) => p.team === 'green').length}`);
+  const ninth = await wsClient(); join(ninth, { room: id, name: 'P9' }); await wait(250);
+  check('девятому — комната заполнена', /заполнена.*8 игроков/.test(last(ninth, 'error')?.text ?? ''), last(ninth, 'error')?.text);
+  for (const c of [host, lob, ninth, ...guests]) c.ws.close();
+  await wait(1200);
+}
+
 console.log('Снаряды (WebSocket)');
 {
   // Граната: сорвать чеку, бросить — летит, через 3 с взрывается; бросивший стоит рядом и погибает
